@@ -27,6 +27,9 @@ from app.reports.models import *
 from app.correspondence.models import *
 from app.esign.models import *
 
+# --- Payment Engine Models ---
+from app.ledger.models import *
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

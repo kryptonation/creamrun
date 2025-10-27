@@ -12,7 +12,7 @@ from enum import Enum as PyEnum
 
 from sqlalchemy import (
     DateTime, Enum, ForeignKey, Numeric,
-    String, Text, Index, CheckConstraint,
+    String, Text, Index, CheckConstraint, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship, mapped_column, Mapped
 
@@ -85,7 +85,7 @@ class LedgerPosting(Base, AuditMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     posting_id: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False, index=True,
+        String(64), nullable=False, index=True,
         comment="Unique posting ID (Format: LP-YYYY-NNNNNN)"
     )
 
@@ -178,6 +178,7 @@ class LedgerPosting(Base, AuditMixin):
 
     __table_args__ = (
         CheckConstraint('amount > 0', name='check_amount_positive'),
+        UniqueConstraint('posting_id', name='uq_ledger_postings_posting_id'),
         Index('idx_posting_period', 'payment_period_start', 'payment_period_end'),
         Index('idx_posting_driver_lease', 'driver_id', 'lease_id'),
         Index('idx_posting_category_status', 'category', 'status'),

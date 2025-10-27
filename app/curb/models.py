@@ -218,6 +218,64 @@ class CurbTrip(Base, AuditMixin):
         Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
         comment="Extra Charges"
     )
+    tolls: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="Tolls amount"
+    )
+
+    # === Taxes and Fees (All from CURB) ===
+    mta_surcharge: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="MTA Surcharge (TAX field or calculated)"
+    )
+    tif: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="Taxi Improvement Fund"
+    )
+    congestion_surcharge: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="Congestion Pricing Surcharge (CONGFEE)"
+    )
+    cbdt: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="Central Business District Toll"
+    )
+    airport_fee: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("0.0000"),
+        comment="Airport Fee"
+    )
+
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False,
+        comment="Total trip amount"
+    )
+
+    # === Payment Information ===
+    payment_type: Mapped[PaymentType] = mapped_column(
+        Enum(PaymentType), nullable=False, index=True,
+        comment="Payment type (CASH/CREDIT_CARD/PRIVATE_CARD)"
+    )
+    cc_last_four: Mapped[Optional[str]] = mapped_column(
+        String(4), nullable=True, comment="Last 4 digits of credit card"
+    )
+    auth_code: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="Authorization code"
+    )
+    auth_amount: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 4), nullable=True, comment="Authorized amount"
+    )
+
+    # === Trip metrics ===
+    passenger_count: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Number of Passengers"
+    )
+    distance_service: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2), nullable=True, comment="Distance in service (miles)"
+    )
+    distance_base: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 2), nullable=True, comment="Base distance"
+    )
+
     
 
 

@@ -461,21 +461,18 @@ class EZPassImportService:
         
         try:
             # Create obligation in ledger
-            balance = self.ledger_service.create_obligation(
+            # Note: create_obligation returns Tuple[LedgerPosting, LedgerBalance]
+            posting, balance = self.ledger_service.create_obligation(
                 driver_id=transaction.driver_id,
                 lease_id=transaction.lease_id,
-                vehicle_id=transaction.vehicle_id,
-                medallion_id=transaction.medallion_id,
                 category=PostingCategory.EZPASS,
                 amount=transaction.toll_amount,
                 reference_type="EZPASS_TRANSACTION",
                 reference_id=str(transaction.id),
-                due_date=transaction.payment_period_end,
                 payment_period_start=transaction.payment_period_start,
                 payment_period_end=transaction.payment_period_end,
-                description=f"EZPass toll - {transaction.agency or 'Unknown'} - {transaction.ticket_number}",
-                notes=f"Plate: {transaction.plate_number}, Plaza: {transaction.entry_plaza or 'N/A'}",
-                created_by=1  # System user
+                due_date=transaction.payment_period_end,
+                description=f"EZPass toll - {transaction.agency or 'Unknown'} - {transaction.ticket_number} - Plate: {transaction.plate_number}"
             )
             
             # Update transaction
@@ -486,7 +483,8 @@ class EZPassImportService:
             
             logger.info(
                 f"Posted EZPass transaction {transaction.ticket_number} to ledger: "
-                f"balance_id={balance.balance_id}, amount={transaction.toll_amount}"
+                f"posting_id={posting.posting_id}, balance_id={balance.balance_id}, "
+                f"amount={transaction.toll_amount}"
             )
             
         except Exception as e:
@@ -495,7 +493,7 @@ class EZPassImportService:
             logger.error(
                 f"Failed to post EZPass transaction {transaction.ticket_number}: {str(e)}"
             )
-            raise EZPassPostingError(f"Ledger posting failed: {str(e)}")
+            raise EZPassPostingError(f"Ledger posting failed: {str(e)}") from e
     
     def remap_transaction(
         self,

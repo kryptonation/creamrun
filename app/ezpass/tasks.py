@@ -4,11 +4,11 @@ app/ezpass/tasks.py
 Celery tasks for scheduled EZPass operations
 """
 
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from celery import shared_task
 
 from app.core.db import SessionLocal
-from app.ezpass.service import EZPassImportService
+from app.ezpass.services import EZPassImportService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)

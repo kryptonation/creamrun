@@ -29,6 +29,7 @@ from app.esign.models import *
 
 # --- Payment Engine Models ---
 from app.ledger.models import *
+from app.curb.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

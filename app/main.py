@@ -25,6 +25,7 @@ from app.esign.router import router as esign_routes
 from app.periodic_reports.router import router as periodic_reports_routes
 # --- Payment Engine Routes ---
 from app.ledger.router import router as ledger_routes
+from app.curb.router import router as curb_routes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,6 +90,7 @@ bat_app.include_router(reports_routes)
 bat_app.include_router(correspondence_routes)
 bat_app.include_router(esign_routes)
 bat_app.include_router(periodic_reports_routes)
+bat_app.include_router(curb_routes)
 bat_app.include_router(ledger_routes)
 
 # Root API to check if the server is up

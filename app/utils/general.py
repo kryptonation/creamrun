@@ -78,6 +78,29 @@ def get_file_from_local(file_path: str):
     with open(file_path, "rb") as file:
         return base64.b64encode(file.read()).decode("utf-8")
     
+def generate_random_string(length=6, alphanumeric=True):
+    """
+    Generate a random string of specified length.
+    
+    Args:
+        length (int): Length of the string to generate (default: 6)
+        alphanumeric (bool): If True, uses uppercase letters and digits (A-Z0-9).
+                           If False, uses only digits (0-9).
+                           
+    Returns:
+        str: Random string of specified length
+        
+    Example:
+        generate_random_string(6, True)   # Returns something like "A7B2X9"
+        generate_random_string(6, False)  # Returns something like "123456"
+    """
+    if alphanumeric:
+        characters = string.ascii_uppercase + string.digits  # A-Z0-9
+    else:
+        characters = string.digits  # 0-9 only
+    
+    return ''.join(random.choices(characters, k=length))
+
 def generate_alphanumeric_code(length=6):
     """Generate a random alphanumeric code of a given length"""
     characters = string.ascii_uppercase + string.digits  # A-Z0-9

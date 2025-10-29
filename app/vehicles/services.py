@@ -19,7 +19,7 @@ from app.vehicles.models import (
     VehicleHackUp,
     VehicleInspection,
     VehicleRegistration,
-    VehicleRepair,
+    # VehicleRepair,
 )
 from app.vehicles.schemas import HackupStatus, RegistrationStatus, VehicleStatus , VehicleEntityStatus
 
@@ -391,35 +391,35 @@ class VehicleService:
             logger.error("Error upserting vehicle inspection: %s", str(e))
             raise e
 
-    def get_repair(
-        self,
-        db: Session,
-        repair_id: Optional[int] = None,
-        vehicle_id: Optional[int] = None,
-        multiple: bool = False,
-        sort_order: Optional[str] = "desc",
-    ) -> Union[VehicleRepair, List[VehicleRepair], None]:
-        """Get vehicle repair by ID, vehicle ID, or multiple"""
-        try:
-            query = db.query(VehicleRepair)
-            if repair_id:
-                query = query.filter(VehicleRepair.id == repair_id)
-            if vehicle_id:
-                query = query.filter(VehicleRepair.vehicle_id == vehicle_id)
+    # def get_repair(
+    #     self,
+    #     db: Session,
+    #     repair_id: Optional[int] = None,
+    #     vehicle_id: Optional[int] = None,
+    #     multiple: bool = False,
+    #     sort_order: Optional[str] = "desc",
+    # ) -> Union[VehicleRepair, List[VehicleRepair], None]:
+    #     """Get vehicle repair by ID, vehicle ID, or multiple"""
+    #     try:
+    #         query = db.query(VehicleRepair)
+    #         if repair_id:
+    #             query = query.filter(VehicleRepair.id == repair_id)
+    #         if vehicle_id:
+    #             query = query.filter(VehicleRepair.vehicle_id == vehicle_id)
 
-            if sort_order:
-                query = query.order_by(
-                    desc(VehicleRepair.created_on)
-                    if sort_order == "desc"
-                    else asc(VehicleRepair.created_on)
-                )
+    #         if sort_order:
+    #             query = query.order_by(
+    #                 desc(VehicleRepair.created_on)
+    #                 if sort_order == "desc"
+    #                 else asc(VehicleRepair.created_on)
+    #             )
 
-            if multiple:
-                return query.all()
-            return query.first()
-        except Exception as e:
-            logger.error("Error getting vehicle repair: %s", str(e))
-            raise e
+    #         if multiple:
+    #             return query.all()
+    #         return query.first()
+    #     except Exception as e:
+    #         logger.error("Error getting vehicle repair: %s", str(e))
+    #         raise e
 
     def get_vehicle_entity(
             self, db: Session,
@@ -473,26 +473,26 @@ class VehicleService:
             logger.error("Error getting vehicle entity: %s", str(e))
             raise e
 
-    def upsert_repair(self, db: Session, repair_data: dict) -> VehicleRepair:
-        """Upsert a vehicle repair"""
-        try:
-            if repair_data.get("id"):
-                repair = self.get_repair(db, repair_id=repair_data.get("id"))
-                if repair:
-                    for key, value in repair_data.items():
-                        setattr(repair, key, value)
-                    db.flush()
-                    db.refresh(repair)
-                    return repair
-            else:
-                repair = VehicleRepair(**repair_data)
-                db.add(repair)
-                db.flush()
-                db.refresh(repair)
-                return repair
-        except Exception as e:
-            logger.error("Error upserting vehicle repair: %s", str(e))
-            raise e
+    # def upsert_repair(self, db: Session, repair_data: dict) -> VehicleRepair:
+    #     """Upsert a vehicle repair"""
+    #     try:
+    #         if repair_data.get("id"):
+    #             repair = self.get_repair(db, repair_id=repair_data.get("id"))
+    #             if repair:
+    #                 for key, value in repair_data.items():
+    #                     setattr(repair, key, value)
+    #                 db.flush()
+    #                 db.refresh(repair)
+    #                 return repair
+    #         else:
+    #             repair = VehicleRepair(**repair_data)
+    #             db.add(repair)
+    #             db.flush()
+    #             db.refresh(repair)
+    #             return repair
+    #     except Exception as e:
+    #         logger.error("Error upserting vehicle repair: %s", str(e))
+    #         raise e
 
     def upsert_dealer(self, db: Session, dealer_data: dict) -> Dealer:
         """Upsert a dealer"""

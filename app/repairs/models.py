@@ -10,7 +10,7 @@ from enum import Enum
 
 from sqlalchemy import (
     Column, Integer, String, Numeric, DateTime, Date,
-    ForeignKey, Text, Enum as SQLEnum, Index
+    ForeignKey, Text, Enum as SQLEnum, Index, ForeignKeyConstraint
 )
 from sqlalchemy.orm import relationship
 
@@ -54,9 +54,16 @@ class VehicleRepair(Base, AuditMixin):
     """
     __tablename__ = "vehicle_repairs"
 
+    id = Column(
+        Integer,
+        primary_key=True,
+        nullable=False,
+        comment="Internal unique identifier"
+    )
+
     repair_id = Column(
         String(50),
-        primary_key=True,
+        unique=True,
         nullable=False,
         comment="Unique repair identifier (e.g., RPR-2025-001)"
     )
@@ -240,11 +247,11 @@ class RepairInstallment(Base, AuditMixin):
         comment="Unique installment ID (e.g., RPR-2025-001-01)"
     )
     repair_id = Column(
-        String(50),
-        ForeignKey("vehicle_repairs.repair_id"),
+        Integer,
+        ForeignKey("vehicle_repairs.id"),
         nullable=False,
         index=True,
-        comment="Parent repair invoice"
+        comment="Parent repair invoice ID"
     )
     installment_number = Column(
         Integer,

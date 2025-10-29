@@ -21,25 +21,22 @@ class PVBImportError(PVBException):
 
 
 class PVBMappingError(PVBException):
-    """Raised when mapping operation fails"""
+    """Raised when mapping violation to driver fails"""
     pass
 
 
 class PVBPostingError(PVBException):
-    """Raised when ledger posting fails"""
+    """Raised when posting to ledger fails"""
     pass
 
 
-class PVBValidationError(PVBException):
-    """Raised when validation fails"""
-    pass
+class PVBViolationNotFoundException(PVBException):
+    """Raised when violation not found"""
+    def __init__(self, violation_id: int):
+        super().__init__(f"PVB violation not found: {violation_id}")
 
 
-class PVBDuplicateError(PVBException):
-    """Raised when duplicate summons number detected"""
-    pass
-
-
-class PVBCSVFormatError(PVBImportError):
-    """Raised when CSV format is invalid"""
-    pass
+class PVBImportHistoryNotFoundException(PVBException):
+    """Raised when import history not found"""
+    def __init__(self, batch_id: str):
+        super().__init__(f"PVB import history not found: {batch_id}")

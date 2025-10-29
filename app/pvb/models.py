@@ -1,7 +1,7 @@
 """
 app/pvb/models.py
 
-SQLAlchemy models for PVB (Parking Violations Bureau) module
+Database models for PVB (Parking Violations Bureau) violations
 """
 
 from datetime import datetime
@@ -9,222 +9,388 @@ from decimal import Decimal
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
-    Integer, String, DateTime, Numeric, Text,
-    Boolean, Enum, ForeignKey, Index
+    Integer, String, DateTime, Numeric, Boolean,
+    ForeignKey, Text, Enum, Index, CheckConstraint,
+    UniqueConstraint
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from app.core.db import Base
+from app.users.models import AuditMixin
 
 
-class ImportSource(str, PyEnum):
-    """ENum for source of imports"""
-    DOF_CSV = "DOF_CSV"
-    MANUAL_ENTRY = "MANUAL_ENTRY"
-    API_IMPORT = "API_IMPORT"
+# === Enums ===
+
+class ViolationSource(str, PyEnum):
+    """Source of PVB violation"""
+    DOF_CSV = "DOF_CSV"  # NYC Department of Finance CSV
+    MANUAL_ENTRY = "MANUAL_ENTRY"  # Manual entry for out-of-state
+    EMAIL = "EMAIL"  # Email notification
+    MAIL = "MAIL"  # Regular mail
 
 
-class ImportStatus(str, PyEnum):
-    """Enumeration for import status"""
-    PENDING = "PENDING"
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED = "COMPLETED"
-    PARTIAL = "PARTIAL"
-    FAILED = "FAILED"
-
-
-class MappingMethod(str, PyEnum):
-    """Enumeration for mapping method"""
-    AUTO_CURB_MATCH = "AUTO_CURB_MATCH"
-    MANUAL_ASSIGNMENT = "MANUAL_ASSIGNMENT"
-    PLATE_ONLY = "PLATE_ONLY"
-    UNKNOWN = "UNKNOWN"
-
-
-class PostingStatus(str, PyEnum):
-    """Enumeration for posting status"""
-    NOT_POSTED = "NOT_POSTED"
-    POSTED = "POSTED"
-    VOIDED = "VOIDED"
+class ViolationState(str, PyEnum):
+    """State where violation occurred"""
+    NY = "NY"  # New York
+    NJ = "NJ"  # New Jersey
+    CT = "CT"  # Connecticut
+    PA = "PA"  # Pennsylvania
+    OTHER = "OTHER"  # Other states
 
 
 class ViolationStatus(str, PyEnum):
-    """Enumeration for violation status"""
-    OPEN = "OPEN"
-    PAID = "PAID"
-    DISPUTED = "DISPUTED"
-    DISMISSED = "DISMISSED"
-    IN_JUDGMENT = "IN_JUDGMENT"
+    """Status of violation"""
+    PENDING = "PENDING"  # Not yet issued
+    ISSUED = "ISSUED"  # Violation issued
+    PAID = "PAID"  # Violation paid
+    DISMISSED = "DISMISSED"  # Violation dismissed
+    HEARING = "HEARING"  # Under hearing
 
 
-class ResolutionStatus(str, PyEnum):
-    """Enumeration for Resolution status"""
-    PENDING = "PENDING"
-    RESOLVED = "RESOLVED"
-    ESCALATED = "ESCALATED"
+class MappingMethod(str, PyEnum):
+    """Method used to map violation to driver"""
+    AUTO_CURB_MATCH = "AUTO_CURB_MATCH"  # Automatically matched via CURB trips
+    MANUAL_ASSIGNMENT = "MANUAL_ASSIGNMENT"  # Manually assigned by staff
+    UNMAPPED = "UNMAPPED"  # Not yet mapped
 
 
-class PVBViolation(Base):
-    """Model for storing violation record"""
+class PostingStatus(str, PyEnum):
+    """Ledger posting status"""
+    NOT_POSTED = "NOT_POSTED"  # Not posted to ledger
+    POSTED = "POSTED"  # Posted to ledger
+    FAILED = "FAILED"  # Posting failed
 
+
+class ImportStatus(str, PyEnum):
+    """Import batch status"""
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"  # Some records failed
+    FAILED = "FAILED"
+
+
+# === PVB Violations Model ===
+
+class PVBViolation(Base, AuditMixin):
+    """
+    PVB (Parking Violations Bureau) violations
+    
+    Tracks parking and traffic violations from NYC DOF and other sources.
+    Maps violations to drivers via CURB trip correlation (time-window matching).
+    """
+    
     __tablename__ = "pvb_violations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
     
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    summons_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    # Violation identification
+    summons_number: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True, unique=True,
+        comment="Unique summons/ticket number from DOF"
+    )
+    plate_number: Mapped[str] = mapped_column(
+        String(16), nullable=False, index=True,
+        comment="Vehicle plate number"
+    )
+    state: Mapped[ViolationState] = mapped_column(
+        Enum(ViolationState), nullable=False,
+        comment="State of plate registration"
+    )
+    vehicle_type: Mapped[str] = mapped_column(
+        String(16), nullable=True,
+        comment="Vehicle type code (e.g., OMT for Medallion)"
+    )
     
-    # Vehicle Information
-    plate_number: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    state: Mapped[str] = mapped_column(String(2), nullable=True)
-    vehicle_type: Mapped[str] = mapped_column(String(10), nullable=True)
-    
-    # Violation Details
-    violation_code: Mapped[str] = mapped_column(String(10), nullable=True)
-    violation_description: Mapped[str] = mapped_column(String(255), nullable=True)
-    
-    # Date and Time
-    issue_date: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    system_entry_date: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Violation details
+    violation_date: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, index=True,
+        comment="Date and time of violation"
+    )
+    violation_code: Mapped[str] = mapped_column(
+        String(16), nullable=True,
+        comment="Violation code"
+    )
+    violation_description: Mapped[str] = mapped_column(
+        Text, nullable=True,
+        comment="Description of violation"
+    )
     
     # Location
-    county: Mapped[str] = mapped_column(String(50), nullable=True)
-    street_name: Mapped[str] = mapped_column(String(255), nullable=True)
-    house_number: Mapped[str] = mapped_column(String(50), nullable=True)
-    intersect_street: Mapped[str] = mapped_column(String(255), nullable=True)
-    front_or_opposite: Mapped[str] = mapped_column(String(1), nullable=True)
+    county: Mapped[str] = mapped_column(
+        String(8), nullable=True,
+        comment="County code (e.g., MN, BK, QN, BX)"
+    )
+    issuing_agency: Mapped[str] = mapped_column(
+        String(64), nullable=True,
+        comment="Agency that issued violation"
+    )
+    street_name: Mapped[str] = mapped_column(
+        String(256), nullable=True,
+        comment="Street where violation occurred"
+    )
+    intersecting_street: Mapped[str] = mapped_column(
+        String(256), nullable=True,
+        comment="Intersecting street"
+    )
+    house_number: Mapped[str] = mapped_column(
+        String(32), nullable=True,
+        comment="House number"
+    )
     
-    # Financial Information
-    fine_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    penalty_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    interest_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    reduction_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    payment_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
-    amount_due: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    # Financial details
+    fine_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False,
+        comment="Base fine amount"
+    )
+    penalty_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal('0.00'),
+        comment="Penalty amount"
+    )
+    interest_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal('0.00'),
+        comment="Interest amount"
+    )
+    reduction_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal('0.00'),
+        comment="Reduction amount (if any)"
+    )
+    payment_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal('0.00'),
+        comment="Amount paid so far"
+    )
+    amount_due: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False,
+        comment="Total amount currently due"
+    )
     
-    # Status Information
-    judgment: Mapped[str] = mapped_column(String(50), nullable=True)
-    penalty_warning: Mapped[str] = mapped_column(String(50), nullable=True)
-    hearing_indicator: Mapped[str] = mapped_column(String(10), nullable=True)
-    terminated: Mapped[str] = mapped_column(String(1), nullable=True)
+    # Status
+    violation_status: Mapped[ViolationStatus] = mapped_column(
+        Enum(ViolationStatus), nullable=False, default=ViolationStatus.ISSUED,
+        index=True, comment="Current status of violation"
+    )
+    judgment_entry_date: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="Date judgment was entered"
+    )
+    hearing_status: Mapped[str] = mapped_column(
+        String(64), nullable=True,
+        comment="Hearing status if applicable"
+    )
     
-    # Entity Associations
-    vehicle_id: Mapped[int] = mapped_column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
-    driver_id: Mapped[int] = mapped_column(Integer, ForeignKey("drivers.id"), nullable=True, index=True)
-    medallion_id: Mapped[int] = mapped_column(Integer, ForeignKey("medallions.id"), nullable=True, index=True)
-    lease_id: Mapped[int] = mapped_column(Integer, ForeignKey("leases.id"), nullable=True, index=True)
+    # Entity mappings (via CURB trip matching or manual assignment)
+    driver_id: Mapped[int] = mapped_column(
+        ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True, index=True,
+        comment="Mapped driver"
+    )
+    vehicle_id: Mapped[int] = mapped_column(
+        ForeignKey("vehicles.id", ondelete="SET NULL"), nullable=True, index=True,
+        comment="Mapped vehicle"
+    )
+    medallion_id: Mapped[int] = mapped_column(
+        ForeignKey("medallions.id", ondelete="SET NULL"), nullable=True, index=True,
+        comment="Mapped medallion"
+    )
+    lease_id: Mapped[int] = mapped_column(
+        ForeignKey("leases.id", ondelete="SET NULL"), nullable=True, index=True,
+        comment="Active lease at time of violation"
+    )
+    hack_license_number: Mapped[str] = mapped_column(
+        String(32), nullable=True, index=True,
+        comment="TLC/Hack license number of responsible driver"
+    )
     
-    # Matching Metadata
-    matched_curb_trip_id: Mapped[str] = mapped_column(String(50), nullable=True)
-    mapping_method: Mapped[MappingMethod] = mapped_column(Enum(MappingMethod), nullable=False, default=MappingMethod.UNKNOWN)
-    mapping_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=True)
-    mapping_notes: Mapped[str] = mapped_column(Text, nullable=True)
-    manually_assigned_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    manually_assigned_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Mapping metadata
+    mapping_method: Mapped[MappingMethod] = mapped_column(
+        Enum(MappingMethod), nullable=False, default=MappingMethod.UNMAPPED,
+        index=True, comment="How violation was mapped to driver"
+    )
+    mapping_confidence: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=True,
+        comment="Confidence score (0.00-1.00) for auto-matching"
+    )
+    matched_curb_trip_id: Mapped[int] = mapped_column(
+        ForeignKey("curb_trips.id", ondelete="SET NULL"), nullable=True,
+        comment="CURB trip used for matching"
+    )
+    mapping_notes: Mapped[str] = mapped_column(
+        Text, nullable=True,
+        comment="Notes about mapping (especially for manual assignments)"
+    )
+    mapped_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="When mapping was performed"
+    )
+    mapped_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+        comment="User who performed manual mapping"
+    )
     
-    # Ledger Integration
-    posted_to_ledger: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    ledger_balance_id: Mapped[str] = mapped_column(String(50), nullable=True)
-    posting_status: Mapped[PostingStatus] = mapped_column(Enum(PostingStatus), nullable=False, default=PostingStatus.NOT_POSTED)
-    posted_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # Ledger integration
+    posting_status: Mapped[PostingStatus] = mapped_column(
+        Enum(PostingStatus), nullable=False, default=PostingStatus.NOT_POSTED,
+        index=True, comment="Whether posted to ledger"
+    )
+    ledger_posting_id: Mapped[str] = mapped_column(
+        String(64), nullable=True, index=True,
+        comment="Reference to ledger_postings.posting_id"
+    )
+    ledger_balance_id: Mapped[str] = mapped_column(
+        String(64), nullable=True, index=True,
+        comment="Reference to ledger_balances.balance_id"
+    )
+    payment_period_start: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="Payment period start (Sunday 00:00)"
+    )
+    payment_period_end: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="Payment period end (Saturday 23:59)"
+    )
+    posted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="When posted to ledger"
+    )
+    posting_error: Mapped[str] = mapped_column(
+        Text, nullable=True,
+        comment="Error message if posting failed"
+    )
     
-    # Violation Status
-    violation_status: Mapped[ViolationStatus] = mapped_column(Enum(ViolationStatus), nullable=False, default=ViolationStatus.OPEN)
-    resolution_status: Mapped[ResolutionStatus] = mapped_column(Enum(ResolutionStatus), nullable=False, default=ResolutionStatus.PENDING)
-    resolution_notes: Mapped[str] = mapped_column(Text, nullable=True)
+    # Import tracking
+    import_source: Mapped[ViolationSource] = mapped_column(
+        Enum(ViolationSource), nullable=False,
+        comment="Source of this violation record"
+    )
+    import_batch_id: Mapped[str] = mapped_column(
+        String(64), nullable=True, index=True,
+        comment="Import batch identifier"
+    )
+    import_file_name: Mapped[str] = mapped_column(
+        String(256), nullable=True,
+        comment="Original filename if from CSV/file"
+    )
     
-    # Import Information
-    import_batch_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    import_source: Mapped[ImportSource] = mapped_column(Enum(ImportSource), nullable=False)
-    source_file_name: Mapped[str] = mapped_column(String(255), nullable=True)
-    
-    # Audit Fields
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    created_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True, onupdate=datetime.utcnow)
-    updated_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    # Relationships
+    driver = relationship("Driver", foreign_keys=[driver_id])
+    vehicle = relationship("Vehicle", foreign_keys=[vehicle_id])
+    medallion = relationship("Medallion", foreign_keys=[medallion_id])
+    lease = relationship("Lease", foreign_keys=[lease_id])
+    mapped_by_user = relationship("User", foreign_keys=[mapped_by])
+    matched_curb_trip = relationship("CurbTrip", foreign_keys=[matched_curb_trip_id])
     
     __table_args__ = (
-        Index('idx_pvb_issue_date_plate', 'issue_date', 'plate_number'),
-        Index('idx_pvb_driver_lease', 'driver_id', 'lease_id'),
-        Index('idx_pvb_posting_status', 'posting_status', 'posted_to_ledger'),
+        CheckConstraint('fine_amount >= 0', name='check_fine_positive'),
+        CheckConstraint('amount_due >= 0', name='check_amount_due_positive'),
+        CheckConstraint('mapping_confidence IS NULL OR (mapping_confidence >= 0 AND mapping_confidence <= 1)', 
+                       name='check_confidence_range'),
+        UniqueConstraint('summons_number', name='uq_pvb_summons_number'),
+        Index('idx_pvb_plate_date', 'plate_number', 'violation_date'),
+        Index('idx_pvb_driver_status', 'driver_id', 'posting_status'),
+        Index('idx_pvb_mapping', 'mapping_method', 'posting_status'),
     )
 
 
-class PVBImportHistory(Base):
-    """Model to maintain records for PVB import"""
+# === PVB Import History Model ===
 
+class PVBImportHistory(Base, AuditMixin):
+    """
+    Audit log for PVB import batches
+    Tracks each import operation with statistics and status
+    """
+    
     __tablename__ = "pvb_import_history"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    batch_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    
-    import_source: Mapped[ImportSource] = mapped_column(Enum(ImportSource), nullable=False)
-    file_name: Mapped[str] = mapped_column(String(255), nullable=True)
-    file_size_kb: Mapped[int] = mapped_column(Integer, nullable=True)
-    
-    date_from: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    date_to: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    plate_filter: Mapped[str] = mapped_column(String(20), nullable=True)
-    
-    total_records_in_file: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_imported: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_duplicates: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    total_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
-    auto_matched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    plate_only_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    unmapped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
-    posted_to_ledger_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    pending_posting_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
-    status: Mapped[ImportStatus] = mapped_column(Enum(ImportStatus), nullable=False, default=ImportStatus.PENDING)
-    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=True)
-    
-    error_message: Mapped[str] = mapped_column(Text, nullable=True)
-    error_details: Mapped[str] = mapped_column(Text, nullable=True)
-    
-    perform_matching: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    post_to_ledger: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    auto_match_threshold: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal('0.90'))
-    
-    triggered_by: Mapped[str] = mapped_column(String(20), nullable=False)
-    triggered_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
 
-
-class PVBSummons(Base):
-    """PVB Summon upload model"""
-
-    __tablename__ = "pvb_summons"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    batch_id: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True,
+        comment="Unique batch identifier (Format: PVB-IMPORT-YYYYMMDD-HHMMSS-XXXXX)"
+    )
     
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pvb_violation_id: Mapped[int] = mapped_column(Integer, ForeignKey("pvb_violations.id"), nullable=False, index=True)
-    document_id: Mapped[int] = mapped_column(Integer, ForeignKey("documents.id"), nullable=False)
-    summons_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    # Import parameters
+    import_source: Mapped[ViolationSource] = mapped_column(
+        Enum(ViolationSource), nullable=False,
+        comment="Source type of import"
+    )
+    file_name: Mapped[str] = mapped_column(
+        String(256), nullable=True,
+        comment="Original filename"
+    )
     
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    uploaded_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
-    notes: Mapped[str] = mapped_column(Text, nullable=True)
+    # Status and timing
+    status: Mapped[ImportStatus] = mapped_column(
+        Enum(ImportStatus), nullable=False, default=ImportStatus.IN_PROGRESS,
+        index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow,
+        comment="Import start time"
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=True,
+        comment="Import completion time"
+    )
+    duration_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=True,
+        comment="Total import duration"
+    )
     
-    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    verified_by: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    verified_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-
-
-class PVBImportFailure(Base):
-    """PVB import failure model"""
+    # Statistics
+    total_records_in_file: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Total records in source file"
+    )
+    records_imported: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Successfully imported records"
+    )
+    records_skipped: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Skipped (duplicates)"
+    )
+    records_failed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Failed records"
+    )
+    records_mapped: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Auto-mapped to drivers"
+    )
+    records_posted: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+        comment="Posted to ledger"
+    )
     
-    __tablename__ = "pvb_import_failures"
+    # Processing flags
+    perform_matching: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+        comment="Whether to auto-match with CURB trips"
+    )
+    post_to_ledger: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+        comment="Whether to post matched violations to ledger"
+    )
+    auto_match_threshold: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal('0.90'),
+        comment="Minimum confidence for auto-matching"
+    )
     
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    import_batch_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # Error tracking
+    errors: Mapped[str] = mapped_column(
+        Text, nullable=True,
+        comment="JSON array of error messages"
+    )
     
-    row_number: Mapped[int] = mapped_column(Integer, nullable=True)
-    raw_data: Mapped[str] = mapped_column(Text, nullable=True)
+    # Audit
+    triggered_by: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="API, CELERY, or MANUAL"
+    )
+    triggered_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+        comment="User who triggered import (if manual)"
+    )
     
-    error_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    error_message: Mapped[str] = mapped_column(Text, nullable=False)
-    field_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (
+        Index('idx_pvb_import_status_date', 'status', 'started_at'),
+    )

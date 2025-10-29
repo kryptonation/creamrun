@@ -540,56 +540,56 @@ class Vehicle(Base, AuditMixin):
         }
 
 
-class VehicleRepair(Base, AuditMixin):
-    """Vehicle Repair model"""
+# class VehicleRepair(Base, AuditMixin):
+#     """Vehicle Repair model"""
 
-    __tablename__ = "vehicle_repairs"
+#     __tablename__ = "vehicle_repairs"
 
-    id = Column(Integer, primary_key=True, nullable=False)
-    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+#     id = Column(Integer, primary_key=True, nullable=False)
+#     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
 
-    # Invoice details
-    invoice_date = Column(Date, nullable=True)
-    invoice_amount = Column(Float, nullable=True)
+#     # Invoice details
+#     invoice_date = Column(Date, nullable=True)
+#     invoice_amount = Column(Float, nullable=True)
 
-    # Vehicle in/out details
-    vehicle_in_date = Column(Date, nullable=True)
-    vehicle_in_time = Column(String(10), nullable=True)
-    vehicle_out_date = Column(Date, nullable=True)
-    vehicle_out_time = Column(String(10), nullable=True)
+#     # Vehicle in/out details
+#     vehicle_in_date = Column(Date, nullable=True)
+#     vehicle_in_time = Column(String(10), nullable=True)
+#     vehicle_out_date = Column(Date, nullable=True)
+#     vehicle_out_time = Column(String(10), nullable=True)
 
-    # Payment details
-    repair_paid_by = Column(String(10), nullable=True)  # BAT or Driver
+#     # Payment details
+#     repair_paid_by = Column(String(10), nullable=True)  # BAT or Driver
 
-    # Service details
-    next_service_due_by = Column(Date, nullable=True)
-    remarks = Column(Text, nullable=True)
+#     # Service details
+#     next_service_due_by = Column(Date, nullable=True)
+#     remarks = Column(Text, nullable=True)
 
-    # Status
-    status = Column(String(20), nullable=False, default="In Progress")
+#     # Status
+#     status = Column(String(20), nullable=False, default="In Progress")
 
-    # Relationships
-    vehicle = relationship("Vehicle", back_populates="repairs")
+#     # Relationships
+#     vehicle = relationship("Vehicle", back_populates="repairs")
 
-    def to_dict(self):
-        """Convert VehicleRepair object to a dictionary"""
-        return {
-            "id": self.id,
-            "vehicle_id": self.vehicle_id,
-            "invoice_date": self.invoice_date,
-            "invoice_amount": self.invoice_amount,
-            "vehicle_in_date": self.vehicle_in_date,
-            "vehicle_in_time": self.vehicle_in_time,
-            "vehicle_out_date": self.vehicle_out_date,
-            "vehicle_out_time": self.vehicle_out_time,
-            "repair_paid_by": self.repair_paid_by,
-            "next_service_due_by": self.next_service_due_by,
-            "remarks": self.remarks,
-            "status": self.status,
-            "created_on": self.created_on,
-            "updated_on": self.updated_on,
-        }
+#     def to_dict(self):
+#         """Convert VehicleRepair object to a dictionary"""
+#         return {
+#             "id": self.id,
+#             "vehicle_id": self.vehicle_id,
+#             "invoice_date": self.invoice_date,
+#             "invoice_amount": self.invoice_amount,
+#             "vehicle_in_date": self.vehicle_in_date,
+#             "vehicle_in_time": self.vehicle_in_time,
+#             "vehicle_out_date": self.vehicle_out_date,
+#             "vehicle_out_time": self.vehicle_out_time,
+#             "repair_paid_by": self.repair_paid_by,
+#             "next_service_due_by": self.next_service_due_by,
+#             "remarks": self.remarks,
+#             "status": self.status,
+#             "created_on": self.created_on,
+#             "updated_on": self.updated_on,
+#         }
 
 
-# Add to Vehicle model
-Vehicle.repairs = relationship("VehicleRepair", back_populates="vehicle")
+# # Add to Vehicle model
+# Vehicle.repairs = relationship("VehicleRepair", back_populates="vehicle")

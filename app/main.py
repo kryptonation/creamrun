@@ -29,6 +29,7 @@ from app.curb.router import router as curb_routes
 from app.ezpass.router import router as ezpass_router
 from app.pvb.router import router as pvb_router
 from app.driver_loans.router import router as driver_loans_router
+from app.repairs.router import router as repairs_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,6 +99,7 @@ bat_app.include_router(ledger_routes)
 bat_app.include_router(ezpass_router)
 bat_app.include_router(pvb_router)
 bat_app.include_router(driver_loans_router)
+bat_app.include_router(repairs_router)
 
 # Root API to check if the server is up
 @bat_app.get("/", tags=["Base"])

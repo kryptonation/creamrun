@@ -31,6 +31,7 @@ from app.pvb.router import router as pvb_router
 from app.driver_loans.router import router as driver_loans_router
 from app.repairs.router import router as repairs_router
 from app.interim_payments.router import router as interim_payments_router
+from app.leases.lease_schedule_router import router as lease_schedule_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -102,6 +103,7 @@ bat_app.include_router(pvb_router)
 bat_app.include_router(driver_loans_router)
 bat_app.include_router(repairs_router)
 bat_app.include_router(interim_payments_router)
+bat_app.include_router(lease_schedule_router)
 
 # Root API to check if the server is up
 @bat_app.get("/", tags=["Base"])

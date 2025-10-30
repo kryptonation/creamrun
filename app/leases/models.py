@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
+    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -58,6 +59,11 @@ class LeaseSchedule(Base, AuditMixin):
     remarks: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, comment="Comment against the installment"
     )
+
+    posted_to_ledger = Column(Integer, default=0, comment='0 = not posted, 1 = posted to ledger')
+    posted_on = Column(DateTime(timezone=True), nullable=True, comment='Timestamp when posted to ledger')
+    ledger_posting_id = Column(String(50), nullable=True, comment='Reference to ledger posting')
+    ledger_balance_id = Column(String(50), nullable=True, comment='Reference to ledger balance')
 
     # Relationships
     lease: Mapped["Lease"] = relationship(

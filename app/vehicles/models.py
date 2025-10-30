@@ -502,8 +502,6 @@ class Vehicle(Base, AuditMixin):
 
     medallions = relationship("Medallion", back_populates="vehicle")
 
-    repairs = relationship("VehicleRepair", back_populates="vehicle")
-
     vehicle_notes = relationship("VehicleNote", back_populates="vehicle")
 
     def to_dict(self):

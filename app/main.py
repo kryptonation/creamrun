@@ -35,6 +35,7 @@ from app.leases.lease_schedule_router import router as lease_schedule_router
 from app.miscellaneous.router import router as miscellaneous_router
 from app.tlc_violations.router import router as tlc_violations_router
 from app.dtr.router import router as dtr_router
+from app.current_balances.router import router as current_balances_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,6 +111,8 @@ bat_app.include_router(lease_schedule_router)
 bat_app.include_router(miscellaneous_router)
 bat_app.include_router(tlc_violations_router)
 bat_app.include_router(dtr_router)
+bat_app.include_router(current_balances_router)
+
 
 # Root API to check if the server is up
 @bat_app.get("/", tags=["Base"])

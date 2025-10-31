@@ -948,7 +948,7 @@ def verify_document(
     description="Export violations to Excel, PDF, CSV, or JSON format with all filters applied"
 )
 def export_violations(
-    format: str = Query(..., regex="^(excel|pdf|csv|json)$", description="Export format"),
+    format: str,
     summons_number: Optional[str] = Query(None),
     violation_id: Optional[str] = Query(None),
     driver_id: Optional[int] = Query(None),

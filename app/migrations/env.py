@@ -38,6 +38,7 @@ from app.interim_payments.models import *
 from app.miscellaneous.models import *
 from app.tlc_violations.models import *
 from app.dtr.models import *
+from app.nach_batches.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

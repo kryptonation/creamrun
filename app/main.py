@@ -36,6 +36,7 @@ from app.miscellaneous.router import router as miscellaneous_router
 from app.tlc_violations.router import router as tlc_violations_router
 from app.dtr.router import router as dtr_router
 from app.current_balances.router import router as current_balances_router
+from app.nach_batches.router import router as nach_batches_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -112,7 +113,7 @@ bat_app.include_router(miscellaneous_router)
 bat_app.include_router(tlc_violations_router)
 bat_app.include_router(dtr_router)
 bat_app.include_router(current_balances_router)
-
+bat_app.include_router(nach_batches_router)
 
 # Root API to check if the server is up
 @bat_app.get("/", tags=["Base"])

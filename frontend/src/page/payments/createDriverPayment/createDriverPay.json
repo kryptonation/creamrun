@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pay Day Form",
+  "description": "Schema for Pay Day form with date range, driver, and vehicle selection",
+  "type": "object",
+  "properties": {
+    "payPeriod": {
+      "type": "string",
+      "enum": ["S", "M", "T", "W", "R", "F", "A"],
+      "label": "Pay Period",
+      "description": "Select the pay period for the payment",
+      "example": "weekly"
+    },
+    "startDate": {
+      "type": "string",
+      "format": "date",
+      "label": "Start Date",
+      "description": "Start date for the pay period",
+      "example": "12/06/2024"
+    },
+    "startTime": {
+      "type": "string",
+      "label": "Start Time",
+      "description": "Start time for the pay period",
+      "example": "5:00 AM"
+    },
+    "endDate": {
+      "type": "string",
+      "format": "date",
+      "label": "End Date",
+      "description": "End date for the pay period",
+      "example": "12/12/2024"
+    },
+
+    "endTime": {
+      "type": "string",
+      "label": "End Time",
+      "description": "End time for the pay period",
+      "example": "4:59 AM"
+    },
+    "driverId": {
+      "type": "string",
+      "label": "Driver ID",
+      "description": "Specific driver ID if not choosing all drivers"
+    },
+    "specificMedallions": {
+      "type": "string",
+      "label": "Specific Medallions",
+      "description": "Array of specific medallion numbers if not choosing all"
+    },
+    "specificPlates": {
+      "type": "string",
+      "label": "Specific Plates",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of specific plate numbers if not choosing all"
+    }
+  },
+  "required": ["startDate", "endDate", "startTime", "endTime"]
+}

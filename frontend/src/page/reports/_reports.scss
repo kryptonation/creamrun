@@ -1,0 +1,174 @@
+.ai-chat-screen {
+  --chat-history-width: 250px;
+  --chat-histor-hidden-width: 30px;
+  --chat-history-padding: 15px;
+  background: #f2dfae;
+  background: linear-gradient(
+    180deg,
+    #fffaee 0%,
+    rgb(255, 255, 255) 50%,
+    rgb(255, 255, 255) 100%
+  );
+  padding: var(--fs40) 60px var(--fs38) var(--fs40);
+  .p-breadcrumb-list {
+    margin: 0px;
+  }
+  .chat-main {
+    .chat-container {
+      padding-right: 3%;
+      transition: all 0.3s ease-in-out;
+      max-width: calc(100% - var(--chat-histor-hidden-width));
+      &.active {
+        max-width: calc(100% - var(--chat-history-width));
+      }
+      .share-container {
+        button {
+          svg {
+            width: 18px;
+          }
+        }
+      }
+      .search-form {
+        width: 80%;
+        height: 40px;
+        box-shadow: 1px 1px 6px 0px #00000040;
+        border-radius: 20px;
+        padding: 0 5px;
+        margin: 0 auto;
+        .search-input {
+          border-radius: 20px;
+          border: 0;
+          outline: none;
+        }
+        .submit-btn {
+          height: 90%;
+          padding-inline: 10px;
+          svg {
+            width: 15px;
+            height: 15px;
+          }
+        }
+      }
+      .p-datatable .p-datatable-thead > tr > th,
+      .p-datatable .p-datatable-tbody > tr > td,
+      .p-paginator {
+        padding-block: 0;
+        padding-inline: 10px;
+      }
+      .p-datatable .p-datatable-tbody > tr > td {
+        padding-block: 5px;
+      }
+      .ai-response-chat {
+        background-color: #f9f8f4;
+        border-radius: 10px;
+        padding: 20px;
+        /* width */
+        &::-webkit-scrollbar {
+          width: 5px;
+        }
+
+        /* Track */
+        &::-webkit-scrollbar-track {
+          background: #f1f1f1;
+        }
+
+        /* Handle */
+        &::-webkit-scrollbar-thumb {
+          background: #888;
+        }
+
+        /* Handle on hover */
+        &::-webkit-scrollbar-thumb:hover {
+          background: #555;
+        }
+      }
+    }
+    .chat-history {
+      background-color: #fcf2d9;
+      border-radius: 5px;
+      padding: var(--chat-history-padding);
+      position: relative;
+      width: var(--chat-histor-hidden-width);
+      transition: all 0.3s ease-in-out;
+      &.active {
+        width: var(--chat-history-width);
+      }
+      .fav-filter {
+        svg{
+          width: 15px;
+        }
+      }
+      .toggle-btn {
+        background-color: #111111;
+        padding: 5px 9px;
+        border-radius: 5px;
+        left: -10px;
+        // margin-left: -10px;
+        position: absolute;
+        svg {
+          width: 15px;
+          height: 15px;
+        }
+      }
+      .chat-history-main {
+        overflow: hidden;
+        transition: all 0.3s ease-in-out;
+        white-space: nowrap;
+        .chat-history-header {
+          text-align: center;
+          border-bottom: 1px solid #e6dfcc;
+          padding-bottom: 20px;
+        }
+        .chat-history-body {
+          width: 100%;
+          .search-history-input {
+            border: 1px solid #e6e6e6;
+            input {
+              outline: none;
+            }
+            svg {
+              width: 15px;
+              height: 15px;
+            }
+          }
+          .prompt-card {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding-block: 10px;
+            border-bottom: 1px solid #e6dfcc;
+            .user-prompt {
+              flex-grow: 1;
+              width: calc(
+                var(--chat-history-width) -
+                  calc(var(--chat-history-padding) * 4)
+              );
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .prompt-user-name {
+              font-size: var(--fs14);
+            }
+            .fav-btn {
+              svg {
+                width: 15px;
+                height: 15px;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+.filter-dropdown-con {
+  width: 220px;
+}
+
+.search-filter-con{
+  .p-calendar .p-inputtext{
+    border: 0 !important;
+  }
+}

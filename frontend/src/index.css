@@ -1,0 +1,25 @@
+   @font-face {
+     font-family:dmsans-regular;
+     src: url("../public/assets/fonts/DMSans-Regular.ttf");
+   }
+  
+   @font-face {
+     font-family:dmsans-bold;
+     src: url("../public/assets/fonts/DMSans-Bold.ttf");
+   }
+   @font-face {
+     font-family:dmsans-light;
+     src: url("../public/assets/fonts/DMSans-Light.ttf");
+   }
+   @font-face {
+     font-family:dmsans-light-italic;
+     src: url("../public/assets/fonts/DMSans-LightItalic.ttf");
+   }
+   @font-face {
+     font-family:dmsans-medium;
+     src: url("../public/assets/fonts/DMSans-Medium.ttf");
+   }
+   @font-face {
+     font-family:dmsans-semibold;
+     src: url("../public/assets/fonts/DMSans-SemiBold.ttf");
+   }

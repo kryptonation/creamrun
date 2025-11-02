@@ -1,0 +1,27 @@
+.custom-breadcrumb {
+    .p-breadcrumb {
+        background: none;
+        padding-left: 0px;
+        padding-top: 28px;
+
+        .p-breadcrumb-list {
+            padding-left: 0px;
+
+            .p-menuitem {
+                .p-menuitem-text {
+                    color: black !important;
+                    opacity: 50%;
+                }
+            }
+
+            .p-menuitem:last-child {
+                .p-menuitem-text {
+                    color: black !important;
+                    opacity: 100% !important;
+                }
+
+            }
+        }
+
+    }
+}

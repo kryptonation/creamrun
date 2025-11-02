@@ -1,0 +1,44 @@
+.verify-documents-container {
+    display: flex;
+    align-items: center;
+}
+
+.section-topic {
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+}
+
+.driver-name-section {
+    margin-top: 30px;
+    margin-left: 20px;
+    margin-bottom: 1px;
+}
+
+.driver-name {
+    margin-bottom: 30px;
+    margin-left: 20px;
+}
+
+.table-container {
+    margin-bottom: 30px;
+}
+
+.button-section {
+    padding-bottom: 30px;
+}
+
+.text-grey {
+    color: #808080;
+}
+
+.button-blue {
+    color: blue;
+}
+
+.primary-btn {
+    border-radius: 0;
+    margin-top: 20px;
+    background-color: #007bff;
+    color: white;
+}

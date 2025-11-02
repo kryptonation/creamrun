@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Enter PVB Details",
+  "description": "Schema for Enter PVB Details",
+  "type": "object",
+  "properties": {
+    "plate_number": {
+      "type": "string",
+      "title": "Vehicle Plate"
+    },
+    "state": {
+      "type": "string",
+      "title": "State"
+    },
+    "vehicle_type": {
+      "type": "string",
+      "title": "Type"
+    },
+    "issue_date": {
+      "type": "string",
+      "format": "date",
+      "title": "Issue Date"
+    },
+    "issue_time": {
+      "type": "string",
+      "format": "time",
+      "title": "Issue Time"
+    },
+    "system_entry": {
+      "type": "string",
+      "format": "date",
+      "title": "System Entry"
+    },
+    "new_issue": {
+      "type": "string",
+      "format": "radio",
+      "title": "New Issue",
+      "enum": [
+        "Yes",
+        "No"
+      ],
+      "default": "No"
+    },
+    "violation_code": {
+      "type": "string",
+      "title": "VC"
+    },
+    "hearing": {
+      "type": "string",
+      "title": "Hearing"
+    },
+    "penalty_warning": {
+      "type": "string",
+      "title": "Penalty Warning"
+    },
+    "penalty_amount": {
+      "type": "number",
+      "title": "Penalty"
+    },
+    "payment_amount": {
+      "type": "number",
+      "title": "Payment"
+    },
+    "vio_county": {
+      "type": "string",
+      "title": "VIO County"
+    },
+    "street_name": {
+      "type": "string",
+      "title": "Street Name"
+    },
+    "street_code_1": {
+      "type": "string",
+      "title": "Street Code 1"
+    },
+    "summons_number": {
+      "type": "string",
+      "title": "Summon"
+    },
+    "judgement": {
+      "type": "string",
+      "title": "Judgement"
+    },
+    "interest_amount": {
+      "type": "number",
+      "title": "Interest"
+    },
+    "ng_pmt": {
+      "type": "string",
+      "title": "NG PMT"
+    },
+    "font_or_opp": {
+      "type": "string",
+      "title": "Font OR OPP"
+    },
+    "intersect_street": {
+      "type": "string",
+      "title": "Intersect Street"
+    },
+    "street_code_2": {
+      "type": "string",
+      "title": "Street Code 2"
+    },
+    "non_program": {
+      "type": "string",
+      "title": "Non Program"
+    },
+    "fine_amount": {
+      "type": "number",
+      "title": "Fine"
+    },
+    "reduction_amount": {
+      "type": "number",
+      "title": "Reduction"
+    },
+    "amount_due": {
+      "type": "number",
+      "title": "Amount"
+    },
+    "house_no": {
+      "type": "string",
+      "title": "House No"
+    },
+    "geo_location": {
+      "type": "string",
+      "title": "GEO Location"
+    },
+    "street_code_3": {
+      "type": "string",
+      "title": "Street Code 3"
+    }
+  },
+  "required": [
+    "summons_number",
+    "plate_number",
+    "violation_code",
+    "issue_date"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "PaymentOptions",
+    "type": "object",
+    "properties": {
+      "payment_method": {
+        "type": "string",
+        "format": "radio",
+        "enum": ["Pay by Cash", "Pay by Checks", "Pay by Credit Card"]
+      },
+      "credit_card_number": {
+        "type": "string",
+        "label": "Enter Credit Card Number",
+        "pattern": "^[0-9]{13,19}$",
+        "description": "Required when paying by credit card"
+      }
+    },
+    "required": ["payment_method"],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "payment_method": { "const": "Pay by Credit Card" }
+          }
+        },
+        "then": {
+          "required": ["credit_card_number"]
+        }
+      }
+    ]
+  }

@@ -1,5 +1,0 @@
-export const newDriverConformationTitle ="Confirmation on New Driver Registration"
-export const newDriverConformationMessage ="This will create a new case for driver registration. Are you sure to proceed?"
-export const procced = "Proceed"
-export const cancel = "Cancel"
-export const newRegistration = "New Registration"

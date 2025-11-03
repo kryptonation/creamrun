@@ -1,0 +1,211 @@
+### app/loans/services.py
+
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from sqlalchemy.orm import Session
+
+from app.bpm.services import bpm_service
+from app.core.db import SessionLocal
+from app.ledger.models import PostingCategory
+from app.ledger.services import LedgerService
+from app.loans.exceptions import (
+    InvalidLoanOperationError,
+    LoanScheduleGenerationError,
+)
+from app.loans.models import (
+    DriverLoan,
+    LoanInstallment,
+    LoanInstallmentStatus,
+    LoanStatus,
+)
+from app.loans.repository import LoanRepository
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+# Same repayment matrix as Vehicle Repairs
+REPAYMENT_MATRIX = [
+    {"min": 0, "max": 200, "installment": "full"},
+    {"min": 201, "max": 500, "installment": 100},
+    {"min": 501, "max": 1000, "installment": 200},
+    {"min": 1001, "max": 3000, "installment": 250},
+    {"min": 3001, "max": float('inf'), "installment": 300},
+]
+
+class LoanService:
+    """
+    Service layer for managing Driver Loans, including creation, schedule generation,
+    and integration with the Centralized Ledger.
+    """
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.repo = LoanRepository(db)
+
+    def _generate_next_loan_id(self) -> str:
+        """Generates a unique Loan ID in the format DLN-YYYY-###."""
+        current_year = datetime.utcnow().year
+        last_id_record = self.repo.get_last_loan_id_for_year(current_year)
+        
+        sequence = 1
+        if last_id_record:
+            last_sequence = int(last_id_record[0].split('-')[-1])
+            sequence = last_sequence + 1
+            
+        return f"DLN-{current_year}-{str(sequence).zfill(3)}"
+
+    def _get_weekly_principal(self, total_amount: Decimal) -> Decimal:
+        """Determines the weekly principal installment based on the repayment matrix."""
+        for rule in REPAYMENT_MATRIX:
+            if rule["min"] <= total_amount <= rule["max"]:
+                if rule["installment"] == "full":
+                    return total_amount
+                return Decimal(str(rule["installment"]))
+        return Decimal("300") # Default for amounts over the max defined
+
+    def create_loan_and_schedule(self, case_no: str, loan_data: dict, user_id: int) -> DriverLoan:
+        """
+        Creates a new Driver Loan, generates its payment schedule, and moves it to OPEN status.
+        This is the main entry point from the BPM flow.
+        """
+        try:
+            loan_id = self._generate_next_loan_id()
+
+            new_loan = DriverLoan(
+                loan_id=loan_id,
+                driver_id=loan_data["driver_id"],
+                lease_id=loan_data["lease_id"],
+                medallion_id=loan_data["medallion_id"],
+                principal_amount=Decimal(loan_data["loan_amount"]),
+                interest_rate=Decimal(loan_data.get("interest_rate", 0)),
+                loan_date=datetime.utcnow().date(), # Loan date is today
+                start_week=loan_data["start_week"],
+                notes=loan_data.get("notes"),
+                status=LoanStatus.DRAFT,
+                created_by=user_id,
+            )
+            self.repo.create_loan(new_loan)
+
+            self.generate_payment_schedule(new_loan)
+
+            new_loan.status = LoanStatus.OPEN
+            self.db.flush()
+
+            bpm_service.create_case_entity(
+                self.db, case_no, "driver_loan", "id", str(new_loan.id)
+            )
+            
+            self.db.commit()
+            logger.info(f"Successfully created and opened Driver Loan {loan_id}.")
+            return new_loan
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to create driver loan: {e}", exc_info=True)
+            raise InvalidLoanOperationError(f"Could not create driver loan: {e}")
+
+    def generate_payment_schedule(self, loan: DriverLoan):
+        """
+        Calculates and stores the full weekly installment schedule for a loan,
+        including principal and interest.
+        """
+        try:
+            total_principal = loan.principal_amount
+            if total_principal <= 0:
+                raise LoanScheduleGenerationError("Loan principal amount must be positive.")
+
+            weekly_principal_payment = self._get_weekly_principal(total_principal)
+            
+            remaining_principal = total_principal
+            current_start_date = loan.start_week
+            last_installment_date = loan.loan_date
+            installments = []
+            seq = 1
+
+            while remaining_principal > 0:
+                principal_due = min(weekly_principal_payment, remaining_principal)
+                
+                due_date = current_start_date + timedelta(days=6) # Due at the end of the week
+                accrual_days = (due_date - last_installment_date).days
+                
+                # Interest = Outstanding Principal * (Annual Rate / 100) * (Accrual Days / 365)
+                interest_due = (remaining_principal * (loan.interest_rate / Decimal("100")) * Decimal(accrual_days)) / Decimal("365")
+                interest_due = interest_due.quantize(Decimal("0.01"))
+
+                total_due = principal_due + interest_due
+
+                installment = LoanInstallment(
+                    loan_id=loan.id,
+                    installment_id=f"{loan.loan_id}-{str(seq).zfill(2)}",
+                    week_start_date=current_start_date,
+                    week_end_date=due_date,
+                    principal_amount=principal_due,
+                    interest_amount=interest_due,
+                    total_due=total_due,
+                    status=LoanInstallmentStatus.SCHEDULED,
+                )
+                installments.append(installment)
+
+                remaining_principal -= principal_due
+                last_installment_date = due_date
+                current_start_date += timedelta(weeks=1)
+                seq += 1
+
+            self.repo.bulk_insert_installments(installments)
+            self.db.flush()
+            logger.info(f"Generated {len(installments)} installments for Loan ID {loan.loan_id}.")
+        except Exception as e:
+            logger.error(f"Error generating payment schedule for {loan.loan_id}: {e}", exc_info=True)
+            raise LoanScheduleGenerationError(f"Could not generate payment schedule: {e}")
+
+    def post_due_installments_to_ledger(self):
+        """
+        Finds all due loan installments and posts them as obligations to the ledger.
+        Designed to be called by a scheduled Celery task.
+        """
+        logger.info("Starting task to post due loan installments to ledger.")
+        db = SessionLocal()
+        ledger_service = LedgerService(db)
+        repo = LoanRepository(db)
+        
+        posted_count, failed_count = 0, 0
+        try:
+            installments_to_post = repo.get_due_installments_to_post(datetime.utcnow().date())
+
+            if not installments_to_post:
+                logger.info("No due loan installments to post.")
+                return {"posted": 0, "failed": 0}
+
+            for installment in installments_to_post:
+                try:
+                    ledger_service.create_obligation(
+                        category=PostingCategory.LOAN,
+                        amount=installment.total_due,
+                        reference_id=installment.installment_id,
+                        driver_id=installment.loan.driver_id,
+                        lease_id=installment.loan.lease_id,
+                        vehicle_id=installment.loan.vehicle_id,
+                        medallion_id=installment.loan.medallion_id,
+                    )
+                    
+                    repo.update_installment(installment.id, {
+                        "status": LoanInstallmentStatus.POSTED,
+                        "posted_on": datetime.utcnow()
+                    })
+                    posted_count += 1
+                except Exception as e:
+                    failed_count += 1
+                    reason = f"Ledger service error: {str(e)}"
+                    repo.update_installment(installment.id, {"status": LoanInstallmentStatus.POSTED, "failure_reason": reason})
+                    logger.error(f"Failed to post loan installment {installment.installment_id} to ledger: {e}", exc_info=True)
+            
+            db.commit()
+            logger.info(f"Loan installment posting task finished. Posted: {posted_count}, Failed: {failed_count}")
+            return {"posted": posted_count, "failed": failed_count}
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Fatal error in post_due_installments_to_ledger: {e}", exc_info=True)
+            raise
+        finally:
+            db.close()

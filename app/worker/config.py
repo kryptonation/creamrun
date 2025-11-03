@@ -17,8 +17,8 @@ from celery.schedules import crontab
 from app.core.config import settings
 
 # Broker and result backend configurations
-broker_url = f"redis://{settings.redis_host}:{settings.redis_port}/0"
-result_backend = f"redis://{settings.redis_host}:{settings.redis_port}/0"
+broker_url = settings.celery_broker
+result_backend = settings.celery_backend
 
 # Task serialization
 task_serializer = "json"
@@ -35,42 +35,58 @@ worker_prefetch_multiplier = 1
 task_acks_late = True
 worker_disable_rate_limits = False
 
+# Redis connection pool settings to prevent connection exhaustion
+broker_connection_retry_on_startup = True
+broker_connection_retry = True
+broker_connection_max_retries = 10
+
+# Redis connection pool configuration
+redis_max_connections = 50
+redis_socket_timeout = 10
+redis_socket_connect_timeout = 10
+redis_retry_on_timeout = True
+redis_health_check_interval = 30
+
+# Connection pool settings for both broker and backend
+broker_transport_options = {
+    'master_name': 'localhost',
+    'max_connections': 20,
+    'socket_timeout': 10,
+    'socket_connect_timeout': 10,
+    'socket_keepalive': True,
+    'socket_keepalive_options': {},
+    'retry_on_timeout': True,
+    'health_check_interval': 30,
+}
+
+result_backend_transport_options = {
+    'master_name': 'localhost', 
+    'max_connections': 20,
+    'socket_timeout': 10,
+    'socket_connect_timeout': 10,
+    'socket_keepalive': True,
+    'socket_keepalive_options': {},
+    'retry_on_timeout': True,
+    'health_check_interval': 30,
+}
+
 
 # Beat schedule configuration
 # This defines when periodic tasks should run
 beat_schedule = {
-    # Fetch and import CURB trips every 24 hours at 2 AM
+    # --- New CURB Data Import Task (Daily) ---
     "curb-fetch-and-import": {
-        "task": "app.curb.tasks.fetch_and_import_curb_trips",
-        "schedule": crontab(hour=2, minute=0),  # Daily at 2 AM UTC
-        "options": {
-            "timezone": "America/New_York"
-        }
+        "task": "curb.fetch_and_import_curb_trips_task",
+        "schedule": crontab(hour=2, minute=0),  # Runs daily at 2:00 AM
+        "options": {"timezone": "America/New_York"},
     },
-    
-    # Reconcile CURB trips every 24 hours at 3 AM
-    "curb-reconcile": {
-        "task": "app.curb.tasks.reconcile_curb_trips",
-        "schedule": crontab(hour=3, minute=0),  # Daily at 3 AM UTC
-        "options": {
-            "timezone": "America/New_York"
-        }
-    },
-    
-    # Post CURB trips to ledger every 24 hours at 4 AM
-    "curb-post": {
-        "task": "app.curb.tasks.post_curb_trips",
-        "schedule": crontab(hour=4, minute=0),  # Daily at 4 AM UTC
-        "options": {
-            "timezone": "America/New_York"
-        }
-    },
-    "generate-weekly-dtrs": {
-        "task": "app.ledger.tasks.generate_weekly_dtrs",
-        "schedule": crontab(hour=5, minute=0, day_of_week="sun"), # Run every Sunday at 5 AM UTC
-        "options": {
-            "timezone": "America/New_York"
-        }
+
+    # --- New CURB Earnings Posting Task (Weekly) ---
+    # IMPORTANT: This must run BEFORE the DTR generation task.
+    "curb-post-earnings-to-ledger": {
+        "task": "curb.post_earnings_to_ledger_task",
+        "schedule": crontab(hour=4, minute=0, day_of_week="sun"), # Runs every Sunday at 4:00 AM
+        "options": {"timezone": "America/New_York"},
     },
 }
 

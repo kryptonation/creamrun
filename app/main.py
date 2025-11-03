@@ -23,6 +23,11 @@ from app.reports.router import router as reports_routes
 from app.esign.router import router as esign_routes
 # --- Payment Engine Routes ---
 from app.ledger.router import router as ledger_routes
+from app.curb.router import router as curb_routes
+from app.ezpass.router import router as ezpass_routes
+from app.pvb.router import router as pvb_routes
+from app.repairs.router import router as repairs_routes
+from app.loans.router import router as loans_routes
 
 
 @asynccontextmanager
@@ -88,7 +93,11 @@ bat_app.include_router(reports_routes)
 bat_app.include_router(esign_routes)
 # Payment Routes
 bat_app.include_router(ledger_routes)
-
+bat_app.include_router(curb_routes)
+bat_app.include_router(ezpass_routes)
+bat_app.include_router(pvb_routes)
+bat_app.include_router(repairs_routes)
+bat_app.include_router(loans_routes)
 
 
 # Root API to check if the server is up

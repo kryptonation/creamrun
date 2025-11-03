@@ -1,0 +1,81 @@
+### app/repairs/schemas.py
+
+from datetime import date
+from decimal import Decimal
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
+
+from app.repairs.models import RepairInvoiceStatus, WorkshopType, RepairInstallmentStatus
+
+
+class RepairInvoiceListResponse(BaseModel):
+    """
+    Response schema for a single repair invoice in a list, matching the UI grid.
+    """
+    repair_id: str
+    invoice_number: str
+    invoice_date: date = Field(..., alias="invoice_date")
+    status: RepairInvoiceStatus
+    driver_name: Optional[str] = None
+    medallion_no: Optional[str] = None
+    lease_type: Optional[str] = None # Will be populated in the router from lease
+    workshop: WorkshopType = Field(..., alias="workshop_type")
+    amount: Decimal = Field(..., alias="total_amount")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class PaginatedRepairInvoiceResponse(BaseModel):
+    """
+    Paginated response schema for a list of Repair Invoices.
+    """
+    items: List[RepairInvoiceListResponse]
+    total_items: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
+class RepairInstallmentResponse(BaseModel):
+    """
+    Response schema for a single installment in the detailed view.
+    """
+    installment_id: str
+    week_period: str # e.g., "09/28/2025-10/01/2025"
+    installment: Decimal = Field(..., alias="principal_amount")
+    prior_balance: Decimal
+    balance: Decimal
+    status: RepairInstallmentStatus
+    posted_date: Optional[date] = Field(None, alias="posted_on")
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class RepairInvoiceDetailResponse(BaseModel):
+    """
+    Comprehensive response schema for the detailed view of a single Repair Invoice.
+    """
+    # Header Info
+    repair_id: str
+    repair_amount: Decimal = Field(..., alias="total_amount")
+    total_paid: Decimal
+    remaining_balance: Decimal
+    installments_progress: str # e.g., "1/5"
+
+    # Detail Cards
+    repair_invoice_details: dict
+    driver_details: dict
+    vehicle_details: dict
+    lease_details: dict
+
+    # Payment Schedule
+    payment_schedule: List[RepairInstallmentResponse]
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True

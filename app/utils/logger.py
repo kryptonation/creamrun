@@ -158,7 +158,7 @@ def setup_file_logging(log_file: str, log_level: str, use_json: bool) -> None:
         ]
 
     formatter = structlog.stdlib.ProcessorFormatter(
-        processor=structlog.dev.ConsoleRenderer() if not use_json else structlog.processors.JSONRenderer(),
+        processor=structlog.dev.ConsoleRenderer(colors=True) if not use_json else structlog.processors.JSONRenderer(),
         foreign_pre_chain=processors,
     )
 

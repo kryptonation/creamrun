@@ -163,3 +163,88 @@ class LoanRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+    
+    def list_installments(
+        self,
+        page: int,
+        per_page: int,
+        sort_by: str,
+        sort_order: str,
+        loan_id: Optional[str] = None,
+        lease_id: Optional[int] = None,
+        driver_id: Optional[int] = None,
+        medallion_id: Optional[int] = None,
+        vehicle_id: Optional[int] = None,
+        status: Optional[str] = None,
+    ) -> Tuple[List[LoanInstallment], int]:
+        """
+        Retrieves a paginated, sorted, and filtered list of Loan Installments.
+        Supports filtering by loan_id, lease_id, driver_id, medallion_id, vehicle_id, and status.
+        """
+        from app.vehicles.models import Vehicle
+        
+        query = (
+            self.db.query(LoanInstallment)
+            .join(DriverLoan, LoanInstallment.loan_id == DriverLoan.id)
+            .options(
+                joinedload(LoanInstallment.loan)
+                .joinedload(DriverLoan.driver),
+                joinedload(LoanInstallment.loan)
+                .joinedload(DriverLoan.medallion),
+                joinedload(LoanInstallment.loan)
+                .joinedload(DriverLoan.lease),
+            )
+            .outerjoin(Driver, DriverLoan.driver_id == Driver.id)
+            .outerjoin(Medallion, DriverLoan.medallion_id == Medallion.id)
+            .outerjoin(Lease, DriverLoan.lease_id == Lease.id)
+            .outerjoin(Vehicle, Lease.vehicle_id == Vehicle.id)
+        )
+
+        # Apply filters
+        if loan_id:
+            query = query.filter(DriverLoan.loan_id.ilike(f"%{loan_id}%"))
+        
+        if lease_id:
+            query = query.filter(DriverLoan.lease_id == lease_id)
+        
+        if driver_id:
+            query = query.filter(DriverLoan.driver_id == driver_id)
+        
+        if medallion_id:
+            query = query.filter(DriverLoan.medallion_id == medallion_id)
+        
+        if vehicle_id:
+            query = query.filter(Lease.vehicle_id == vehicle_id)
+        
+        if status:
+            try:
+                status_enum = LoanInstallmentStatus[status.upper()]
+                query = query.filter(LoanInstallment.status == status_enum)
+            except KeyError:
+                logger.warning(f"Invalid status filter for installments: {status}")
+
+        total_items = query.with_entities(func.count(LoanInstallment.id)).scalar()
+
+        # Apply sorting
+        sort_column_map = {
+            "installment_id": LoanInstallment.installment_id,
+            "loan_id": DriverLoan.loan_id,
+            "driver_name": Driver.full_name,
+            "medallion_no": Medallion.medallion_number,
+            "week_start_date": LoanInstallment.week_start_date,
+            "principal_amount": LoanInstallment.principal_amount,
+            "interest_amount": LoanInstallment.interest_amount,
+            "total_due": LoanInstallment.total_due,
+            "status": LoanInstallment.status,
+            "posted_on": LoanInstallment.posted_on,
+        }
+        
+        sort_column = sort_column_map.get(sort_by, LoanInstallment.week_start_date)
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+
+        return query.all(), total_items

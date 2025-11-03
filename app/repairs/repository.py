@@ -159,3 +159,89 @@ class RepairRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+    
+    def list_installments(
+        self,
+        page: int,
+        per_page: int,
+        sort_by: str,
+        sort_order: str,
+        repair_id: Optional[str] = None,
+        lease_id: Optional[int] = None,
+        driver_id: Optional[int] = None,
+        medallion_id: Optional[int] = None,
+        vehicle_id: Optional[int] = None,
+        status: Optional[str] = None,
+    ) -> Tuple[List[RepairInstallment], int]:
+        """
+        Retrieves a paginated, sorted, and filtered list of Repair Installments.
+        Supports filtering by repair_id, lease_id, driver_id, medallion_id, vehicle_id, and status.
+        """
+        from app.leases.models import Lease
+        from app.vehicles.models import Vehicle
+        
+        query = (
+            self.db.query(RepairInstallment)
+            .join(RepairInvoice, RepairInstallment.invoice_id == RepairInvoice.id)
+            .options(
+                joinedload(RepairInstallment.invoice)
+                .joinedload(RepairInvoice.driver),
+                joinedload(RepairInstallment.invoice)
+                .joinedload(RepairInvoice.medallion),
+                joinedload(RepairInstallment.invoice)
+                .joinedload(RepairInvoice.lease),
+                joinedload(RepairInstallment.invoice)
+                .joinedload(RepairInvoice.vehicle),
+            )
+            .outerjoin(Driver, RepairInvoice.driver_id == Driver.id)
+            .outerjoin(Medallion, RepairInvoice.medallion_id == Medallion.id)
+            .outerjoin(Lease, RepairInvoice.lease_id == Lease.id)
+            .outerjoin(Vehicle, RepairInvoice.vehicle_id == Vehicle.id)
+        )
+
+        # Apply filters
+        if repair_id:
+            query = query.filter(RepairInvoice.repair_id.ilike(f"%{repair_id}%"))
+        
+        if lease_id:
+            query = query.filter(RepairInvoice.lease_id == lease_id)
+        
+        if driver_id:
+            query = query.filter(RepairInvoice.driver_id == driver_id)
+        
+        if medallion_id:
+            query = query.filter(RepairInvoice.medallion_id == medallion_id)
+        
+        if vehicle_id:
+            query = query.filter(RepairInvoice.vehicle_id == vehicle_id)
+        
+        if status:
+            try:
+                status_enum = RepairInstallmentStatus[status.upper()]
+                query = query.filter(RepairInstallment.status == status_enum)
+            except KeyError:
+                logger.warning(f"Invalid status filter for repair installments: {status}")
+
+        total_items = query.with_entities(func.count(RepairInstallment.id)).scalar()
+
+        # Apply sorting
+        sort_column_map = {
+            "installment_id": RepairInstallment.installment_id,
+            "repair_id": RepairInvoice.repair_id,
+            "driver_name": Driver.full_name,
+            "medallion_no": Medallion.medallion_number,
+            "week_start_date": RepairInstallment.week_start_date,
+            "principal_amount": RepairInstallment.principal_amount,
+            "status": RepairInstallment.status,
+            "posted_on": RepairInstallment.posted_on,
+        }
+        
+        sort_column = sort_column_map.get(sort_by, RepairInstallment.week_start_date)
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+
+        return query.all(), total_items

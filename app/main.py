@@ -28,6 +28,9 @@ from app.ezpass.router import router as ezpass_routes
 from app.pvb.router import router as pvb_routes
 from app.repairs.router import router as repairs_routes
 from app.loans.router import router as loans_routes
+from app.tlc.router import router as tlc_routes
+from app.interim_payments.router import router as interim_payment_routes
+from app.misc_expenses.router import router as misc_expense_routes
 
 
 @asynccontextmanager
@@ -98,6 +101,9 @@ bat_app.include_router(ezpass_routes)
 bat_app.include_router(pvb_routes)
 bat_app.include_router(repairs_routes)
 bat_app.include_router(loans_routes)
+bat_app.include_router(tlc_routes)
+bat_app.include_router(interim_payment_routes)
+bat_app.include_router(misc_expense_routes)
 
 
 # Root API to check if the server is up

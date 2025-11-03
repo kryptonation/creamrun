@@ -2,13 +2,15 @@
 
 import math
 import random
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from decimal import Decimal
 
-from app.repairs.models import RepairInvoiceStatus, WorkshopType
+from app.repairs.models import RepairInvoiceStatus, WorkshopType, RepairInstallmentStatus
 from app.repairs.schemas import (
     PaginatedRepairInvoiceResponse,
     RepairInvoiceListResponse,
+    RepairInstallmentListResponse,
+    PaginatedRepairInstallmentResponse,
 )
 
 # --- Pre-defined lists to generate realistic fake data ---
@@ -51,4 +53,54 @@ def create_stub_repair_invoice_response(
         page=page,
         per_page=per_page,
         total_pages=total_pages,
+    )
+
+def create_stub_repair_installment_response(page: int, per_page: int) -> PaginatedRepairInstallmentResponse:
+    """
+    Creates a stubbed paginated response for repair installments for testing purposes.
+    """
+    
+    stub_items = []
+    total_items = 50
+    start_index = (page - 1) * per_page
+    
+    statuses = [
+        RepairInstallmentStatus.SCHEDULED,
+        RepairInstallmentStatus.POSTED,
+        RepairInstallmentStatus.PAID,
+    ]
+    
+    workshops = [WorkshopType.BIG_APPLE, WorkshopType.EXTERNAL]
+    
+    for i in range(start_index, min(start_index + per_page, total_items)):
+        week_start = date(2025, 1, 5) + timedelta(weeks=i)
+        week_end = week_start + timedelta(days=6)
+        
+        stub_items.append(
+            RepairInstallmentListResponse(
+                installment_id=f"RPR-2025-{str((i % 10) + 1).zfill(3)}-{str((i % 5) + 1).zfill(2)}",
+                repair_id=f"RPR-2025-{str((i % 10) + 1).zfill(3)}",
+                invoice_number=f"INV-{str(1000 + i).zfill(6)}",
+                driver_name=f"Driver {chr(65 + (i % 26))} {chr(65 + ((i+1) % 26))}",
+                medallion_no=f"1A{str(10 + (i % 90)).zfill(2)}",
+                lease_id=f"LSE-2024-{str((i % 20) + 1).zfill(3)}",
+                vehicle_id=100 + (i % 50),
+                week_start_date=week_start,
+                week_end_date=week_end,
+                principal_amount=Decimal("150.00") + Decimal(str(i % 100)),
+                status=statuses[i % len(statuses)],
+                posted_on=week_start if i % 2 == 0 else None,
+                ledger_posting_ref=f"LDG-{str(i+1).zfill(6)}" if i % 2 == 0 else None,
+                workshop_type=workshops[i % len(workshops)],
+            )
+        )
+    
+    total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+    
+    return PaginatedRepairInstallmentResponse(
+        items=stub_items,
+        total_items=total_items,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages
     )

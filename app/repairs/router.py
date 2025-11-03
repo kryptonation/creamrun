@@ -1,9 +1,8 @@
 ### app/repairs/router.py
 
 import math
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
-from io import BytesIO
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,12 +18,14 @@ from app.repairs.schemas import (
     RepairInvoiceDetailResponse,
     RepairInvoiceListResponse,
     RepairInstallmentResponse,
-    RepairInstallmentStatus
+    RepairInstallmentStatus,
+    RepairInstallmentListResponse,
+    PaginatedRepairInstallmentResponse,
 )
 from app.repairs.models import RepairInstallment
 from app.repairs.services import RepairService
 from app.leases.services import lease_service
-from app.repairs.stubs import create_stub_repair_invoice_response
+from app.repairs.stubs import create_stub_repair_invoice_response, create_stub_repair_installment_response
 from app.users.models import User
 from app.users.utils import get_current_user
 from app.utils.exporter.excel_exporter import ExcelExporter
@@ -295,3 +296,75 @@ def export_repairs(
     except Exception as e:
         logger.error("Error exporting repair data: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred during the export process.") from e
+    
+
+@router.get("/fetch/installments", response_model=PaginatedRepairInstallmentResponse, summary="List Repair Installments")
+def list_repair_installments(
+    use_stubs: bool = Query(False, description="Return stubbed data for testing."),
+    page: int = Query(1, ge=1, description="Page number for pagination."),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page."),
+    sort_by: Optional[str] = Query("week_start_date", description="Field to sort by."),
+    sort_order: str = Query("desc", enum=["asc", "desc"]),
+    repair_id: Optional[str] = Query(None, description="Filter by Repair ID."),
+    lease_id: Optional[int] = Query(None, description="Filter by Lease ID."),
+    driver_id: Optional[int] = Query(None, description="Filter by Driver ID."),
+    medallion_id: Optional[int] = Query(None, description="Filter by Medallion ID."),
+    vehicle_id: Optional[int] = Query(None, description="Filter by Vehicle ID."),
+    status: Optional[str] = Query(None, description="Filter by Installment Status."),
+    repair_service: RepairService = Depends(get_repair_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieves a paginated, sorted, and filtered list of repair installments.
+    Supports filtering by repair_id, lease_id, driver_id, medallion_id, vehicle_id, or status.
+    """
+    if use_stubs:
+        return create_stub_repair_installment_response(page, per_page)
+    
+    try:
+        installments, total_items = repair_service.repo.list_installments(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            repair_id=repair_id,
+            lease_id=lease_id,
+            driver_id=driver_id,
+            medallion_id=medallion_id,
+            vehicle_id=vehicle_id,
+            status=status,
+        )
+
+        response_items = []
+        for inst in installments:
+            response_items.append(
+                RepairInstallmentListResponse(
+                    installment_id=inst.installment_id,
+                    repair_id=inst.invoice.repair_id,
+                    invoice_number=inst.invoice.invoice_number,
+                    driver_name=inst.invoice.driver.full_name if inst.invoice.driver else None,
+                    medallion_no=inst.invoice.medallion.medallion_number if inst.invoice.medallion else None,
+                    lease_id=inst.invoice.lease.lease_id if inst.invoice.lease else None,
+                    vehicle_id=inst.invoice.vehicle_id,
+                    week_start_date=inst.week_start_date,
+                    week_end_date=inst.week_end_date,
+                    principal_amount=inst.principal_amount,
+                    status=inst.status,
+                    posted_on=inst.posted_on.date() if inst.posted_on else None,
+                    ledger_posting_ref=inst.ledger_posting_ref,
+                    workshop_type=inst.invoice.workshop_type if inst.invoice else None,
+                )
+            )
+        
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+
+        return PaginatedRepairInstallmentResponse(
+            items=response_items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages
+        )
+    except Exception as e:
+        logger.error("Error fetching repair installments: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while fetching repair installments.") from e

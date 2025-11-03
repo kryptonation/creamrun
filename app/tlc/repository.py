@@ -65,11 +65,14 @@ class TLCRepository:
         """
         Retrieves a paginated, sorted, and filtered list of TLC violations.
         """
+        from app.drivers.models import Driver
+        
         query = (
             self.db.query(TLCViolation)
             .options(
                 joinedload(TLCViolation.driver),
                 joinedload(TLCViolation.medallion),
+                joinedload(TLCViolation.lease),
             )
             .outerjoin(Driver, TLCViolation.driver_id == Driver.id)
             .outerjoin(Medallion, TLCViolation.medallion_id == Medallion.id)
@@ -77,25 +80,27 @@ class TLCRepository:
 
         # Apply filters
         if plate:
-            # Note: TLC violations are not directly linked to plate, this is a placeholder
-            # for potential future enhancement or searching via associated vehicle.
-            logger.warning("Filtering TLC violations by plate is not directly supported.")
+            query = query.filter(TLCViolation.plate.ilike(f"%{plate}%"))
+        
         if state:
             query = query.filter(TLCViolation.state.ilike(f"%{state}%"))
+        
         if type:
             try:
                 type_enum = TLCViolationType[type.upper()]
                 query = query.filter(TLCViolation.violation_type == type_enum)
             except KeyError:
                 logger.warning(f"Invalid type filter for TLC violations: {type}")
+        
         if summons:
             query = query.filter(TLCViolation.summons_no.ilike(f"%{summons}%"))
+        
         if issue_date:
-            start_of_day = datetime.combine(issue_date, time.min)
-            end_of_day = datetime.combine(issue_date, time.max)
-            query = query.filter(TLCViolation.issue_date.between(start_of_day, end_of_day))
+            query = query.filter(TLCViolation.issue_date == issue_date)
+        
         if driver_id:
             query = query.filter(Driver.driver_id.ilike(f"%{driver_id}%"))
+        
         if medallion_no:
             query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
 
@@ -103,22 +108,21 @@ class TLCRepository:
 
         # Apply sorting
         sort_column_map = {
-            "plate": None, # Not a direct column, requires join logic not implemented here
+            "summons_no": TLCViolation.summons_no,
+            "plate": TLCViolation.plate,
             "state": TLCViolation.state,
             "type": TLCViolation.violation_type,
-            "summons": TLCViolation.summons_no,
             "issue_date": TLCViolation.issue_date,
-            "issue_time": TLCViolation.issue_time,
-            "medallion_no": Medallion.medallion_number,
             "driver_id": Driver.driver_id,
+            "medallion_no": Medallion.medallion_number,
+            "amount": TLCViolation.amount,
         }
         
         sort_column = sort_column_map.get(sort_by, TLCViolation.issue_date)
-        if sort_column is not None:
-            if sort_order.lower() == "desc":
-                query = query.order_by(sort_column.desc())
-            else:
-                query = query.order_by(sort_column.asc())
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
 
         query = query.offset((page - 1) * per_page).limit(per_page)
 

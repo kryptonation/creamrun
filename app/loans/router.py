@@ -18,10 +18,12 @@ from app.loans.schemas import (
     DriverLoanListResponse,
     LoanInstallmentResponse,
     PaginatedDriverLoanResponse,
+    LoanInstallmentListResponse,
+    PaginatedLoanInstallmentResponse,
 )
 from app.loans.services import LoanService
 from app.loans.models import LoanInstallmentStatus
-from app.loans.stubs import create_stub_loan_response
+from app.loans.stubs import create_stub_loan_response, create_stub_installment_response
 from app.users.models import User
 from app.users.utils import get_current_user
 from app.utils.exporter.excel_exporter import ExcelExporter
@@ -33,6 +35,7 @@ router = APIRouter(prefix="/payments/driver-loans", tags=["Driver Loans"])
 
 # Dependency to inject the LoanService
 def get_loan_service(db: Session = Depends(get_db)) -> LoanService:
+    """Dependency to get LoanService instance."""
     return LoanService(db)
 
 @router.get("", response_model=PaginatedDriverLoanResponse, summary="List Driver Loans")
@@ -76,7 +79,7 @@ def list_driver_loans(
         )
     except Exception as e:
         logger.error("Error fetching driver loans: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching driver loans.")
+        raise HTTPException(status_code=500, detail="An error occurred while fetching driver loans.") from e
 
 @router.post("/create-case", summary="Create a New Driver Loan Case", status_code=status.HTTP_201_CREATED)
 def create_driver_loan_case(
@@ -93,10 +96,10 @@ def create_driver_loan_case(
             "case_no": new_case.case_no,
         }
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error creating driver loan case: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not start a new driver loan case.")
+        raise HTTPException(status_code=500, detail="Could not start a new driver loan case.") from e
 
 
 @router.get("/{loan_id}", response_model=DriverLoanDetailResponse, summary="View Driver Loan Details")
@@ -162,10 +165,10 @@ def get_loan_details(
             payment_schedule=schedule_response,
         )
     except LoanNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error fetching details for loan ID {loan_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching loan details.")
+        raise HTTPException(status_code=500, detail="An error occurred while fetching loan details.") from e
 
 
 @router.get("/export", summary="Export Driver Loan Data")
@@ -213,4 +216,77 @@ def export_loans(
 
     except Exception as e:
         logger.error("Error exporting loan data: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred during the export process.")
+        raise HTTPException(status_code=500, detail="An error occurred during the export process.") from e
+    
+
+@router.get("/fetch/installments", response_model=PaginatedLoanInstallmentResponse, summary="List Loan Installments")
+def list_loan_installments(
+    use_stubs: bool = Query(False, description="Return stubbed data for testing."),
+    page: int = Query(1, ge=1, description="Page number for pagination."),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page."),
+    sort_by: Optional[str] = Query("week_start_date", description="Field to sort by."),
+    sort_order: str = Query("desc", enum=["asc", "desc"]),
+    loan_id: Optional[str] = Query(None, description="Filter by Loan ID."),
+    lease_id: Optional[int] = Query(None, description="Filter by Lease ID."),
+    driver_id: Optional[int] = Query(None, description="Filter by Driver ID."),
+    medallion_id: Optional[int] = Query(None, description="Filter by Medallion ID."),
+    vehicle_id: Optional[int] = Query(None, description="Filter by Vehicle ID."),
+    status: Optional[str] = Query(None, description="Filter by Installment Status."),
+    loan_service: LoanService = Depends(get_loan_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieves a paginated, sorted, and filtered list of loan installments.
+    Supports filtering by loan_id, lease_id, driver_id, medallion_id, vehicle_id, or status.
+    """
+    logger.info("Using stubs: **** %s", use_stubs)
+    if use_stubs:
+        return create_stub_installment_response(page, per_page)
+    
+    try:
+        installments, total_items = loan_service.repo.list_installments(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            loan_id=loan_id,
+            lease_id=lease_id,
+            driver_id=driver_id,
+            medallion_id=medallion_id,
+            vehicle_id=vehicle_id,
+            status=status,
+        )
+
+        response_items = []
+        for inst in installments:
+            response_items.append(
+                LoanInstallmentListResponse(
+                    installment_id=inst.installment_id,
+                    loan_id=inst.loan.loan_id,
+                    driver_name=inst.loan.driver.full_name if inst.loan.driver else None,
+                    medallion_no=inst.loan.medallion.medallion_number if inst.loan.medallion else None,
+                    lease_id=inst.loan.lease.lease_id if inst.loan.lease else None,
+                    vehicle_id=inst.loan.lease.vehicle_id if inst.loan.lease else None,
+                    week_start_date=inst.week_start_date,
+                    week_end_date=inst.week_end_date,
+                    principal_amount=inst.principal_amount,
+                    interest_amount=inst.interest_amount,
+                    total_due=inst.total_due,
+                    status=inst.status,
+                    posted_on=inst.posted_on.date() if inst.posted_on else None,
+                    ledger_posting_ref=inst.ledger_posting_ref,
+                )
+            )
+        
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+
+        return PaginatedLoanInstallmentResponse(
+            items=response_items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages
+        )
+    except Exception as e:
+        logger.error("Error fetching loan installments: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An error occurred while fetching loan installments.") from e

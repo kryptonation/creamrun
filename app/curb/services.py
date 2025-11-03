@@ -144,21 +144,28 @@ class CurbService:
         self.repo = CurbRepository(db)
         self.api_service = CurbApiService()
 
-    def _parse_and_normalize_trips(self, xml_string: str) -> List[Dict]:
-        """Parses XML from CURB endpoints into a standardized list of trip dictionaries."""
+    def _parse_and_normalize_trips(self, xml_data: str) -> List[Dict]:
+        """
+        Parses the XML response from CURB and normalizes it into a standard dictionary format.
+        Handles both the GET_TRIPS_LOG10 and Get_Trans_By_Date_Cab12 response structures.
+        """
         trips = []
-        if not xml_string or not xml_string.strip():
+        if not xml_data:
             return trips
         
         try:
-            # The actual data is inside an outer XML structure, so we need to parse the string content
-            root = ET.fromstring(f"<root>{xml_string}</root>")
+            root = ET.fromstring(xml_data)
+            trip_nodes = root.findall(".//trip") + root.findall(".//tran")
             
-            # Handles both <TRIPS><RECORD .../></TRIPS> and <trans><tran .../></trans>
-            for trip_node in root.findall(".//RECORD") + root.findall(".//tran"):
+            for trip_node in trip_nodes:
+                if not isinstance(trip_node, ET.Element):
+                    continue
+                    
                 try:
-                    payment_type_char = trip_node.attrib.get("T", trip_node.findtext('CC_TYPE', default="?"))
-
+                    # Determine payment type
+                    payment_type_str = trip_node.attrib.get("PAYMENT_TYPE", trip_node.findtext("CC_TYPE", ""))
+                    payment_type_char = payment_type_str[0] if payment_type_str else None
+                    
                     if payment_type_char == '$' or 'cash' in (trip_node.findtext('PAYMENT_TYPE') or '').lower():
                         payment_type = PaymentType.CASH
                     elif payment_type_char in ['C', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
@@ -177,14 +184,44 @@ class CurbService:
                     
                     unique_id = f"{period}-{trip_id}" if period else trip_id
 
+                    # Parse date and time - FIX FOR THE ERROR
+                    trip_date = trip_node.findtext("TRIPDATE", "")
+                    trip_time_start = trip_node.findtext("TRIPTIMESTART", "")
+                    trip_time_end = trip_node.findtext("TRIPTIMEEND", "")
+                    
+                    # Combine date and time, handling both formats (with and without seconds)
+                    start_datetime_str = trip_node.attrib.get("START_DATE", f"{trip_date} {trip_time_start}").strip()
+                    end_datetime_str = trip_node.attrib.get("END_DATE", f"{trip_date} {trip_time_end}").strip()
+                    
+                    # Try parsing with seconds first, then without
+                    def parse_flexible_datetime(datetime_str: str) -> datetime:
+                        """Parse datetime with flexible format handling."""
+                        if not datetime_str or datetime_str == " ":
+                            raise ValueError("Empty datetime string")
+                        
+                        # Try with seconds first
+                        try:
+                            return datetime.strptime(datetime_str, "%m/%d/%Y %H:%M:%S")
+                        except ValueError:
+                            # If that fails, try without seconds
+                            try:
+                                return datetime.strptime(datetime_str, "%m/%d/%Y %H:%M")
+                            except ValueError:
+                                # If both fail, log and re-raise
+                                logger.warning(f"Failed to parse datetime: '{datetime_str}'")
+                                raise
+
+                    start_time = parse_flexible_datetime(start_datetime_str)
+                    end_time = parse_flexible_datetime(end_datetime_str)
+
                     trip_data = {
                         "curb_trip_id": unique_id,
                         "curb_period": period,
                         "status": CurbTripStatus.UNRECONCILED,
                         "curb_driver_id": trip_node.attrib.get("DRIVER", trip_node.findtext("TRIPDRIVERID")),
                         "curb_cab_number": trip_node.attrib.get("CABNUMBER"),
-                        "start_time": datetime.strptime(trip_node.attrib.get("START_DATE", trip_node.findtext("TRIPDATE", "") + " " + trip_node.findtext("TRIPTIMESTART", "")), "%m/%d/%Y %H:%M:%S"),
-                        "end_time": datetime.strptime(trip_node.attrib.get("END_DATE", trip_node.findtext("TRIPDATE", "") + " " + trip_node.findtext("TRIPTIMEEND", "")), "%m/%d/%Y %H:%M:%S"),
+                        "start_time": start_time,
+                        "end_time": end_time,
                         "fare": Decimal(trip_node.attrib.get("TRIPFARE", "0.00")),
                         "tips": Decimal(trip_node.attrib.get("TRIPTIPS", trip_node.attrib.get("TIPS", "0.00"))),
                         "tolls": Decimal(trip_node.attrib.get("TRIPTOLL", "0.00")),
@@ -199,7 +236,8 @@ class CurbService:
                     }
                     trips.append(trip_data)
                 except (ValueError, KeyError) as e:
-                    logger.warning("Skipping malformed trip record: %s. Error: %s", ET.tostring(trip_node, 'utf-8'), e)
+                    logger.warning("Skipping malformed trip record: %s. Error: %s", 
+                                ET.tostring(trip_node, 'utf-8'), e)
                     continue
 
         except ET.ParseError as e:

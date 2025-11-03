@@ -74,6 +74,9 @@ class TLCViolation(Base, AuditMixin):
     status: Mapped[TLCViolationStatus] = mapped_column(Enum(TLCViolationStatus), default=TLCViolationStatus.PENDING)
     original_posting_id: Mapped[Optional[str]] = mapped_column(String(255), comment="Reference to the initial ledger posting.")
     reversal_posting_id: Mapped[Optional[str]] = mapped_column(String(255), comment="Reference to the reversal posting if disposition is changed.")
+
+    plate: Mapped[str] = mapped_column(String(50), comment="License plate number of the vehicle.")
+    state: Mapped[str] = mapped_column(String(10), default="NY", comment="State of the license plate.")
     
     # --- Relationships ---
     driver: Mapped[Optional["Driver"]] = relationship()

@@ -76,3 +76,38 @@ class DriverLoanDetailResponse(BaseModel):
     class Config:
         from_attributes = True
         populate_by_name = True
+
+
+class LoanInstallmentListResponse(BaseModel):
+    """
+    Response schema for a single loan installment in a list view.
+    """
+    installment_id: str
+    loan_id: str
+    driver_name: Optional[str] = None
+    medallion_no: Optional[str] = None
+    lease_id: Optional[str] = None
+    vehicle_id: Optional[int] = None
+    week_start_date: date
+    week_end_date: date
+    principal: Decimal = Field(..., alias="principal_amount")
+    interest: Decimal = Field(..., alias="interest_amount")
+    total_due: Decimal
+    status: LoanInstallmentStatus
+    posted_date: Optional[date] = Field(None, alias="posted_on")
+    ledger_posting_ref: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+
+class PaginatedLoanInstallmentResponse(BaseModel):
+    """
+    Paginated response schema for a list of Loan Installments.
+    """
+    items: List[LoanInstallmentListResponse]
+    total_items: int
+    page: int
+    per_page: int
+    total_pages: int

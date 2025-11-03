@@ -34,6 +34,8 @@ from app.pvb.models import *
 from app.repairs.models import *
 from app.loans.models import *
 from app.tlc.models import *
+from app.interim_payments.models import *
+from app.misc_expenses.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

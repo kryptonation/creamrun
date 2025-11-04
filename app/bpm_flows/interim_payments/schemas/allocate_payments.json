@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Interim Payment - Step 2: Allocate Payments",
+  "description": "Schema for validating payment allocation submission",
+  "type": "object",
+  "required": ["payment_amount", "payment_method", "payment_date", "allocations"],
+  "properties": {
+    "payment_amount": {
+      "type": "number",
+      "description": "Total payment amount in dollars",
+      "minimum": 0.01,
+      "maximum": 999999.99,
+      "examples": [600.00, 1250.50]
+    },
+    "payment_method": {
+      "type": "string",
+      "description": "Method of payment",
+      "enum": ["Cash", "Check", "ACH"],
+      "examples": ["ACH", "Cash", "Check"]
+    },
+    "payment_date": {
+      "type": "string",
+      "description": "Date when payment was received (ISO 8601 format)",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "examples": ["2025-10-21", "2025-11-04"]
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional notes about the payment",
+      "maxLength": 1000,
+      "examples": ["Driver paid cash at front desk", "Check #12345"]
+    },
+    "allocations": {
+      "type": "array",
+      "description": "List of balance allocations",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["balance_id", "amount", "category", "reference_id"],
+        "properties": {
+          "balance_id": {
+            "type": "string",
+            "description": "The ledger balance ID to apply payment to",
+            "minLength": 1,
+            "examples": ["LB-2025-000123", "LB-2025-000456"]
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount to allocate to this balance",
+            "minimum": 0.01,
+            "maximum": 999999.99,
+            "examples": [265.00, 335.00]
+          },
+          "category": {
+            "type": "string",
+            "description": "Category of the obligation",
+            "enum": ["LEASE", "REPAIRS", "LOANS", "EZPASS", "PVB", "TLC", "TAXES", "MISC"],
+            "examples": ["LEASE", "REPAIRS", "EZPASS"]
+          },
+          "reference_id": {
+            "type": "string",
+            "description": "Reference ID of the original obligation",
+            "minLength": 1,
+            "maxLength": 100,
+            "examples": ["MED-102-LS-08", "INV-2457", "LN-3001"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

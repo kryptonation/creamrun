@@ -186,6 +186,10 @@ def list_leases(
     status: Optional[str] = Query(None, description="Filter by lease status"),
     sort_by: Optional[str] = Query(None, description="Sort by field"),
     sort_order: Optional[str] = Query(None, description="Sort order"),
+    exclude_additional_drivers: Optional[bool] = Query(
+        True, 
+        description="Exclude leases where driver is additional driver (default: true)"
+    ),  # ✅ NEW PARAMETER
     logged_in_user: User = Depends(get_current_user),
 ):
     """List all the leases"""
@@ -208,6 +212,7 @@ def list_leases(
             status=status,
             sort_by=sort_by,
             sort_order=sort_order,
+            exclude_additional_drivers=exclude_additional_drivers,
             multiple=True,
         )
         lease_info = [format_lease_response(db, lease) for lease in leases]
@@ -352,6 +357,10 @@ def export_leases(
         None, description="Filter by lease end date"
     ),
     status: Optional[str] = Query(None, description="Filter by lease status"),
+    exclude_additional_drivers: Optional[bool] = Query(
+        True, 
+        description="Exclude leases where driver is additional driver (default: true)"
+    ),
     logged_in_user: User = Depends(get_current_user),
 ):
     """Export all the leases"""
@@ -371,6 +380,7 @@ def export_leases(
             plate_number=plate_no,
             lease_start_date=lease_start_date,
             lease_end_date=lease_end_date,
+            exclude_additional_drivers=exclude_additional_drivers,
             status=status,
             multiple=True,
         )

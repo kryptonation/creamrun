@@ -64,6 +64,7 @@ class LeaseService:
         status: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        exclude_additional_drivers: Optional[bool] = True,
         multiple: bool = False,
     ) -> Union[Lease, List[Lease], None]:
         """Get a lease by ID, vehicle ID, or status"""
@@ -143,6 +144,7 @@ class LeaseService:
                         Driver, LeaseDriver.driver_id == Driver.driver_id
                     )
                     joined_driver = True
+
                 query = query.filter(
                     or_(*[Driver.driver_id.ilike(f"%{id}%") for id in driver_ids])
                 )
@@ -181,6 +183,19 @@ class LeaseService:
                         TLCLicense, Driver.tlc_license_number_id == TLCLicense.id
                     )
                     joined_tlc_license = True
+
+                # ✅ NEW: Exclude additional drivers if requested
+                if exclude_additional_drivers:
+                    logger.info(
+                        f"Filtering leases for tlc_number={tlc_number}: excluding additional drivers"
+                    )
+                    query = query.filter(
+                        or_(
+                            LeaseDriver.is_additional_driver == False,
+                            LeaseDriver.is_additional_driver.is_(None)
+                        )
+                    )
+                    
                 query = query.filter(
                     or_(
                         *[

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Interim Payment - Step 2: Allocate Payments",
-  "description": "Schema for validating payment allocation submission",
+  "title": "Interim Payment - Allocate Payments",
+  "description": "Schema for validating payment allocation submission in Step 302",
   "type": "object",
   "required": ["payment_amount", "payment_method", "payment_date", "allocations"],
   "properties": {
@@ -41,10 +41,9 @@
         "required": ["balance_id", "amount", "category", "reference_id"],
         "properties": {
           "balance_id": {
-            "type": "string",
+            "type": ["string", "integer"],
             "description": "The ledger balance ID to apply payment to",
-            "minLength": 1,
-            "examples": ["LB-2025-000123", "LB-2025-000456"]
+            "examples": ["123", 456]
           },
           "amount": {
             "type": "number",

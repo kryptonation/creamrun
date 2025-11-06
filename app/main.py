@@ -31,6 +31,8 @@ from app.loans.router import router as loans_routes
 from app.tlc.router import router as tlc_routes
 from app.interim_payments.router import router as interim_payment_routes
 from app.misc_expenses.router import router as misc_expense_routes
+from app.driver_payments.router import router as driver_payments_routes
+from app.dtr.router import router as dtr_routes
 
 
 @asynccontextmanager
@@ -104,6 +106,8 @@ bat_app.include_router(loans_routes)
 bat_app.include_router(tlc_routes)
 bat_app.include_router(interim_payment_routes)
 bat_app.include_router(misc_expense_routes)
+bat_app.include_router(driver_payments_routes)
+bat_app.include_router(dtr_routes)
 
 
 # Root API to check if the server is up

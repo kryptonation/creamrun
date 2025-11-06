@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 from app.core.celery_app import app
@@ -74,8 +74,16 @@ class CurbApiService:
             raise CurbApiError("Invalid XML response from CURB API.") from e
 
 
-    def get_trips_log10(self, from_date: str, to_date: str) -> str:
-        """Fetches trip data from the GET_TRIPS_LOG10 endpoint."""
+    def get_trips_log10(self, from_date: str, to_date: str, driver_id: str = "", cab_number: str = "") -> str:
+        """
+        Fetches trip data from the GET_TRIPS_LOG10 endpoint.
+        
+        Args:
+            from_date: Start date in YYYY-MM-DD format
+            to_date: End date in YYYY-MM-DD format
+            driver_id: Optional driver ID filter (TLC License)
+            cab_number: Optional medallion number filter
+        """
         payload = f"""<?xml version="1.0" encoding="utf-8"?>
         <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
           <soap:Body>
@@ -83,8 +91,8 @@ class CurbApiService:
               <UserId>{self.username}</UserId>
               <Password>{self.password}</Password>
               <Merchant>{self.merchant}</Merchant>
-              <DRIVERID></DRIVERID>
-              <CABNUMBER></CABNUMBER>
+              <DRIVERID>{driver_id}</DRIVERID>
+              <CABNUMBER>{cab_number}</CABNUMBER>
               <DATE_FROM>{from_date}</DATE_FROM>
               <DATE_TO>{to_date}</DATE_TO>
               <RECON_STAT>-1</RECON_STAT>
@@ -93,8 +101,15 @@ class CurbApiService:
         </soap:Envelope>"""
         return self._make_soap_request("GET_TRIPS_LOG10", payload)
 
-    def get_trans_by_date_cab12(self, from_date: str, to_date: str) -> str:
-        """Fetches card transaction data from the Get_Trans_By_Date_Cab12 endpoint."""
+    def get_trans_by_date_cab12(self, from_date: str, to_date: str, cab_number: str = "") -> str:
+        """
+        Fetches card transaction data from the Get_Trans_By_Date_Cab12 endpoint.
+        
+        Args:
+            from_date: Start date in YYYY-MM-DD format
+            to_date: End date in YYYY-MM-DD format
+            cab_number: Optional medallion number filter
+        """
         payload = f"""<?xml version="1.0" encoding="utf-8"?>
         <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
           <soap:Body>
@@ -104,7 +119,7 @@ class CurbApiService:
               <Merchant>{self.merchant}</Merchant>
               <fromDateTime>{from_date} 00:00:00</fromDateTime>
               <ToDateTime>{to_date} 23:59:59</ToDateTime>
-              <CabNumber></CabNumber>
+              <CabNumber>{cab_number}</CabNumber>
               <TranType>ALL</TranType>
             </Get_Trans_By_Date_Cab12>
           </soap:Body>
@@ -326,6 +341,212 @@ class CurbService:
             self.db.rollback()
             logger.error("Failed during CURB data import and mapping: %s", e, exc_info=True)
             raise
+
+    def import_driver_data(self, driver_id: Optional[str], tlc_license_no: Optional[str], 
+                          start_date: date, end_date: date) -> Dict:
+        """
+        Import CURB data for a specific driver within a date range.
+        
+        Args:
+            driver_id: Internal driver ID (optional)
+            tlc_license_no: TLC License Number (optional) - at least one must be provided
+            start_date: Start date for import
+            end_date: End date for import
+        """
+        try:
+            # Determine which TLC license to use for CURB API
+            if tlc_license_no:
+                curb_driver_id = tlc_license_no
+            elif driver_id:
+                # Look up TLC license from internal driver ID
+                driver = driver_service.get_drivers(self.db, driver_id=driver_id)
+                if not driver or not driver.tlc_license_number:
+                    raise ValueError(f"Driver {driver_id} not found or has no TLC license")
+                curb_driver_id = driver.tlc_license_number
+            else:
+                raise ValueError("Either driver_id or tlc_license_no must be provided")
+
+            date_format = "%m/%d/%Y"
+            from_date_str = start_date.strftime(date_format)
+            to_date_str = end_date.strftime(date_format)
+
+            logger.info(f"Importing CURB data for driver {curb_driver_id} from {from_date_str} to {to_date_str}")
+
+            # Fetch data from CURB API with driver filter
+            trips_log_xml = self.api_service.get_trips_log10(from_date_str, to_date_str, driver_id=curb_driver_id)
+            trans_xml = self.api_service.get_trans_by_date_cab12(from_date_str, to_date_str)
+            
+            # Parse and combine (trans data might not support driver filtering, so filter it manually)
+            normalized_trips = self._parse_and_normalize_trips(trips_log_xml)
+            normalized_trans = self._parse_and_normalize_trips(trans_xml)
+            
+            # Filter trans data to only include trips for this driver
+            filtered_trans = [t for t in normalized_trans if t.get('curb_driver_id') == curb_driver_id]
+            
+            # Combine and deduplicate
+            combined_data = {trip['curb_trip_id']: trip for trip in normalized_trips}
+            combined_data.update({tran['curb_trip_id']: tran for tran in filtered_trans})
+            
+            all_trips_data = list(combined_data.values())
+            logger.info(f"Fetched {len(all_trips_data)} records for driver {curb_driver_id}")
+
+            return self._process_and_store_trips(all_trips_data, f"driver {curb_driver_id}")
+
+        except (CurbApiError, SQLAlchemyError, ValueError) as e:
+            self.db.rollback()
+            logger.error(f"Failed to import data for driver {curb_driver_id}: %s", e, exc_info=True)
+            raise
+
+    def import_medallion_data(self, medallion_number: str, start_date: date, end_date: date) -> Dict:
+        """
+        Import CURB data for a specific medallion within a date range.
+        """
+        try:
+            date_format = "%m/%d/%Y"
+            from_date_str = start_date.strftime(date_format)
+            to_date_str = end_date.strftime(date_format)
+
+            logger.info(f"Importing CURB data for medallion {medallion_number} from {from_date_str} to {to_date_str}")
+
+            # Fetch data from CURB API with medallion filter
+            trips_log_xml = self.api_service.get_trips_log10(from_date_str, to_date_str, cab_number=medallion_number)
+            trans_xml = self.api_service.get_trans_by_date_cab12(from_date_str, to_date_str, cab_number=medallion_number)
+            
+            # Parse and combine
+            normalized_trips = self._parse_and_normalize_trips(trips_log_xml)
+            normalized_trans = self._parse_and_normalize_trips(trans_xml)
+            
+            # Combine and deduplicate
+            combined_data = {trip['curb_trip_id']: trip for trip in normalized_trips}
+            combined_data.update({tran['curb_trip_id']: tran for tran in normalized_trans})
+            
+            all_trips_data = list(combined_data.values())
+            logger.info(f"Fetched {len(all_trips_data)} records for medallion {medallion_number}")
+
+            return self._process_and_store_trips(all_trips_data, f"medallion {medallion_number}")
+
+        except (CurbApiError, SQLAlchemyError) as e:
+            self.db.rollback()
+            logger.error(f"Failed to import data for medallion {medallion_number}: %s", e, exc_info=True)
+            raise
+
+    def import_filtered_data(self, start_date: date, end_date: date, 
+                           driver_ids: Optional[List[str]] = None,
+                           medallion_numbers: Optional[List[str]] = None) -> Dict:
+        """
+        Import CURB data for specific date range with optional driver/medallion filters.
+        For multiple filters, this fetches all data and filters locally since CURB API
+        doesn't support multiple simultaneous filters.
+        """
+        try:
+            date_format = "%m/%d/%Y"
+            from_date_str = start_date.strftime(date_format)
+            to_date_str = end_date.strftime(date_format)
+
+            filter_desc = f"date range {from_date_str} to {to_date_str}"
+            if driver_ids:
+                filter_desc += f", drivers: {', '.join(driver_ids)}"
+            if medallion_numbers:
+                filter_desc += f", medallions: {', '.join(medallion_numbers)}"
+
+            logger.info(f"Importing CURB data for {filter_desc}")
+
+            # For multiple filters, fetch all data and filter locally
+            trips_log_xml = self.api_service.get_trips_log10(from_date_str, to_date_str)
+            trans_xml = self.api_service.get_trans_by_date_cab12(from_date_str, to_date_str)
+            
+            # Parse and combine
+            normalized_trips = self._parse_and_normalize_trips(trips_log_xml)
+            normalized_trans = self._parse_and_normalize_trips(trans_xml)
+            
+            # Apply local filters
+            if driver_ids:
+                normalized_trips = [t for t in normalized_trips if t.get('curb_driver_id') in driver_ids]
+                normalized_trans = [t for t in normalized_trans if t.get('curb_driver_id') in driver_ids]
+            
+            if medallion_numbers:
+                normalized_trips = [t for t in normalized_trips if t.get('curb_cab_number') in medallion_numbers]
+                normalized_trans = [t for t in normalized_trans if t.get('curb_cab_number') in medallion_numbers]
+            
+            # Combine and deduplicate
+            combined_data = {trip['curb_trip_id']: trip for trip in normalized_trips}
+            combined_data.update({tran['curb_trip_id']: tran for tran in normalized_trans})
+            
+            all_trips_data = list(combined_data.values())
+            logger.info(f"Fetched {len(all_trips_data)} records matching filters")
+
+            return self._process_and_store_trips(all_trips_data, filter_desc)
+
+        except (CurbApiError, SQLAlchemyError) as e:
+            self.db.rollback()
+            logger.error("Failed to import filtered data: %s", e, exc_info=True)
+            raise
+
+    def _process_and_store_trips(self, trips_data: List[Dict], description: str) -> Dict:
+        """
+        Common helper method to process and store trip data with entity mapping.
+        """
+        if not trips_data:
+            logger.info(f"No trips data to process for {description}")
+            return {
+                "total_records": 0,
+                "mapped_records": 0,
+                "mapping_errors": 0,
+                "newly_inserted": 0,
+                "updated": 0,
+            }
+
+        # Map to internal entities
+        mapped_trips = []
+        mapping_errors = 0
+        
+        for trip_data in trips_data:
+            try:
+                # Find driver by TLC license (curb_driver_id)
+                driver = driver_service.get_drivers(self.db, tlc_license_number=trip_data["curb_driver_id"])
+                if not driver:
+                    raise DataMappingError("TLC License", trip_data["curb_driver_id"])
+                
+                # Find medallion by cab number
+                medallion = medallion_service.get_medallion(self.db, medallion_number=trip_data["curb_cab_number"])
+                if not medallion:
+                    raise DataMappingError("Medallion Number", trip_data["curb_cab_number"])
+
+                # Find the active lease for this driver and medallion on the trip date
+                active_lease = lease_service.get_lease(
+                    self.db,
+                    driver_id=driver.driver_id,
+                    medallion_number=medallion.medallion_number,
+                    status="Active",
+                )
+                if not active_lease:
+                    raise DataMappingError("Active Lease", f"Driver: {driver.driver_id}, Medallion: {medallion.medallion_number}")
+
+                trip_data["driver_id"] = driver.id
+                trip_data["medallion_id"] = medallion.id
+                trip_data["lease_id"] = active_lease.id
+                trip_data["vehicle_id"] = active_lease.vehicle_id
+                
+                mapped_trips.append(trip_data)
+
+            except DataMappingError as e:
+                logger.warning(str(e))
+                mapping_errors += 1
+                continue
+        
+        logger.info(f"Successfully mapped {len(mapped_trips)} trips for {description}")
+
+        # Bulk insert/update into the database
+        inserted, updated = self.repo.bulk_insert_or_update(mapped_trips)
+        self.db.commit()
+
+        return {
+            "total_records": len(trips_data),
+            "mapped_records": len(mapped_trips),
+            "mapping_errors": mapping_errors,
+            "newly_inserted": inserted,
+            "updated": updated,
+        }
         
     def reconcile_unreconciled_trips(self):
         """
@@ -417,13 +638,13 @@ class CurbService:
                 
                 posted_count += 1
                 total_posted_amount += total_earnings
-            except Exception as e:
+            except (ValueError, SQLAlchemyError) as e:
                 logger.error(f"Failed to post earnings for driver {driver_id}: {e}", exc_info=True)
                 # Continue to other drivers, do not rollback successful postings
         
         # After processing all drivers, update the status of the trips that were included
         for trip in trips_to_post:
-             if trip.driver_id in earnings_by_driver:
+            if trip.driver_id in earnings_by_driver:
                 self.repo.update_trip_status(trip.id, CurbTripStatus.POSTED_TO_LEDGER)
 
         self.db.commit()
@@ -479,5 +700,100 @@ def post_earnings_to_ledger_task():
         start_date = end_date - timedelta(days=6)
         
         return curb_service.post_earnings_to_ledger(start_date, end_date, ledger_service)
+    finally:
+        db.close()
+
+
+@app.task(name="curb.import_driver_data")
+def import_driver_data_task(driver_id: Optional[str], tlc_license_no: Optional[str], 
+                           start_date_str: str, end_date_str: str):
+    """
+    Celery task to import CURB data for a specific driver within a date range.
+    
+    Args:
+        driver_id: Internal driver ID (optional)
+        tlc_license_no: TLC License Number (optional)
+        start_date_str: Start date in YYYY-MM-DD format
+        end_date_str: End date in YYYY-MM-DD format
+    """
+    logger.info(f"Executing CURB driver import task for driver_id={driver_id}, tlc_license={tlc_license_no}")
+    db: Session = next(get_db())
+    try:
+        curb_service = CurbService(db)
+        
+        # Parse date strings
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        
+        result = curb_service.import_driver_data(driver_id, tlc_license_no, start_date, end_date)
+        
+        # Follow up with reconciliation
+        reco_result = curb_service.reconcile_unreconciled_trips()
+        result.update(reco_result)
+        
+        return result
+    finally:
+        db.close()
+
+
+@app.task(name="curb.import_medallion_data")
+def import_medallion_data_task(medallion_number: str, start_date_str: str, end_date_str: str):
+    """
+    Celery task to import CURB data for a specific medallion within a date range.
+    
+    Args:
+        medallion_number: Medallion number to import data for
+        start_date_str: Start date in YYYY-MM-DD format
+        end_date_str: End date in YYYY-MM-DD format
+    """
+    logger.info(f"Executing CURB medallion import task for medallion={medallion_number}")
+    db: Session = next(get_db())
+    try:
+        curb_service = CurbService(db)
+        
+        # Parse date strings
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        
+        result = curb_service.import_medallion_data(medallion_number, start_date, end_date)
+        
+        # Follow up with reconciliation
+        reco_result = curb_service.reconcile_unreconciled_trips()
+        result.update(reco_result)
+        
+        return result
+    finally:
+        db.close()
+
+
+@app.task(name="curb.import_filtered_data")
+def import_filtered_data_task(start_date_str: str, end_date_str: str,
+                             driver_ids: Optional[List[str]] = None,
+                             medallion_numbers: Optional[List[str]] = None):
+    """
+    Celery task to import CURB data for a specific date range with optional filters.
+    
+    Args:
+        start_date_str: Start date in YYYY-MM-DD format
+        end_date_str: End date in YYYY-MM-DD format
+        driver_ids: Optional list of driver IDs to filter
+        medallion_numbers: Optional list of medallion numbers to filter
+    """
+    logger.info(f"Executing CURB filtered import task for date range {start_date_str} to {end_date_str}")
+    db: Session = next(get_db())
+    try:
+        curb_service = CurbService(db)
+        
+        # Parse date strings
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        
+        result = curb_service.import_filtered_data(start_date, end_date, driver_ids, medallion_numbers)
+        
+        # Follow up with reconciliation
+        reco_result = curb_service.reconcile_unreconciled_trips()
+        result.update(reco_result)
+        
+        return result
     finally:
         db.close()

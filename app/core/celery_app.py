@@ -10,9 +10,6 @@ It integrates with the existing worker configuration and includes all task modul
 # Third party imports
 from celery import Celery
 
-# Local imports
-from app.core.config import settings
-
 # Create Celery Instance
 app = Celery("BAT_scheduler")
 
@@ -24,8 +21,15 @@ app.config_from_object("app.worker.config")
 app.autodiscover_tasks([
     "app.notifications",
     "app.worker",
-    "app.curb",  # Include curb tasks
-    "app.bpm.sla",  # Include BPM SLA tasks
+    "app.curb",
+    "app.bpm.sla",
+    "app.driver_payments",
+    "app.leases", 
+    "app.pvb",
+    "app.ezpass",
+    "app.loans",
+    "app.repairs",
+    "app.tlc",
 ])
 
 if __name__ == "__main__":

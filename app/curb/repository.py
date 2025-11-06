@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlalchemy.orm import Session, joinedload
 
 from app.curb.models import CurbTrip, CurbTripStatus
@@ -137,8 +137,7 @@ class CurbRepository:
             query = query.filter(CurbTrip.end_time < (end_date + timedelta(days=1)))
 
         # Determine total items before pagination
-        total_items_query = query.with_entities(func.count(CurbTrip.id))
-        total_items = total_items_query.scalar()
+        total_items = query.count()
 
         # Apply sorting
         sort_column_map = {
@@ -161,3 +160,87 @@ class CurbRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+
+    def get_trips_by_driver_and_date_range(
+        self, driver_id: Optional[str], tlc_license_no: Optional[str], 
+        start_date: date, end_date: date
+    ) -> List[CurbTrip]:
+        """
+        Get all trips for a specific driver within a date range.
+        Can search by either internal driver_id or TLC license number.
+        """
+        query = self.db.query(CurbTrip)
+        
+        if driver_id:
+            # Join with driver table to filter by internal driver_id
+            query = query.join(Driver, CurbTrip.driver_id == Driver.id).filter(Driver.driver_id == driver_id)
+        elif tlc_license_no:
+            # Filter by TLC license (curb_driver_id field)
+            query = query.filter(CurbTrip.curb_driver_id == tlc_license_no)
+        else:
+            return []
+            
+        query = query.filter(
+            CurbTrip.start_time >= start_date,
+            CurbTrip.end_time < (end_date + timedelta(days=1))
+        )
+        
+        return query.all()
+
+    def get_trips_by_medallion_and_date_range(
+        self, medallion_number: str, start_date: date, end_date: date
+    ) -> List[CurbTrip]:
+        """
+        Get all trips for a specific medallion within a date range.
+        """
+        return (
+            self.db.query(CurbTrip)
+            .filter(
+                CurbTrip.curb_cab_number == medallion_number,
+                CurbTrip.start_time >= start_date,
+                CurbTrip.end_time < (end_date + timedelta(days=1))
+            )
+            .all()
+        )
+
+    def get_existing_trip_ids_for_filters(
+        self, start_date: date, end_date: date,
+        driver_ids: Optional[List[str]] = None,
+        medallion_numbers: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        Get existing CURB trip IDs for given filters to avoid re-importing.
+        """
+        query = self.db.query(CurbTrip.curb_trip_id).filter(
+            CurbTrip.start_time >= start_date,
+            CurbTrip.end_time < (end_date + timedelta(days=1))
+        )
+        
+        if driver_ids:
+            query = query.filter(CurbTrip.curb_driver_id.in_(driver_ids))
+        
+        if medallion_numbers:
+            query = query.filter(CurbTrip.curb_cab_number.in_(medallion_numbers))
+            
+        return [row[0] for row in query.all()]
+
+    def count_trips_by_status_and_filters(
+        self, status: CurbTripStatus, start_date: date, end_date: date,
+        driver_id: Optional[str] = None, medallion_number: Optional[str] = None
+    ) -> int:
+        """
+        Count trips by status with optional filters for monitoring/reporting.
+        """
+        query = self.db.query(CurbTrip).filter(
+            CurbTrip.status == status,
+            CurbTrip.start_time >= start_date,
+            CurbTrip.end_time < (end_date + timedelta(days=1))
+        )
+        
+        if driver_id:
+            query = query.filter(CurbTrip.curb_driver_id == driver_id)
+            
+        if medallion_number:
+            query = query.filter(CurbTrip.curb_cab_number == medallion_number)
+            
+        return query.count()

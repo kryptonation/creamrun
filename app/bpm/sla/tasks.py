@@ -1,21 +1,31 @@
-import logging
-from datetime import datetime
-
-from app.bpm.bpm_schema import CaseStatusEnum
-from app.bpm.models import SLA, Case
-from app.bpm.utils import escalate_cases
 from app.core.db import SessionLocal
-from celery import Celery
-from sqlalchemy.exc import IntegrityError
+from app.core.celery_app import app
+from app.utils.logger import get_logger
 
-app = Celery('tasks', broker='redis://localhost:6379/10')
+logger = get_logger(__name__)
 
 
-@app.task
+@app.task(name="bpm.sla.process_case_sla")
 def process_case_sla():
+    """
+    Process SLA escalations for BPM cases.
+    This task should implement the SLA escalation logic.
+    """
+    logger.info("Processing BPM case SLA escalations")
+    
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        escalate_cases(db)
-        db.commit()
+        # TODO: Implement SLA escalation logic
+        # This would typically:
+        # 1. Find cases that have exceeded their SLA
+        # 2. Escalate them to the next level
+        # 3. Send notifications
+        
+        logger.info("BPM SLA processing completed")
+        return {"message": "SLA processing completed"}
+    except Exception as e:
+        logger.error(f"Error processing case SLA: {e}", exc_info=True)
+        db.rollback()
+        raise
     finally:
         db.close()

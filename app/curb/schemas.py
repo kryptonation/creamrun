@@ -4,7 +4,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
 from app.curb.models import PaymentType
 
@@ -20,7 +20,7 @@ class CurbTripResponse(BaseModel):
     vehicle_plate: Optional[str] = Field(None, alias="plate")
     medallion_no: Optional[str] = Field(None, alias="curb_cab_number")
     total_amount: Decimal
-    payment_mode: PaymentType
+    payment_mode: PaymentType = Field(..., alias="payment_type")
 
     # Optional fields for column selection
     trip_start_date: Optional[datetime] = Field(None, alias="start_time")
@@ -63,16 +63,18 @@ class CurbDriverImportRequest(BaseModel):
     
     @field_validator('end_date')
     @classmethod
-    def validate_date_range(cls, v, values):
-        if 'start_date' in values and v < values['start_date']:
+    def validate_date_range(cls, v, info: ValidationInfo):
+        data = info.data if hasattr(info, 'data') else {}
+        if 'start_date' in data and v < data['start_date']:
             raise ValueError('end_date must be greater than or equal to start_date')
         return v
     
     @field_validator('tlc_license_no')
     @classmethod
-    def validate_driver_identifier(cls, v, values):
+    def validate_driver_identifier(cls, v, info: ValidationInfo):
         # At least one driver identifier must be provided
-        driver_id = values.get('driver_id')
+        data = info.data if hasattr(info, 'data') else {}
+        driver_id = data.get('driver_id')
         if not v and not driver_id:
             raise ValueError('Either driver_id or tlc_license_no must be provided')
         return v
@@ -89,8 +91,9 @@ class CurbMedallionImportRequest(BaseModel):
     
     @field_validator('end_date')
     @classmethod
-    def validate_date_range(cls, v, values):
-        if 'start_date' in values and v < values['start_date']:
+    def validate_date_range(cls, v, info: ValidationInfo):
+        data = info.data if hasattr(info, 'data') else {}
+        if 'start_date' in data and v < data['start_date']:
             raise ValueError('end_date must be greater than or equal to start_date')
         return v
 
@@ -107,8 +110,9 @@ class CurbDateRangeImportRequest(BaseModel):
     
     @field_validator('end_date')
     @classmethod
-    def validate_date_range(cls, v, values):
-        if 'start_date' in values and v < values['start_date']:
+    def validate_date_range(cls, v, info: ValidationInfo):
+        data = info.data if hasattr(info, 'data') else {}
+        if 'start_date' in data and v < data['start_date']:
             raise ValueError('end_date must be greater than or equal to start_date')
         return v
 

@@ -288,6 +288,16 @@ class Driver(Base, AuditMixin):
     lease_drivers = relationship("LeaseDriver", back_populates="driver")
 
     driver_notes = relationship("DriverNote", back_populates="driver")
+    
+    transaction_receipts = relationship(
+        "DriverTransactionReceipt", 
+        back_populates="driver"
+    )
+    
+    dtrs = relationship(
+        "DTR", 
+        back_populates="driver"
+    )
 
     def to_dict(self):
         """Convert the Driver model to a dictionary"""

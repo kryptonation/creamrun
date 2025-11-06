@@ -406,6 +406,14 @@ class Lease(Base, AuditMixin):
     lease_notes: Mapped[list["LeaseNote"]] = relationship(
             "LeaseNote", back_populates="lease"
         )
+    
+    transaction_receipts: Mapped[list["DriverTransactionReceipt"]] = relationship(
+        back_populates="lease"
+    )
+    
+    dtrs: Mapped[list["DTR"]] = relationship(
+        back_populates="lease"
+    )
 
     def to_dict(self):
         """Convert the Lease model to a dictionary"""

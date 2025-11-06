@@ -1,0 +1,1880 @@
+{
+  "info": {
+    "name": "Big Apple Taxi Fleet Management System",
+    "description": "Complete API collection for BAT Connect system with JWT authentication and all module endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "bat-fleet-mgmt-v1",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Check if access token exists and is valid",
+          "const token = pm.collectionVariables.get('access_token');",
+          "const tokenExpiry = pm.collectionVariables.get('token_expiry');",
+          "",
+          "if (!token || !tokenExpiry || Date.now() >= tokenExpiry) {",
+          "    console.log('Token expired or missing, please login');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "token_expiry",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Parse response",
+                  "const jsonData = pm.response.json();",
+                  "",
+                  "// Save tokens to collection variables",
+                  "if (jsonData.access_token) {",
+                  "    pm.collectionVariables.set('access_token', jsonData.access_token);",
+                  "    console.log('Access token saved:', jsonData.access_token.substring(0, 20) + '...');",
+                  "}",
+                  "",
+                  "if (jsonData.refresh_token) {",
+                  "    pm.collectionVariables.set('refresh_token', jsonData.refresh_token);",
+                  "    console.log('Refresh token saved');",
+                  "}",
+                  "",
+                  "// Calculate and save token expiry (assuming 60 minutes)",
+                  "const expiryTime = Date.now() + (60 * 60 * 1000);",
+                  "pm.collectionVariables.set('token_expiry', expiryTime);",
+                  "",
+                  "// Verify response",
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Access token is present', function() {",
+                  "    pm.expect(jsonData.access_token).to.exist;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin@bigappletaxi.com\",\n  \"password\": \"your_password\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticate user and receive JWT tokens. Tokens are automatically saved to collection variables."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const jsonData = pm.response.json();",
+                  "",
+                  "if (jsonData.access_token) {",
+                  "    pm.collectionVariables.set('access_token', jsonData.access_token);",
+                  "    const expiryTime = Date.now() + (60 * 60 * 1000);",
+                  "    pm.collectionVariables.set('token_expiry', expiryTime);",
+                  "    console.log('Access token refreshed');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1. CURB Module",
+      "item": [
+        {
+          "name": "Fetch Trips",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_date\": \"2025-01-05\",\n  \"end_date\": \"2025-01-11\",\n  \"reconcile\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/curb/fetch-trips",
+              "host": ["{{base_url}}"],
+              "path": ["curb", "fetch-trips"]
+            },
+            "description": "Fetch trips from CURB API for specified date range"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Trips",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/curb/trips?page=1&per_page=50&status=POSTED_TO_LEDGER",
+              "host": ["{{base_url}}"],
+              "path": ["curb", "trips"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "POSTED_TO_LEDGER"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Trip by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/curb/trips/CURB-123456",
+              "host": ["{{base_url}}"],
+              "path": ["curb", "trips", "CURB-123456"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reconcile Trips",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"trip_ids\": [\"CURB-123456\", \"CURB-123457\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/curb/reconcile",
+              "host": ["{{base_url}}"],
+              "path": ["curb", "reconcile"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. EZPass Module",
+      "item": [
+        {
+          "name": "Upload CSV",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/trips/ezpass/upload-csv",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "ezpass", "upload-csv"]
+            },
+            "description": "Upload EZPass CSV file for processing"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/ezpass/transactions?page=1&per_page=50&status=ASSOCIATED",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "ezpass", "transactions"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "ASSOCIATED"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transaction by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/ezpass/transactions/1",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "ezpass", "transactions", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Association",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_ids\": [1, 2, 3]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/trips/ezpass/retry-association",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "ezpass", "retry-association"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. PVB Module",
+      "item": [
+        {
+          "name": "Upload CSV",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/trips/pvb/upload-csv",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pvb", "upload-csv"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Case (Manual Entry)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initiated_by\": \"FINANCE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/trips/pvb/create-case",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pvb", "create-case"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Violations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/pvb/violations?page=1&per_page=50&status=POSTED_TO_LEDGER",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pvb", "violations"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "POSTED_TO_LEDGER"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Violation by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/trips/pvb/violations/1",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pvb", "violations", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Violation",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plate\": \"ABC1234\",\n  \"state\": \"NY\",\n  \"type\": \"PAS\",\n  \"summons\": \"1234567890\",\n  \"issue_date\": \"2025-01-10\",\n  \"issue_time\": \"1430P\",\n  \"fine\": 115.00,\n  \"penalty\": 0.00,\n  \"interest\": 0.00,\n  \"reduction\": 0.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/trips/pvb/violations/1",
+              "host": ["{{base_url}}"],
+              "path": ["trips", "pvb", "violations", "1"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Driver Loan Module",
+      "item": [
+        {
+          "name": "Create Loan Case",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initiated_by\": \"FINANCE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/driver-loans/create-case",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "driver-loans", "create-case"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"principal_amount\": 1200.00,\n  \"annual_interest_rate\": 10.0,\n  \"loan_date\": \"2025-01-10\",\n  \"start_week\": \"2025-01-12\",\n  \"purpose\": \"Personal loan for driver\",\n  \"notes\": \"Trusted driver, long-term relationship\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/driver-loans",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "driver-loans"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Loans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/driver-loans?page=1&per_page=50&status=OPEN",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "driver-loans"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "OPEN"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Loan by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/driver-loans/DLNY2025-001",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "driver-loans", "DLNY2025-001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export Loans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/driver-loans/export?format=excel",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "driver-loans", "export"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "excel"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Interim Payments Module",
+      "item": [
+        {
+          "name": "Create Interim Payment Case",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initiated_by\": \"FRONT_DESK\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/interim-payments/create-case",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "interim-payments", "create-case"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Interim Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"payment_amount\": 500.00,\n  \"payment_method\": \"CASH\",\n  \"payment_date\": \"2025-01-15T10:30:00Z\",\n  \"allocation_category\": \"REPAIR\",\n  \"notes\": \"Cash payment for repair balance\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/interim-payments",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "interim-payments"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Interim Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/interim-payments?page=1&per_page=50",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "interim-payments"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Interim Payment by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/interim-payments/1",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "interim-payments", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Allocate Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_id\": 1,\n  \"allocations\": [\n    {\n      \"category\": \"REPAIR\",\n      \"posting_id\": \"uuid-posting-1\",\n      \"amount\": 300.00\n    },\n    {\n      \"category\": \"EZPASS\",\n      \"posting_id\": \"uuid-posting-2\",\n      \"amount\": 200.00\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/interim-payments/allocate",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "interim-payments", "allocate"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Miscellaneous Charges Module",
+      "item": [
+        {
+          "name": "Create Misc Charge",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"category\": \"LOST_KEY\",\n  \"description\": \"Replacement key cost\",\n  \"amount\": 75.00,\n  \"charge_date\": \"2025-01-15\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Misc Charges",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses?page=1&per_page=50&status=POSTED",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "POSTED"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Misc Charge by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses/1",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Misc Charge",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\",\n  \"amount\": 80.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses/1",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Misc Charge",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses/1",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post to Ledger",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/misc-expenses/1/post-to-ledger",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "misc-expenses", "1", "post-to-ledger"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Vehicle Repairs Module",
+      "item": [
+        {
+          "name": "Create Repair Case",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initiated_by\": \"FINANCE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/repairs/create-case",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs", "create-case"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Repair Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"case_no\": \"CRREPAIR-2025-001\",\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"vehicle_id\": 789,\n  \"invoice_number\": \"INV-2025-001\",\n  \"invoice_date\": \"2025-01-10\",\n  \"workshop_type\": \"EXTERNAL\",\n  \"total_amount\": 1200.00,\n  \"repair_description\": \"Engine replacement\",\n  \"start_week\": \"CURRENT\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/repairs",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Repairs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/repairs?page=1&per_page=50&status=OPEN",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "OPEN"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Repair by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/repairs/RPR-2025-00001",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs", "RPR-2025-00001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Repair Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/repairs/RPR-2025-00001/status",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs", "RPR-2025-00001", "status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export Repairs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/repairs/export?format=excel",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "repairs", "export"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "excel"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. TLC Violations Module",
+      "item": [
+        {
+          "name": "Upload Ticket Scan",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/tlc-tickets/upload",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "tlc-tickets", "upload"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create TLC Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"summons_no\": \"40470\",\n  \"plate\": \"ABC1234\",\n  \"state\": \"NY\",\n  \"violation_type\": \"FI\",\n  \"issue_date\": \"2025-01-08\",\n  \"issue_time\": \"14:30\",\n  \"amount\": 100.00,\n  \"service_fee\": 10.00,\n  \"disposition\": \"PAID\",\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"medallion_id\": 789,\n  \"attachment_document_id\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/tlc-tickets",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "tlc-tickets"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All TLC Tickets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/tlc-tickets?page=1&per_page=50&disposition=PAID",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "tlc-tickets"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "disposition",
+                  "value": "PAID"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get TLC Ticket by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payments/tlc-tickets/1",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "tlc-tickets", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Disposition",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"disposition\": \"REDUCED\",\n  \"new_amount\": 50.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/payments/tlc-tickets/1/disposition",
+              "host": ["{{base_url}}"],
+              "path": ["payments", "tlc-tickets", "1", "disposition"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Centralized Ledger",
+      "item": [
+        {
+          "name": "Create Obligation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"LEASE\",\n  \"amount\": 500.00,\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"vehicle_id\": 789,\n  \"medallion_id\": 101,\n  \"period_start\": \"2025-01-05\",\n  \"period_end\": \"2025-01-11\",\n  \"due_date\": \"2025-01-11\",\n  \"description\": \"Weekly lease fee\",\n  \"source_type\": \"lease\",\n  \"source_id\": \"LEASE-2025-001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/ledger/obligations",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "obligations"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Obligations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/obligations?page=1&per_page=50&category=LEASE",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "obligations"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "category",
+                  "value": "LEASE"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Obligation by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/obligations/uuid-posting-id",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "obligations", "uuid-posting-id"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Apply Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"posting_id\": \"uuid-posting-id\",\n  \"payment_amount\": 500.00,\n  \"payment_date\": \"2025-01-15T10:00:00Z\",\n  \"description\": \"Payment from CURB earnings\",\n  \"source_type\": \"curb\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/ledger/payments",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "payments"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Apply Payment with Hierarchy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"driver_id\": 123,\n  \"lease_id\": 456,\n  \"payment_amount\": 1200.00,\n  \"payment_date\": \"2025-01-15T05:00:00Z\",\n  \"period_start\": \"2025-01-05\",\n  \"period_end\": \"2025-01-11\",\n  \"source_type\": \"curb\",\n  \"description\": \"Weekly CC earnings\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/ledger/payments/apply-hierarchy",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "payments", "apply-hierarchy"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/balances?status=OPEN",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "balances"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "OPEN"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balances by Driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/balances/driver/123",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "balances", "driver", "123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balances by Lease",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/balances/lease/456",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "balances", "lease", "456"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reconciliation Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/reconciliation",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "reconciliation"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Period Reconciliation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ledger/reconciliation/period?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["ledger", "reconciliation", "period"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10. DTR Generation",
+      "item": [
+        {
+          "name": "Generate Single DTR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lease_id\": 456,\n  \"driver_id\": 123,\n  \"period_start_date\": \"2025-01-05\",\n  \"period_end_date\": \"2025-01-11\",\n  \"auto_finalize\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dtr/generate",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "generate"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Batch Generate DTRs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"period_start\": \"2025-01-05\",\n  \"period_end\": \"2025-01-11\",\n  \"auto_finalize\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dtr/batch-generate",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "batch-generate"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All DTRs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr?page=1&per_page=50&status=GENERATED",
+              "host": ["{{base_url}}"],
+              "path": ["dtr"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "GENERATED"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get DTR by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/1",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get DTRs by Driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/driver/123",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "driver", "123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get DTRs by Lease",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/lease/456",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "lease", "456"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get DTRs by Period",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/period/2025-01-05/2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "period", "2025-01-05", "2025-01-11"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Finalize DTR",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/1/finalize",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "1", "finalize"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark DTR as Paid",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"ACH\",\n  \"payment_date\": \"2025-01-15T10:00:00Z\",\n  \"ach_batch_number\": \"2501-001\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dtr/1/mark-as-paid",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "1", "mark-as-paid"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Void DTR",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Error in calculation, regenerating\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/dtr/1/void",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "1", "void"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export DTR to PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/1/pdf",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "1", "pdf"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export DTRs to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/export/csv?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "export", "csv"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export DTRs to Excel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dtr/export/excel?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["dtr", "export", "excel"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11. Current Balances",
+      "item": [
+        {
+          "name": "Get Current Week Balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balances by Week",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/week/2025-01-05",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "week", "2025-01-05"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balance by Lease",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/lease/456",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "lease", "456"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Balance by Driver",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/driver/123",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "driver", "123"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Daily Breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/456/daily-breakdown",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "456", "daily-breakdown"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Day Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/456/day/2025-01-08/details",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "456", "day", "2025-01-08", "details"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Balances",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"week_start\": \"2025-01-05\",\n  \"medallion_numbers\": [\"1234\", \"5678\"],\n  \"payment_type\": \"ACH\",\n  \"dtr_status\": \"NOT_GENERATED\",\n  \"min_net_earnings\": -500.00,\n  \"max_net_earnings\": 1000.00\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/current-balances/filter",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "filter"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to Excel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/export/excel",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "export", "excel"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/export/csv",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "export", "csv"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/current-balances/export/pdf",
+              "host": ["{{base_url}}"],
+              "path": ["current-balances", "export", "pdf"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12. Driver Payments",
+      "item": [
+        {
+          "name": "Get All Driver Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments?page=1&per_page=50&status=GENERATED&payment_type=ACH",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "GENERATED"
+                },
+                {
+                  "key": "payment_type",
+                  "value": "ACH"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Payment by Receipt Number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/RCPT-2025-01-00001",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "RCPT-2025-01-00001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Payment Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver-payments/RCPT-2025-01-00001/status",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "RCPT-2025-01-00001", "status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create ACH Batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receipt_numbers\": [\n    \"RCPT-2025-01-00001\",\n    \"RCPT-2025-01-00002\",\n    \"RCPT-2025-01-00003\"\n  ],\n  \"batch_date\": \"2025-01-15\",\n  \"effective_date\": \"2025-01-16\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver-payments/ach-batch/create",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "ach-batch", "create"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get ACH Batch Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/ach-batch/2501-001",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "ach-batch", "2501-001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate NACHA File",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/ach-batch/2501-001/generate-nacha",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "ach-batch", "2501-001", "generate-nacha"]
+            },
+            "description": "Download NACHA formatted file for bank upload"
+          },
+          "response": []
+        },
+        {
+          "name": "Reverse ACH Batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Incorrect payment date - correcting and recreating batch\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver-payments/ach-batch/2501-001/reverse",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "ach-batch", "2501-001", "reverse"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Process Check Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receipt_number\": \"RCPT-2025-01-00004\",\n  \"check_number\": \"1234\",\n  \"payment_date\": \"2025-01-15\",\n  \"notes\": \"Physical check issued\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver-payments/check-payment",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "check-payment"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Check Number",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_number\": \"5678\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/driver-payments/RCPT-2025-01-00004/check-number",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "RCPT-2025-01-00004", "check-number"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/export/csv?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "export", "csv"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to Excel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/export/excel?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "export", "excel"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export to PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/driver-payments/export/pdf?start_date=2025-01-05&end_date=2025-01-11",
+              "host": ["{{base_url}}"],
+              "path": ["driver-payments", "export", "pdf"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-05"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-11"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

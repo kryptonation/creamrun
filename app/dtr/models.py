@@ -231,18 +231,16 @@ class DTR(Base, AuditMixin):
     vehicle = relationship("Vehicle", foreign_keys=[vehicle_id], back_populates="dtrs")
     medallion = relationship("Medallion", foreign_keys=[medallion_id], back_populates="dtrs")
     
-    # Additional driver DTRs
+    # Self-referential relationships for parent/child DTRs
     additional_driver_dtrs = relationship(
         "DTR", 
-        foreign_keys=[parent_dtr_id],
-        remote_side=[id],
-        back_populates="parent_dtr"
+        back_populates="parent_dtr",
+        remote_side=[id]
     )
     parent_dtr = relationship(
         "DTR",
-        foreign_keys=[parent_dtr_id],
-        remote_side=[id],
-        back_populates="additional_driver_dtrs"
+        back_populates="additional_driver_dtrs",
+        remote_side=[parent_dtr_id]
     )
     
     def to_dict(self):

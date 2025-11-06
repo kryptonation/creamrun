@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 
 from app.dtr.models import DTRStatus, PaymentMethod
 
@@ -19,8 +19,9 @@ class DTRGenerationRequest(BaseModel):
     
     @field_validator('period_end_date')
     @classmethod
-    def validate_period(cls, v, values):
-        if 'period_start_date' in values and v < values['period_start_date']:
+    def validate_period(cls, v, info: ValidationInfo):
+        data = info.data if hasattr(info, 'data') else {}
+        if 'period_start_date' in data and v < data['period_start_date']:
             raise ValueError('Period end date must be after start date')
         return v
 

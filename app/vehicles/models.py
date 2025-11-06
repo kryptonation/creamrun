@@ -504,6 +504,11 @@ class Vehicle(Base, AuditMixin):
     medallions = relationship("Medallion", back_populates="vehicle")
 
     vehicle_notes = relationship("VehicleNote", back_populates="vehicle")
+    
+    dtrs = relationship(
+        "DTR", 
+        back_populates="vehicle"
+    )
 
     def to_dict(self):
         """Convert Vehicle object to a dictionary"""

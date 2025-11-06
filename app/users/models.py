@@ -139,8 +139,9 @@ class User(Base, AuditMixin):
     )
     created_audit_trails: Mapped[List["AuditTrail"]] = relationship(
         "AuditTrail",
-        back_populates="user",
+        back_populates="creator",
         foreign_keys="[AuditTrail.created_by]",
+        overlaps="user"
     )
     case_reassignments: Mapped[List["CaseReassignment"]] = relationship(
         back_populates="users",

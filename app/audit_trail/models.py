@@ -33,8 +33,18 @@ class AuditTrail(Base, AuditMixin):
 
     # Relationships
     case = relationship("Case", back_populates="audit_trail")
-    user = relationship(
+    
+    # User who created the record (from AuditMixin)
+    creator = relationship(
         "User",
         back_populates="created_audit_trails",
         foreign_keys="[AuditTrail.created_by]",
+        overlaps="user"
+    )
+    
+    # User who performed the action
+    user = relationship(
+        "User",
+        foreign_keys="[AuditTrail.done_by]",
+        overlaps="creator"
     )

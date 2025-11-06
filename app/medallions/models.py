@@ -291,6 +291,11 @@ class Medallion(Base, AuditMixin):
     )
 
     medallion_notes = relationship("MedallionNote", back_populates="medallion")
+    
+    dtrs = relationship(
+        "DTR", 
+        back_populates="medallion"
+    )
 
     def to_dict(self):
         """Convert the Medallion model to a dictionary"""

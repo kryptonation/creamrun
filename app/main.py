@@ -33,6 +33,7 @@ from app.interim_payments.router import router as interim_payment_routes
 from app.misc_expenses.router import router as misc_expense_routes
 from app.driver_payments.router import router as driver_payments_routes
 from app.dtr.router import router as dtr_routes
+from app.current_balances.router import router as current_balances_routes
 
 
 @asynccontextmanager
@@ -108,6 +109,7 @@ bat_app.include_router(interim_payment_routes)
 bat_app.include_router(misc_expense_routes)
 bat_app.include_router(driver_payments_routes)
 bat_app.include_router(dtr_routes)
+bat_app.include_router(current_balances_routes)
 
 
 # Root API to check if the server is up

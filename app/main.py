@@ -8,6 +8,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.utils.logger import setup_app_logging, get_logger
 from app.bpm.step_info import STEP_REGISTRY, import_bpm_flows
+
+# Import all models to ensure SQLAlchemy class registry is populated
+import app.users.models
+import app.audit_trail.models
+import app.entities.models
+import app.medallions.models
+import app.vehicles.models
+import app.drivers.models
+import app.leases.models
+import app.esign.models
+import app.ledger.models
+import app.curb.models
+import app.ezpass.models
+import app.pvb.models
+import app.repairs.models
+import app.loans.models
+import app.tlc.models
+import app.interim_payments.models
+import app.misc_expenses.models
+import app.driver_payments.models
+import app.dtr.models
+import app.notes.models
+import app.reports.models
+import app.uploads.models
+import app.bpm.models
 # Local application imports - Routes
 from app.users.router import router as user_routes
 from app.uploads.router import router as upload_routes

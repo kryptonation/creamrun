@@ -86,7 +86,7 @@ class CurbTrip(Base, AuditMixin):
     curb_driver_id: Mapped[str] = mapped_column(
         String(100), index=True, comment="The raw driver identifier from CURB."
     )
-    curb_cab_number: Mapped[str] = mapped_column(
+    curb_cab_number: Mapped[Optional[str]] = mapped_column(
         String(100), index=True, comment="The raw cab/medallion number from CURB."
     )
     plate: Mapped[Optional[str]] = mapped_column(

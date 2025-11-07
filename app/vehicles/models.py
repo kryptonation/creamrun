@@ -507,7 +507,8 @@ class Vehicle(Base, AuditMixin):
     
     dtrs = relationship(
         "DTR", 
-        back_populates="vehicle"
+        back_populates="vehicle",
+        viewonly=True
     )
 
     def to_dict(self):

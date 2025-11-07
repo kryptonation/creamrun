@@ -408,11 +408,13 @@ class Lease(Base, AuditMixin):
         )
     
     transaction_receipts: Mapped[list["DriverTransactionReceipt"]] = relationship(
-        back_populates="lease"
+        back_populates="lease",
+        viewonly=True
     )
     
     dtrs: Mapped[list["DTR"]] = relationship(
-        back_populates="lease"
+        back_populates="lease",
+        viewonly=True
     )
 
     def to_dict(self):

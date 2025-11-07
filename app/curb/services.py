@@ -3,7 +3,8 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 import requests
 from app.core.celery_app import app
@@ -26,6 +27,13 @@ from app.medallions.services import medallion_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+@dataclass
+class DriverFetchResult:
+    tlc_license: str
+    success: bool
+    trips_data: List[Dict]
+    error_message: Optional[str] = None
 
 
 class CurbApiService:
@@ -297,25 +305,29 @@ class CurbService:
                     if not driver:
                         raise DataMappingError("TLC License", trip_data["curb_driver_id"])
                     
-                    # Find medallion by cab number
-                    medallion = medallion_service.get_medallion(self.db, medallion_number=trip_data["curb_cab_number"])
-                    if not medallion:
-                        raise DataMappingError("Medallion Number", trip_data["curb_cab_number"])
+                    # Find medallion by cab number (if available)
+                    medallion = None
+                    if trip_data.get("curb_cab_number"):
+                        medallion = medallion_service.get_medallion(self.db, medallion_number=trip_data["curb_cab_number"])
+                        if not medallion:
+                            raise DataMappingError("Medallion Number", trip_data["curb_cab_number"])
 
                     # Find the active lease for this driver and medallion on the trip date
-                    active_lease = lease_service.get_lease(
-                        self.db,
-                        driver_id=driver.driver_id,
-                        medallion_number=medallion.medallion_number,
-                        status= "Active",
-                    )
-                    if not active_lease:
-                        raise DataMappingError("Active Lease", f"Driver: {driver.driver_id}, Medallion: {medallion.medallion_number}")
+                    active_lease = None
+                    if medallion:
+                        active_lease = lease_service.get_lease(
+                            self.db,
+                            driver_id=driver.driver_id,
+                            medallion_number=medallion.medallion_number,
+                            status= "Active",
+                        )
+                        if not active_lease:
+                            raise DataMappingError("Active Lease", f"Driver: {driver.driver_id}, Medallion: {medallion.medallion_number}")
 
                     trip_data["driver_id"] = driver.id
-                    trip_data["medallion_id"] = medallion.id
-                    trip_data["lease_id"] = active_lease.id
-                    trip_data["vehicle_id"] = active_lease.vehicle_id
+                    trip_data["medallion_id"] = medallion.id if medallion else None
+                    trip_data["lease_id"] = active_lease.id if active_lease else None
+                    trip_data["vehicle_id"] = active_lease.vehicle_id if active_lease else None
                     
                     mapped_trips.append(trip_data)
 
@@ -507,25 +519,29 @@ class CurbService:
                 if not driver:
                     raise DataMappingError("TLC License", trip_data["curb_driver_id"])
                 
-                # Find medallion by cab number
-                medallion = medallion_service.get_medallion(self.db, medallion_number=trip_data["curb_cab_number"])
-                if not medallion:
-                    raise DataMappingError("Medallion Number", trip_data["curb_cab_number"])
+                # Find medallion by cab number (if available)
+                medallion = None
+                if trip_data.get("curb_cab_number"):
+                    medallion = medallion_service.get_medallion(self.db, medallion_number=trip_data["curb_cab_number"])
+                    if not medallion:
+                        raise DataMappingError("Medallion Number", trip_data["curb_cab_number"])
 
                 # Find the active lease for this driver and medallion on the trip date
-                active_lease = lease_service.get_lease(
-                    self.db,
-                    driver_id=driver.driver_id,
-                    medallion_number=medallion.medallion_number,
-                    status="Active",
-                )
-                if not active_lease:
-                    raise DataMappingError("Active Lease", f"Driver: {driver.driver_id}, Medallion: {medallion.medallion_number}")
+                active_lease = None
+                if medallion:
+                    active_lease = lease_service.get_lease(
+                        self.db,
+                        driver_id=driver.driver_id,
+                        medallion_number=medallion.medallion_number,
+                        status="Active",
+                    )
+                    if not active_lease:
+                        raise DataMappingError("Active Lease", f"Driver: {driver.driver_id}, Medallion: {medallion.medallion_number}")
 
                 trip_data["driver_id"] = driver.id
-                trip_data["medallion_id"] = medallion.id
-                trip_data["lease_id"] = active_lease.id
-                trip_data["vehicle_id"] = active_lease.vehicle_id
+                trip_data["medallion_id"] = medallion.id if medallion else None
+                trip_data["lease_id"] = active_lease.id if active_lease else None
+                trip_data["vehicle_id"] = active_lease.vehicle_id if active_lease else None
                 
                 mapped_trips.append(trip_data)
 
@@ -651,6 +667,430 @@ class CurbService:
         logger.info(f"Successfully posted earnings for {posted_count} drivers. Total amount: ${total_posted_amount}")
 
         return {"posted_count": posted_count, "total_amount": float(total_posted_amount)}
+    
+    def import_and_map_data_for_active_leases(self, start_date: date, end_date: date) -> Dict:
+        """
+        OPTIMIZED & REFACTORED METHOD with separated fetch and processing phases.
+        
+        Phase 1: Fetch active leases and build mapping
+        Phase 2: Fetch CURB data for all active drivers (with error handling)
+        Phase 3: Process and store all fetched trips
+        
+        Args:
+            start_date: Start date for import
+            end_date: End date for import
+            
+        Returns:
+            Dictionary with comprehensive import statistics
+        """
+        try:
+            date_format = "%m/%d/%Y"
+            from_date_str = start_date.strftime(date_format)
+            to_date_str = end_date.strftime(date_format)
+
+            logger.info(f"=== Starting CURB import for active leases: {from_date_str} to {to_date_str} ===")
+
+            # ========================================
+            # PHASE 1: Build Active Lease Mapping
+            # ========================================
+            logger.info("Phase 1: Building active lease mapping...")
+            
+            tlc_licenses, lease_mapping = self._build_active_lease_mapping()
+            
+            if not tlc_licenses:
+                logger.warning("No drivers with TLC licenses found in active leases")
+                return self._empty_result("No TLC licenses found in active leases")
+
+            logger.info(f"Found {len(tlc_licenses)} unique TLC licenses in active leases")
+            if len(tlc_licenses) <= 10:
+                logger.info(f"TLC Licenses: {', '.join(sorted(tlc_licenses))}")
+            else:
+                logger.info(f"TLC Licenses (sample): {', '.join(sorted(list(tlc_licenses)[:10]))}...")
+
+            # ========================================
+            # PHASE 2: Fetch CURB Data for All Drivers
+            # ========================================
+            logger.info("Phase 2: Fetching CURB data for all active drivers...")
+            
+            fetch_results = self._fetch_curb_data_for_drivers(
+                tlc_licenses, 
+                from_date_str, 
+                to_date_str
+            )
+            
+            # Log fetch summary
+            successful_fetches = sum(1 for r in fetch_results if r.success)
+            failed_fetches = len(fetch_results) - successful_fetches
+            total_trips = sum(len(r.trips_data) for r in fetch_results if r.success)
+            
+            logger.info(f"Fetch phase complete: {successful_fetches}/{len(fetch_results)} drivers successful")
+            logger.info(f"Total trips fetched: {total_trips}")
+            if failed_fetches > 0:
+                logger.warning(f"Failed to fetch data for {failed_fetches} drivers")
+                self._log_fetch_errors(fetch_results)
+
+            # ========================================
+            # PHASE 3: Process and Store All Trips
+            # ========================================
+            logger.info("Phase 3: Processing and storing fetched trips...")
+            
+            # Combine all successfully fetched trips
+            all_trips_data = []
+            for result in fetch_results:
+                if result.success:
+                    all_trips_data.extend(result.trips_data)
+
+            if not all_trips_data:
+                logger.warning("No trips data to process after fetch phase")
+                return {
+                    "total_records": 0,
+                    "mapped_records": 0,
+                    "mapping_errors": 0,
+                    "newly_inserted": 0,
+                    "updated": 0,
+                    "fetch_successful": successful_fetches,
+                    "fetch_failed": failed_fetches,
+                    "message": "No trips fetched from CURB"
+                }
+
+            # Process and store with pre-built lease mapping
+            result = self._process_and_store_trips_optimized(
+                all_trips_data, 
+                lease_mapping, 
+                "daily import for active leases"
+            )
+            
+            # Add fetch statistics to result
+            result["fetch_successful"] = successful_fetches
+            result["fetch_failed"] = failed_fetches
+            result["drivers_processed"] = len(tlc_licenses)
+            
+            logger.info(f"=== CURB import complete: {result} ===")
+            return result
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Critical error during CURB import: {e}", exc_info=True)
+            raise
+
+    def _build_active_lease_mapping(self) -> Tuple[set, Dict[str, List[Dict]]]:
+        """
+        Phase 1: Build mapping of TLC licenses to lease information.
+        
+        Returns:
+            Tuple of (tlc_licenses_set, lease_mapping_dict)
+        """
+        logger.debug("Fetching active leases with driver relationships...")
+        
+        active_leases = lease_service.get_active_leases_with_drivers(self.db)
+
+        if not active_leases:
+            return set(), {}
+
+        tlc_licenses = set()
+        lease_mapping = {}
+        
+        driver_count = 0
+        additional_driver_count = 0
+        
+        for lease in active_leases:
+            for lease_driver in lease.lease_driver:
+                if lease_driver.is_active and lease_driver.driver:
+                    driver = lease_driver.driver
+                    
+                    if not driver.tlc_license or not driver.tlc_license.tlc_license_number:
+                        logger.warning(
+                            f"Driver {driver.driver_id} in lease {lease.lease_id} "
+                            f"has no TLC license number"
+                        )
+                        continue
+                    
+                    tlc_license = driver.tlc_license.tlc_license_number
+                    tlc_licenses.add(tlc_license)
+                    
+                    # Build mapping for O(1) lookup during processing
+                    if tlc_license not in lease_mapping:
+                        lease_mapping[tlc_license] = []
+                    
+                    lease_mapping[tlc_license].append({
+                        'lease_id': lease.id,
+                        'driver_id': driver.id,
+                        'medallion_number': lease.medallion.medallion_number if lease.medallion else None,
+                        'medallion_id': lease.medallion.id if lease.medallion else None,
+                        'vehicle_id': lease.vehicle_id,
+                        'is_additional_driver': lease_driver.is_additional_driver
+                    })
+                    
+                    driver_count += 1
+                    if lease_driver.is_additional_driver:
+                        additional_driver_count += 1
+
+        logger.info(
+            f"Built lease mapping: {len(tlc_licenses)} TLC licenses, "
+            f"{driver_count} total drivers ({additional_driver_count} additional drivers)"
+        )
+        
+        return tlc_licenses, lease_mapping
+
+    def _fetch_curb_data_for_drivers(
+        self, 
+        tlc_licenses: set, 
+        from_date_str: str, 
+        to_date_str: str
+    ) -> List[DriverFetchResult]:
+        """
+        Phase 2: Fetch CURB data for all drivers with comprehensive error handling.
+        
+        This method fetches data for each driver independently, capturing both
+        successes and failures for better observability.
+        
+        Args:
+            tlc_licenses: Set of TLC license numbers to fetch
+            from_date_str: Start date in MM/DD/YYYY format
+            to_date_str: End date in MM/DD/YYYY format
+            
+        Returns:
+            List of DriverFetchResult objects
+        """
+        fetch_results = []
+        
+        logger.info(f"Starting fetch for {len(tlc_licenses)} drivers...")
+        
+        # Track progress
+        processed = 0
+        progress_interval = max(10, len(tlc_licenses) // 10)  # Log every 10% or every 10 drivers
+        
+        for tlc_license in sorted(tlc_licenses):  # Sort for consistent ordering in logs
+            processed += 1
+            
+            # Log progress periodically
+            if processed % progress_interval == 0:
+                logger.info(f"Fetch progress: {processed}/{len(tlc_licenses)} drivers")
+            
+            try:
+                logger.debug(f"Fetching CURB data for TLC: {tlc_license}")
+                
+                # Fetch trips for this specific driver
+                trips_log_xml = self.api_service.get_trips_log10(
+                    from_date_str, 
+                    to_date_str, 
+                    driver_id=tlc_license
+                )
+                
+                # Fetch transactions (may need filtering)
+                trans_xml = self.api_service.get_trans_by_date_cab12(
+                    from_date_str, 
+                    to_date_str
+                )
+                
+                # Parse both sources
+                normalized_trips = self._parse_and_normalize_trips(trips_log_xml)
+                normalized_trans = self._parse_and_normalize_trips(trans_xml)
+                
+                # Filter trans data to only include trips for this driver
+                filtered_trans = [
+                    t for t in normalized_trans 
+                    if t.get('curb_driver_id') == tlc_license
+                ]
+                
+                # Combine and deduplicate for this driver
+                driver_trips = {trip['curb_trip_id']: trip for trip in normalized_trips}
+                driver_trips.update({tran['curb_trip_id']: tran for tran in filtered_trans})
+                
+                trips_list = list(driver_trips.values())
+                
+                fetch_results.append(DriverFetchResult(
+                    tlc_license=tlc_license,
+                    success=True,
+                    trips_data=trips_list,
+                    error_message=None
+                ))
+                
+                if trips_list:
+                    logger.debug(f"Fetched {len(trips_list)} trips for TLC: {tlc_license}")
+                else:
+                    logger.debug(f"No trips found for TLC: {tlc_license}")
+                
+            except CurbApiError as e:
+                logger.error(f"CURB API error for TLC {tlc_license}: {e}")
+                fetch_results.append(DriverFetchResult(
+                    tlc_license=tlc_license,
+                    success=False,
+                    trips_data=[],
+                    error_message=f"CURB API error: {str(e)}"
+                ))
+                
+            except Exception as e:
+                logger.error(f"Unexpected error fetching data for TLC {tlc_license}: {e}", exc_info=True)
+                fetch_results.append(DriverFetchResult(
+                    tlc_license=tlc_license,
+                    success=False,
+                    trips_data=[],
+                    error_message=f"Unexpected error: {str(e)}"
+                ))
+        
+        logger.info(f"Fetch phase complete: processed {processed} drivers")
+        return fetch_results
+
+    def _log_fetch_errors(self, fetch_results: List[DriverFetchResult]) -> None:
+        """Log detailed information about fetch errors"""
+        failed_results = [r for r in fetch_results if not r.success]
+        
+        if not failed_results:
+            return
+        
+        logger.warning(f"=== Fetch Errors Summary ({len(failed_results)} failures) ===")
+        
+        # Group errors by type
+        error_groups = {}
+        for result in failed_results:
+            error_type = result.error_message.split(':')[0] if result.error_message else "Unknown"
+            if error_type not in error_groups:
+                error_groups[error_type] = []
+            error_groups[error_type].append(result.tlc_license)
+        
+        for error_type, tlc_list in error_groups.items():
+            logger.warning(f"  {error_type}: {len(tlc_list)} drivers")
+            if len(tlc_list) <= 5:
+                logger.warning(f"    TLC licenses: {', '.join(tlc_list)}")
+            else:
+                logger.warning(f"    TLC licenses (sample): {', '.join(tlc_list[:5])}...")
+
+    def _process_and_store_trips_optimized(
+        self, 
+        trips_data: List[Dict], 
+        lease_mapping: Dict[str, List[Dict]], 
+        description: str
+    ) -> Dict:
+        """
+        Phase 3: Process all fetched trips using pre-built lease mapping.
+        
+        This method maps trips to internal entities and stores them in the database.
+        Uses pre-fetched lease mapping for O(1) lookups (no database queries per trip).
+        
+        Args:
+            trips_data: List of normalized trip data from CURB
+            lease_mapping: Pre-built mapping of TLC licenses to lease info
+            description: Description for logging
+            
+        Returns:
+            Dictionary with processing statistics
+        """
+        if not trips_data:
+            logger.warning(f"No trips data to process for {description}")
+            return self._empty_result()
+
+        logger.info(f"Processing {len(trips_data)} trips...")
+
+        try:
+            mapped_trips = []
+            mapping_errors = 0
+            error_details = {}
+            
+            # Track progress for large datasets
+            processed = 0
+            progress_interval = max(100, len(trips_data) // 10)
+            
+            for trip_data in trips_data:
+                processed += 1
+                
+                if processed % progress_interval == 0:
+                    logger.info(f"Processing progress: {processed}/{len(trips_data)} trips")
+                
+                try:
+                    curb_driver_id = trip_data.get("curb_driver_id")
+                    curb_cab_number = trip_data.get("curb_cab_number")
+                    
+                    if not curb_driver_id or not curb_cab_number:
+                        error_key = "Missing driver or cab number"
+                        error_details[error_key] = error_details.get(error_key, 0) + 1
+                        mapping_errors += 1
+                        continue
+                    
+                    # O(1) lookup in pre-built mapping
+                    if curb_driver_id not in lease_mapping:
+                        error_key = f"No active lease for TLC: {curb_driver_id}"
+                        error_details[error_key] = error_details.get(error_key, 0) + 1
+                        mapping_errors += 1
+                        continue
+                    
+                    # Find matching lease for this medallion
+                    lease_info = None
+                    for info in lease_mapping[curb_driver_id]:
+                        if info['medallion_number'] == curb_cab_number:
+                            lease_info = info
+                            break
+                    
+                    if not lease_info:
+                        error_key = f"No lease for TLC {curb_driver_id} + Medallion {curb_cab_number}"
+                        error_details[error_key] = error_details.get(error_key, 0) + 1
+                        mapping_errors += 1
+                        continue
+                    
+                    # Map using pre-fetched information (no DB queries!)
+                    trip_data["driver_id"] = lease_info['driver_id']
+                    trip_data["medallion_id"] = lease_info['medallion_id']
+                    trip_data["lease_id"] = lease_info['lease_id']
+                    trip_data["vehicle_id"] = lease_info['vehicle_id']
+                    
+                    mapped_trips.append(trip_data)
+
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error mapping trip {trip_data.get('curb_trip_id')}: {e}", 
+                        exc_info=True
+                    )
+                    error_key = "Unexpected mapping error"
+                    error_details[error_key] = error_details.get(error_key, 0) + 1
+                    mapping_errors += 1
+                    continue
+            
+            # Log mapping error summary
+            if error_details:
+                logger.warning(f"=== Mapping Error Summary for {description} ===")
+                for error_msg, count in sorted(error_details.items(), key=lambda x: x[1], reverse=True):
+                    logger.warning(f"  {error_msg}: {count} trips")
+            
+            success_rate = (len(mapped_trips) / len(trips_data) * 100) if trips_data else 0
+            logger.info(
+                f"Mapping complete: {len(mapped_trips)}/{len(trips_data)} trips mapped "
+                f"({success_rate:.1f}% success rate)"
+            )
+
+            # Bulk insert/update into the database
+            logger.info("Starting bulk database insert/update...")
+            inserted, updated = self.repo.bulk_insert_or_update(mapped_trips)
+            self.db.commit()
+            logger.info(f"Database operation complete: {inserted} inserted, {updated} updated")
+
+            return {
+                "total_records": len(trips_data),
+                "mapped_records": len(mapped_trips),
+                "mapping_errors": mapping_errors,
+                "newly_inserted": inserted,
+                "updated": updated,
+                "success_rate_percent": round(success_rate, 2)
+            }
+            
+        except (CurbApiError, SQLAlchemyError) as e:
+            self.db.rollback()
+            logger.error(f"Failed during trip processing for {description}: {e}", exc_info=True)
+            raise
+
+    def _empty_result(self, message: str = "No data to process") -> Dict:
+        """Return empty result structure"""
+        return {
+            "total_records": 0,
+            "mapped_records": 0,
+            "mapping_errors": 0,
+            "newly_inserted": 0,
+            "updated": 0,
+            "fetch_successful": 0,
+            "fetch_failed": 0,
+            "drivers_processed": 0,
+            "success_rate_percent": 0.0,
+            "message": message
+        }
 
 
 # --- Celery Tasks ---
@@ -658,24 +1098,30 @@ class CurbService:
 @app.task(name="curb.fetch_and_import_curb_trips")
 def fetch_and_import_curb_trips_task():
     """
-    Celery task to fetch trip data from CURB, map it to internal entities, and store it.
-    This runs daily.
+    Celery task to fetch trip data from CURB ONLY for drivers with active leases.
+    This is the optimized version that runs daily.
     """
-    logger.info("Executing Celery task: fetch_and_import_curb_trips_task")
+    logger.info("Executing Celery task: fetch_and_import_curb_trips_task (optimized for active leases)")
     db: Session = next(get_db())
     try:
         curb_service = CurbService(db)
-        # Fetch data for the last 1 days to catch any delayed entries
+        # Fetch data for the last 1 day to catch any delayed entries
         end_date = datetime.now(timezone.utc).date()
         start_date = end_date - timedelta(days=1)
         
-        result = curb_service.import_and_map_data(start_date, end_date)
+        # Use the optimized method that only fetches for active lease drivers
+        result = curb_service.import_and_map_data_for_active_leases(start_date, end_date)
         
         # Follow up with reconciliation
         reco_result = curb_service.reconcile_unreconciled_trips()
         
         result.update(reco_result)
+        
+        logger.info(f"CURB import task completed: {result}")
         return result
+    except Exception as e:
+        logger.error(f"CURB import task failed: {e}", exc_info=True)
+        raise
     finally:
         db.close()
 
@@ -704,30 +1150,23 @@ def post_earnings_to_ledger_task():
         db.close()
 
 
+# Keep existing granular import tasks unchanged
 @app.task(name="curb.import_driver_data")
 def import_driver_data_task(driver_id: Optional[str], tlc_license_no: Optional[str], 
                            start_date_str: str, end_date_str: str):
     """
     Celery task to import CURB data for a specific driver within a date range.
-    
-    Args:
-        driver_id: Internal driver ID (optional)
-        tlc_license_no: TLC License Number (optional)
-        start_date_str: Start date in YYYY-MM-DD format
-        end_date_str: End date in YYYY-MM-DD format
     """
     logger.info(f"Executing CURB driver import task for driver_id={driver_id}, tlc_license={tlc_license_no}")
     db: Session = next(get_db())
     try:
         curb_service = CurbService(db)
         
-        # Parse date strings
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
         end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
         
         result = curb_service.import_driver_data(driver_id, tlc_license_no, start_date, end_date)
         
-        # Follow up with reconciliation
         reco_result = curb_service.reconcile_unreconciled_trips()
         result.update(reco_result)
         

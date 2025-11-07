@@ -5,8 +5,8 @@ import tempfile
 from datetime import date, datetime, timezone
 from typing import List, Optional, Tuple, Union
 
-from sqlalchemy import and_, asc, delete, desc, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy.orm import Session, joinedload
 
 from app.drivers.models import Driver, TLCLicense
 from app.drivers.schemas import DOVLease
@@ -1881,6 +1881,87 @@ class LeaseService:
         except Exception as e:
             logger.error(f"Error getting lease schedule: {str(e)}", exc_info=True)
             raise e
+        
+    def get_active_leases_with_drivers(self, db: Session) -> List[Lease]:
+        """
+        Efficiently fetch all active leases with their related entities loaded.
+        This method is optimized for CURB import to avoid N+1 queries.
+        
+        Returns:
+            List of Lease objects with drivers, medallions, and vehicles eagerly loaded
+        """
+        try:
+            query = (
+                db.query(Lease)
+                .filter(Lease.lease_status == "Active")
+                .options(
+                    # Eagerly load all required relationships
+                    joinedload(Lease.lease_driver).joinedload(LeaseDriver.driver).joinedload(Driver.tlc_license),
+                    joinedload(Lease.medallion),
+                    joinedload(Lease.vehicle)
+                )
+            )
+            
+            active_leases = query.all()
+            
+            logger.info(f"Retrieved {len(active_leases)} active leases with drivers for CURB import")
+            return active_leases
+            
+        except Exception as e:
+            logger.error(f"Error fetching active leases with drivers: {e}", exc_info=True)
+            raise
+
+    def get_leases_by_status_with_relationships(
+        self, 
+        db: Session, 
+        status: str = "Active",
+        include_drivers: bool = True,
+        include_medallion: bool = True,
+        include_vehicle: bool = True
+    ) -> List[Lease]:
+        """
+        Generic method to fetch leases by status with configurable relationship loading.
+        
+        Args:
+            db: Database session
+            status: Lease status to filter by (default: "Active")
+            include_drivers: Whether to load driver relationships
+            include_medallion: Whether to load medallion relationship
+            include_vehicle: Whether to load vehicle relationship
+            
+        Returns:
+            List of Lease objects with requested relationships loaded
+        """
+        try:
+            query = db.query(Lease).filter(Lease.lease_status == status)
+            
+            # Build joinedload options based on parameters
+            options = []
+            
+            if include_drivers:
+                options.append(
+                    joinedload(Lease.lease_driver)
+                    .joinedload(LeaseDriver.driver)
+                    .joinedload(Driver.tlc_license)
+                )
+            
+            if include_medallion:
+                options.append(joinedload(Lease.medallion))
+            
+            if include_vehicle:
+                options.append(joinedload(Lease.vehicle))
+            
+            if options:
+                query = query.options(*options)
+            
+            leases = query.all()
+            
+            logger.info(f"Retrieved {len(leases)} leases with status '{status}'")
+            return leases
+            
+        except Exception as e:
+            logger.error(f"Error fetching leases by status with relationships: {e}", exc_info=True)
+            raise
 
 
 lease_service = LeaseService()

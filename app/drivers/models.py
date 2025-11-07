@@ -291,12 +291,14 @@ class Driver(Base, AuditMixin):
     
     transaction_receipts = relationship(
         "DriverTransactionReceipt", 
-        back_populates="driver"
+        back_populates="driver",
+        viewonly=True
     )
     
     dtrs = relationship(
         "DTR", 
-        back_populates="driver"
+        back_populates="driver",
+        viewonly=True
     )
 
     def to_dict(self):

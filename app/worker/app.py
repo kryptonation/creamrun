@@ -10,6 +10,18 @@ It also handles task discovery from multiple modules and configures timezone set
 # Third party imports
 from celery import Celery
 
+# Import all models to ensure they're registered with SQLAlchemy
+# This must happen before any database operations in tasks
+import app.drivers.models
+import app.leases.models
+import app.vehicles.models
+import app.medallions.models
+import app.curb.models
+import app.driver_payments.models
+import app.dtr.models
+import app.users.models
+import app.audit_trail.models
+
 # Create Celery Instance
 app = Celery("BAT_scheduler")
 

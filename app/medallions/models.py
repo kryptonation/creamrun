@@ -294,7 +294,8 @@ class Medallion(Base, AuditMixin):
     
     dtrs = relationship(
         "DTR", 
-        back_populates="medallion"
+        back_populates="medallion",
+        viewonly=True
     )
 
     def to_dict(self):

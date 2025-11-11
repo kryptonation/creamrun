@@ -144,6 +144,19 @@ class CurbTrip(Base, AuditMixin):
         DateTime(timezone=True), comment="Timestamp when the trip was reconciled."
     )
 
+    start_long: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 7), comment="Starting longitude of the trip."
+    )
+    start_lat: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 7), comment="Starting latitude of the trip."
+    )
+    end_long: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 7), comment="Ending longitude of the trip."
+    )
+    end_lat: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(10, 7), comment="Ending latitude of the trip."
+    )
+
     # --- Relationships ---
     driver: Mapped[Optional["Driver"]] = relationship()
     lease: Mapped[Optional["Lease"]] = relationship()

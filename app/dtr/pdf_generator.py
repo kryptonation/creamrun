@@ -46,43 +46,49 @@ class DTRPDFGenerator:
     
     def _setup_custom_styles(self):
         """Setup custom paragraph styles"""
-        self.styles.add(ParagraphStyle(
-            name='CompanyHeader',
-            fontSize=16,
-            textColor=colors.black,
-            alignment=TA_LEFT,
-            spaceAfter=6,
-            fontName='Helvetica-Bold'
-        ))
+        # Check if custom styles already exist to avoid duplicates
+        if 'CompanyHeader' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='CompanyHeader',
+                fontSize=16,
+                textColor=colors.black,
+                alignment=TA_LEFT,
+                spaceAfter=6,
+                fontName='Helvetica-Bold'
+            ))
         
-        self.styles.add(ParagraphStyle(
-            name='SectionHeader',
-            fontSize=12,
-            textColor=colors.black,
-            alignment=TA_LEFT,
-            spaceAfter=6,
-            fontName='Helvetica-Bold',
-            borderColor=colors.red,
-            borderWidth=0,
-            borderPadding=5,
-            leftIndent=10,
-            backColor=colors.white
-        ))
+        if 'SectionHeader' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='SectionHeader',
+                fontSize=12,
+                textColor=colors.black,
+                alignment=TA_LEFT,
+                spaceAfter=6,
+                fontName='Helvetica-Bold',
+                borderColor=colors.red,
+                borderWidth=0,
+                borderPadding=5,
+                leftIndent=10,
+                backColor=colors.white
+            ))
         
-        self.styles.add(ParagraphStyle(
-            name='TableHeader',
-            fontSize=9,
-            textColor=colors.black,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        ))
+        if 'TableHeader' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='TableHeader',
+                fontSize=9,
+                textColor=colors.black,
+                alignment=TA_CENTER,
+                fontName='Helvetica-Bold'
+            ))
         
-        self.styles.add(ParagraphStyle(
-            name='Normal',
-            fontSize=8,
-            textColor=colors.black,
-            alignment=TA_LEFT
-        ))
+        # Use 'DTRNormal' instead of 'Normal' to avoid conflict with default styles
+        if 'DTRNormal' not in self.styles:
+            self.styles.add(ParagraphStyle(
+                name='DTRNormal',
+                fontSize=8,
+                textColor=colors.black,
+                alignment=TA_LEFT
+            ))
     
     def _format_currency(self, amount: Decimal) -> str:
         """Format decimal as currency"""
@@ -115,7 +121,7 @@ class DTRPDFGenerator:
         
         # Company header with yellow background
         header_data = [[
-            Paragraph(f'<font size="16"><b>{self.company_name}</b></font>', self.styles['Normal']),
+            Paragraph(f'<font size="16"><b>{self.company_name}</b></font>', self.styles['DTRNormal']),
         ]]
         
         header_table = Table(header_data, colWidths=[6*inch])
@@ -133,7 +139,7 @@ class DTRPDFGenerator:
         # Company address
         address_para = Paragraph(
             f'{self.company_address} | {self.company_phone} | {self.company_email}',
-            self.styles['Normal']
+            self.styles['DTRNormal']
         )
         address_table = Table([[address_para]], colWidths=[6*inch])
         address_table.setStyle(TableStyle([
@@ -151,7 +157,7 @@ class DTRPDFGenerator:
         # DTR identification block
         medallion = dtr.medallion.medallion_number if dtr.medallion else ""
         driver_name = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else ""
-        tlc_license = dtr.driver.tlc_license_number if dtr.driver else ""
+        tlc_license = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else ""
         
         receipt_data = [
             ['Medallion:', medallion, 'Receipt number:', dtr.receipt_number],
@@ -312,11 +318,11 @@ class DTRPDFGenerator:
         elements.append(Spacer(1, 0.1*inch))
         footnote1 = Paragraph(
             '<font size="7"><i>Note: Includes transactions where the driver is "unknown" - mapped by BATM</i></font>',
-            self.styles['Normal']
+            self.styles['DTRNormal']
         )
         footnote2 = Paragraph(
             '<font size="7"><i>Note: Negative Charges (displayed in parentheses) indicate credits or adjustments (e.g., payments received) that reduce the driver\'s outstanding charges</i></font>',
-            self.styles['Normal']
+            self.styles['DTRNormal']
         )
         elements.append(footnote1)
         elements.append(footnote2)

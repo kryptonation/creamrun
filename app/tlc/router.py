@@ -146,7 +146,7 @@ def get_tlc_violation_details(
         driver_details = {
             "driver_id": violation.driver.driver_id if violation.driver else None,
             "full_name": violation.driver.full_name if violation.driver else None,
-            "tlc_license": violation.driver.tlc_license_number if violation.driver else None,
+            "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver and violation.driver.tlc_license else None,
         }
         
         lease_details = {

@@ -1,7 +1,8 @@
 ### app/vehicles/search_service.py
 
 # Standard library imports
-from datetime import date
+from datetime import date , timedelta
+from typing import Any, Dict, List
 
 # Third party imports
 from sqlalchemy.orm import Session, aliased, joinedload
@@ -24,8 +25,10 @@ from app.vehicles.models import (
     VehicleHackUp,
     VehicleInspection,
     VehicleRegistration,
+    VehicleExpensesAndCompliance
 )
-from app.vehicles.schemas import VehicleStatus
+from app.vehicles.schemas import VehicleStatus , ExpensesAndComplianceCategory , ExpensesAndComplianceSubType
+from app.uploads.services import upload_service
 
 logger = get_logger(__name__)
 
@@ -644,3 +647,181 @@ def format_vehicle_response(vehicle: Vehicle, db: Session):
         "registration_expiry_date": registration.registration_expiry_date if registration and registration.registration_expiry_date else "N/A",
         "fuel": None
     }
+
+
+def get_vehicle_expenses(
+        db: Session,
+        vin : str,
+        category : str,
+        sub_type: str,
+        invoice_number : str,
+        amount_from : float,
+        amount_to : float,
+        vendor_name : str,
+        page: int,
+        per_page: int,
+        sort_by: str,
+        sort_order: str
+):
+    """Get the vehicle expenses"""
+    
+    try:
+        query = db.query(VehicleExpensesAndCompliance).filter(VehicleExpensesAndCompliance.is_active == True)
+
+        vehicle_join = False
+
+        if vin:
+            if not vehicle_join:
+                query = query.join(Vehicle , Vehicle.id == VehicleExpensesAndCompliance.vehicle_id)
+                vehicle_join = True
+            query = query.filter(Vehicle.vin == vin)
+        if category:
+            query = query.filter(VehicleExpensesAndCompliance.category.ilike(f"%{category}%"))
+        if sub_type:
+            query = query.filter(VehicleExpensesAndCompliance.sub_type.ilike(f"%{sub_type}%"))
+        if invoice_number:
+            query = query.filter(VehicleExpensesAndCompliance.invoice_number.ilike(f"%{invoice_number}%"))
+        if amount_from:
+            query = query.filter(VehicleExpensesAndCompliance.amount >= amount_from)
+        if amount_to:
+            query = query.filter(VehicleExpensesAndCompliance.amount <= amount_to)
+        if vendor_name:
+            query = query.filter(VehicleExpensesAndCompliance.vendor_name.ilike(f"%{vendor_name}%"))
+
+        if sort_by and sort_order:
+            sort_mapping = {
+                "category": VehicleExpensesAndCompliance.category,
+                "sub_type": VehicleExpensesAndCompliance.sub_type,
+                "invoice_number": VehicleExpensesAndCompliance.invoice_number,
+                "amount": VehicleExpensesAndCompliance.amount,
+                "vendor_name": VehicleExpensesAndCompliance.vendor_name,
+                "created_on": VehicleExpensesAndCompliance.created_on
+            }
+            if sort_by == "vin":
+                if not vehicle_join:
+                    query = query.join(Vehicle , Vehicle.id == VehicleExpensesAndCompliance.vehicle_id)
+                    vehicle_join = True
+                query = query.order_by(Vehicle.vin.desc())
+            elif sort_by in sort_mapping:
+                sort_column = sort_mapping[sort_by]
+                query = query.order_by(
+                    sort_column.desc() if sort_order.lower() == "desc" else sort_column.asc()
+                
+                )
+            else:
+                query = query.order_by(VehicleExpensesAndCompliance.created_on.desc())
+
+        else:
+            query = query.order_by(VehicleExpensesAndCompliance.updated_on.desc(),VehicleExpensesAndCompliance.created_on.desc())
+
+        
+        subquery = query.subquery()
+        total_items = db.query(func.count()).select_from(subquery).scalar()
+        expenses = query.offset((page - 1) * per_page).limit(per_page).all()
+
+        items = group_expenses_for_ui(db, expenses)
+
+        return {
+            "page": page,
+            "per_page": per_page,
+            "total_items": total_items,
+            "items": items
+        }
+    except Exception as e:
+        raise e
+    
+def format_vehicle_expenses(db,vehicle_expense):
+    """Format the vehicle expenses"""
+
+    try:
+        document = upload_service.get_documents(
+            db=db , object_type="vehicle_expenses" , object_id=vehicle_expense.id , document_type="document"
+        )
+
+        status = "Valid"
+
+        if vehicle_expense.expiry_date:
+            if vehicle_expense.expiry_date < date.today():
+                status = "Expired"
+            if vehicle_expense.expiry_date < date.today() + timedelta(days=30):
+                status = "Due Soon"
+
+        return {
+            "id": vehicle_expense.id,
+            "vin": vehicle_expense.vehicle.vin if vehicle_expense.vehicle else "N/A",
+            "category": vehicle_expense.category,
+            "sub_type": vehicle_expense.sub_type,
+            "invoice_number": vehicle_expense.invoice_number,
+            "amount": vehicle_expense.amount,
+            "vendor_name": vehicle_expense.vendor_name,
+            "status": status,
+            "issue_data": vehicle_expense.issue_date,
+            "expiry_date": vehicle_expense.expiry_date,
+            "documents": document,
+            "note": vehicle_expense.note,
+            "created_on": vehicle_expense.created_on,
+            "updated_on": vehicle_expense.updated_on
+        }
+    
+    except Exception as e:
+        raise e
+
+def group_expenses_for_ui(db: Session, expenses: List[Any]) -> Dict[str, Any]:
+    """
+    Groups a flat list of vehicle expenses into the nested, UI-friendly structure:
+    { Category: [{ sub_type_name: str, items: [expense_data] }, ...] }
+    """
+    
+    # Use a dictionary for temporary grouping
+    temp_grouped_data = {
+        ExpensesAndComplianceCategory.VEHICLE_EXPENSES.value: [], # Simple list
+        ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE.value: {}, # Dict for sub-grouping
+        ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS.value: {},  # Dict for sub-grouping
+    }
+
+    # 4.1. Iterate, format, and assign to temporary groups
+    for expense in expenses:
+        formatted_item = format_vehicle_expenses(db, expense)
+        category = formatted_item["category"]
+        sub_type = formatted_item["sub_type"]
+        
+        if category == ExpensesAndComplianceCategory.VEHICLE_EXPENSES.value:
+            temp_grouped_data[category].append(formatted_item)
+
+        elif category in [
+            ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE.value,
+            ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS.value
+        ]:
+            if sub_type not in temp_grouped_data[category]:
+                temp_grouped_data[category][sub_type] = []
+            temp_grouped_data[category][sub_type].append(formatted_item)
+
+    # 4.2. Convert the nested compliance/documents dictionaries into the final list structure
+    # This structure is better for rendering in the UI as collapsible sections.
+    final_data = {}
+    
+    # Vehicle Expenses is a simple list
+    final_data[ExpensesAndComplianceCategory.VEHICLE_EXPENSES.value] = temp_grouped_data[
+        ExpensesAndComplianceCategory.VEHICLE_EXPENSES.value
+    ]
+    
+    # Compliance (Inspections & Compliance in the UI)
+    compliance_list = []
+    for sub_type, items in temp_grouped_data[ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE.value].items():
+        compliance_list.append({
+            "sub_type_name": sub_type,
+            "items": items
+        })
+    final_data[ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE.value] = compliance_list
+
+    # Documents (Other Vehicle Documents in the UI)
+    documents_list = []
+    for sub_type, items in temp_grouped_data[ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS.value].items():
+        documents_list.append({
+            "sub_type_name": sub_type,
+            "items": items
+        })
+    final_data[ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS.value] = documents_list
+
+    return final_data
+

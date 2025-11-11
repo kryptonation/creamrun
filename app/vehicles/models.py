@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    DateTime
 )
 from sqlalchemy.orm import relationship
 
@@ -21,6 +22,26 @@ from app.utils.general import generate_random_6_digit
 from app.vehicles.schemas import VehicleEntityStatus
 
 
+class VehicleExpensesAndCompliance(Base , AuditMixin):
+
+    __tablename__ = "vehicle_expenses_and_compliance"
+
+    id = Column(Integer, primary_key=True, nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
+    category = Column(String(255), nullable=True)
+    sub_type = Column(String(255), nullable=True)
+    invoice_number = Column(String(255), nullable=True)
+    amount = Column(Float, nullable=True , default=0.0)
+    vendor_name = Column(String(255), nullable=True)
+    issue_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    note = Column(Text, nullable=True)
+    document_id = Column(Integer, ForeignKey("document.id"), nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    vehicle = relationship("Vehicle", back_populates="expenses_and_compliance", foreign_keys=[vehicle_id])
+    
 class Dealer(Base, AuditMixin):
     """
     Dealer model
@@ -357,7 +378,7 @@ class HackUpTasks(Base , AuditMixin):
     status = Column(String(255), nullable=True)
     note = Column(Text, nullable=True)
     is_task_done = Column(Boolean, nullable=True)
-    is_required = Column(Boolean, nullable=True , default=False)
+    is_required = Column(Boolean, nullable=True)
 
     #relationship
     paint_hackups = relationship("VehicleHackUp", back_populates="paint_task", foreign_keys="VehicleHackUp.paint_task_id")
@@ -510,6 +531,8 @@ class Vehicle(Base, AuditMixin):
         back_populates="vehicle",
         viewonly=True
     )
+
+    expenses_and_compliance = relationship("VehicleExpensesAndCompliance", back_populates="vehicle")
 
     def to_dict(self):
         """Convert Vehicle object to a dictionary"""

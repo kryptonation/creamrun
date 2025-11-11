@@ -28,6 +28,7 @@ from app.medallions.services import medallion_service
 from app.uploads.services import upload_service
 from app.users.models import User
 from app.users.utils import get_current_user
+from app.core.dependencies import get_db_with_current_user
 from app.utils.exporter.excel_exporter import ExcelExporter
 from app.utils.exporter.pdf_exporter import PDFExporter
 from app.utils.logger import get_logger
@@ -54,6 +55,7 @@ from app.vehicles.search_service import (
     get_vehicle_deprecation,
     get_vehicles_list,
     total_depreciation_till_now,
+    get_vehicle_expenses
 )
 from app.vehicles.services import vehicle_service
 from app.vehicles.utils import (
@@ -65,7 +67,6 @@ from app.vehicles.utils import (
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Vehicles"])
-
 
 @router.get("/vin/{vin}", summary="Get vehicle by VIN")
 def get_vehicle_by_vin(vin: str, db: Session = Depends(get_db)):
@@ -1614,3 +1615,82 @@ def finalize_vehicle_hackup(
             status_code=500,
             detail="An internal server error occurred while finalizing the hack-up.",
         )
+    
+@router.get("/vehicle_expeneses" , summary = "List Vehicle Expenses")
+def list_vehicle_expenses(
+    db: Session = Depends(get_db_with_current_user),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(10, ge=1, le=100),
+    vin: str = None,
+    category: str = None,
+    sub_type: str = None,
+    invoice_number : str = None,
+    from_amount : str = None,
+    to_amount : str = None,
+    vendor_name : str = None,
+    sort_by: str = None,
+    sort_order: str =  None,
+    logged_in_user: User = Depends(get_current_user),
+):
+    """
+    List vehicle expenses based on the provided filters
+    """
+    try:
+
+        return get_vehicle_expenses(
+            db=db,
+            page=page,
+            per_page=per_page,
+            vin=vin,
+            category=category,
+            sub_type=sub_type,
+            invoice_number=invoice_number,
+            amount_from=from_amount,
+            amount_to=to_amount,
+            vendor_name=vendor_name,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except Exception as e:
+        logger.error("Error listing vehicle expenses: %s", str(e))
+        raise e
+    
+@router.delete("/vehicle_expense/{id}", summary="Delete Vehicle Expense")
+def delete_vehicle_expense(
+    id: int,
+    db: Session = Depends(get_db_with_current_user),
+    logged_in_user: User = Depends(get_current_user),
+):
+    """
+    Delete a vehicle expense by its ID.
+    """
+    try:
+        if not id:
+            raise ValueError("Id is required")
+        
+        expense = vehicle_service.get_vehicle_expenses(
+            db=db , lookup_id=id
+        )
+
+        if not expense:
+            raise ValueError("Expense not found")
+        
+        if not expense.is_active:
+            raise ValueError("Expense Already Deleted")
+        
+        vehicle_service.upsert_vehicle_expenses(
+            db=db , vehicle_expenses={
+                "id":expense.id,
+                "is_active": False,
+                "deleted_at": datetime.utcnow(),
+                "deleted_by": logged_in_user.id
+            }
+        )
+
+        return {
+            "status": "success",
+            "massage": "Expense Deleted Successfully"
+            }
+    except Exception as e:
+        logger.error("Error deleting vehicle expense: %s", str(e))
+        raise e

@@ -15,7 +15,7 @@ from sqlalchemy import and_, or_
 
 from app.leases.models import Lease, LeaseSchedule
 from app.leases.schemas import LeaseStatus
-from app.ledger.service import LedgerService
+from app.ledger.services import LedgerService
 from app.ledger.models import PostingCategory
 from app.utils.logger import get_logger
 

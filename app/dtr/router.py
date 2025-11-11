@@ -55,7 +55,7 @@ async def generate_dtr(
         
         # Add related entity information
         response_data['driver_name'] = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else None
-        response_data['tlc_license_number'] = dtr.driver.tlc_license_number if dtr.driver else None
+        response_data['tlc_license_number'] = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else None
         response_data['medallion_number'] = dtr.medallion.medallion_number if dtr.medallion else None
         response_data['vehicle_plate'] = dtr.vehicle.plate_number if dtr.vehicle else None
         response_data['lease_number'] = dtr.lease.lease_id if dtr.lease else None
@@ -110,7 +110,7 @@ async def get_dtr(
         
         response_data = dtr.to_dict()
         response_data['driver_name'] = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else None
-        response_data['tlc_license_number'] = dtr.driver.tlc_license_number if dtr.driver else None
+        response_data['tlc_license_number'] = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else None
         response_data['medallion_number'] = dtr.medallion.medallion_number if dtr.medallion else None
         response_data['vehicle_plate'] = dtr.vehicle.plate_number if dtr.vehicle else None
         response_data['lease_number'] = dtr.lease.lease_id if dtr.lease else None
@@ -139,7 +139,7 @@ async def get_dtr_by_number(
         
         response_data = dtr.to_dict()
         response_data['driver_name'] = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else None
-        response_data['tlc_license_number'] = dtr.driver.tlc_license_number if dtr.driver else None
+        response_data['tlc_license_number'] = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else None
         response_data['medallion_number'] = dtr.medallion.medallion_number if dtr.medallion else None
         response_data['vehicle_plate'] = dtr.vehicle.plate_number if dtr.vehicle else None
         response_data['lease_number'] = dtr.lease.lease_id if dtr.lease else None
@@ -379,7 +379,7 @@ async def export_dtrs_csv(
         # Data rows
         for dtr in dtrs:
             driver_name = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else ""
-            tlc_license = dtr.driver.tlc_license_number if dtr.driver else ""
+            tlc_license = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else ""
             medallion = dtr.medallion.medallion_number if dtr.medallion else ""
             
             writer.writerow([

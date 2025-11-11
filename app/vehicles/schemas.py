@@ -3,9 +3,9 @@
 # Standard library imports
 from datetime import datetime , date
 from enum import Enum as PyEnum
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic import BaseModel, root_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class VehicleStatus(str, PyEnum):
@@ -93,7 +93,8 @@ class HackUpData(BaseModel):
     rooftop_from_location: Optional[str] = None
     rooftop_to_location: Optional[str] = None
 
-    @root_validator(pre=True)
+    @field_validator('*', mode='before')
+    @classmethod
     def convert_empty_to_none(cls, values):
         for field, value in values.items():
             if value in [0, "", []]:
@@ -132,3 +133,79 @@ class DeliveryData(BaseModel):
     delivery_location: Optional[str] = None
     delivery_note: Optional[str] = None
     vehicle_status: VehicleStatus = VehicleStatus.AVAILABLE
+
+class ExpensesAndComplianceCategory(str, PyEnum):
+    VEHICLE_EXPENSES = "vehicle expenses"
+    VEHICLE_COMPLIANCE = "vehicle compliance"
+    VEHICLE_DOCUMENTS = "vehicle documents"
+class ExpensesAndComplianceSubType(str, PyEnum):
+    VEHICLE_PURCHASE = "vehicle purchase"
+    HACKUP = "Hackup"
+    TLC_PREPARATION = "tlc preparation"
+    REPAIRS_MAINTENANCE = "repairs & maintenance"
+    OTHERS = "others"
+    TLC_INSPECTION = "tlc inspection"
+    MILE_RUN_INSPECTION = "mile run inspection"
+    DMV_INSPECTION = "dmv inspection"
+    STATE_INSPECTION = "state inspection"
+    INSURANCE = "insurance"
+    OWNERSHIP_REPORT = "ownership report"
+    PLATE_RECEIPT = "plate receipt"
+    WARRANTY = "warranty"
+    LONE_AGGREMENT = "lone agreement"
+    ACCIDENT_REPORT = "accident report"
+
+
+class VehicleExpensesAndComplianceSchema(BaseModel):
+    id: Optional[int] = None
+    vehicle_id: int
+    category: Optional[ExpensesAndComplianceCategory] = None
+    sub_type: Optional[ExpensesAndComplianceSubType] = None
+    invoice_number: Optional[str] = None
+    amount: Optional[float] = 0.0
+    vendor_name: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    note: Optional[str] = None
+    document_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def validate_category_and_subtype(self):
+        allowed = {}
+        if self.category == ExpensesAndComplianceCategory.VEHICLE_EXPENSES:
+            allowed = {
+                ExpensesAndComplianceSubType.VEHICLE_PURCHASE,
+                ExpensesAndComplianceSubType.HACKUP,
+                ExpensesAndComplianceSubType.TLC_PREPARATION,
+                ExpensesAndComplianceSubType.REPAIRS_MAINTENANCE,
+                ExpensesAndComplianceSubType.OTHERS
+            }
+        elif  self.category == ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE:
+            allowed = {
+                ExpensesAndComplianceSubType.TLC_INSPECTION,
+                ExpensesAndComplianceSubType.MILE_RUN_INSPECTION,
+                ExpensesAndComplianceSubType.DMV_INSPECTION,
+                ExpensesAndComplianceSubType.STATE_INSPECTION,
+                ExpensesAndComplianceSubType.INSURANCE,
+                ExpensesAndComplianceSubType.OTHERS
+            }
+        elif self.category == ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS:
+            allowed = {
+                ExpensesAndComplianceSubType.OWNERSHIP_REPORT,
+                ExpensesAndComplianceSubType.PLATE_RECEIPT,
+                ExpensesAndComplianceSubType.WARRANTY,
+                ExpensesAndComplianceSubType.LONE_AGGREMENT,
+                ExpensesAndComplianceSubType.ACCIDENT_REPORT,
+                ExpensesAndComplianceSubType.OTHERS
+            }
+        
+
+        if self.sub_type not in allowed:
+            raise ValueError(f"Invalid combination of category and sub_type for category '{self.category}'")
+
+        
+        return self
+        
+    class Config:
+        """Pydantic configuration"""
+        from_attributes = True

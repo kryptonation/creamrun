@@ -208,3 +208,21 @@ def get_vehicles_from_owner(owner, page, per_page):
         "per_page": per_page,
         "total_pages": math.ceil(total_count / per_page),
     }
+
+
+def format_vehicle_expense(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "invoice_number" : vehicle_expense.invoice_number,
+        "amount" : vehicle_expense.amount,
+        "vendor_name" : vehicle_expense.vendor_name,
+        "issue_date" : vehicle_expense.issue_date,
+        "expiry_date" : vehicle_expense.expiry_date,
+        "note" : vehicle_expense.note,
+        "document_id" : vehicle_expense.document_id,
+        "deleted_at" : vehicle_expense.deleted_at,
+        "deleted_by" : vehicle_expense.deleted_by
+    }

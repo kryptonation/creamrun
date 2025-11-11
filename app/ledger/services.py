@@ -195,6 +195,7 @@ class LedgerService:
         """
         Applies weekly CURB earnings to a driver's outstanding balances.
         """
+        logger.info("Applying weekly earnings.", driver_id=driver_id, earnings_amount=earnings_amount)
         if earnings_amount <= 0:
             return []
 

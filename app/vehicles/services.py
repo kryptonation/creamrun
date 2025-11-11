@@ -19,7 +19,8 @@ from app.vehicles.models import (
     VehicleHackUp,
     VehicleInspection,
     VehicleRegistration,
-    HackUpTasks
+    HackUpTasks,
+    VehicleExpensesAndCompliance
 )
 from app.vehicles.schemas import HackupStatus, RegistrationStatus, VehicleStatus , VehicleEntityStatus
 
@@ -608,6 +609,56 @@ class VehicleService:
         except Exception as e:
             logger.error("Error upserting hackup tasks: %s", str(e))
 
+    def get_vehicle_expenses(self , 
+                             db: Session, 
+                             lookup_id: Optional[int] = None,
+                             vehicle_id: Optional[int] = None,
+                             sort_order: Optional[str] = None,
+                             sort_by: Optional[str] = None,
+                             multiple: bool = False,
+                             ):
+        """Get vehicle expenses"""
+        try:
+            query = db.query(VehicleExpensesAndCompliance)
 
+            if lookup_id:
+                query = query.filter(VehicleExpensesAndCompliance.id == lookup_id)
+
+            if vehicle_id:
+                query = query.filter(VehicleExpensesAndCompliance.vehicle_id == vehicle_id)
+
+            if sort_by and hasattr(VehicleExpensesAndCompliance, sort_by):
+                column = getattr(VehicleExpensesAndCompliance, sort_by)
+                query = query.order_by(
+                    column.desc() if sort_order == "desc" else column.asc()
+                )
+    
+            if multiple:
+                return query.all()
+            return query.first()
+        except Exception as e:
+            logger.error("Error getting vehicle expenses: %s", str(e))
+            raise e
+        
+    def upsert_vehicle_expenses(self, db: Session, vehicle_expenses: dict):
+        """Upsert vehicle expenses"""
+        try:
+            if vehicle_expenses.get("id"):
+                vehicle_expense = self.get_vehicle_expenses(db, lookup_id=vehicle_expenses.get("id"))
+
+                if vehicle_expense:
+                    for key, value in vehicle_expenses.items():
+                        setattr(vehicle_expense, key, value)
+                    return vehicle_expense
+            else:
+                vehicle_expense = VehicleExpensesAndCompliance(**vehicle_expenses)
+                
+            db.add(vehicle_expense)
+            db.flush()
+            db.refresh(vehicle_expense)
+            return vehicle_expense
+        except Exception as e:
+            logger.error("Error upserting vehicle expenses: %s", str(e))
+            raise e
 
 vehicle_service = VehicleService()

@@ -115,10 +115,13 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
                     error=str(e)
                 )
             
+            
             formatted_leases.append({
                 "lease_id_pk": lease.id,
                 "lease_id": lease.lease_id,
+                "vehicle_id": lease.vehicle.id,
                 "medallion_no": lease.medallion.medallion_number if lease.medallion else "N/A",
+                "medallion_id": lease.medallion.id if lease.medallion else "N/A",
                 "plate_no": (
                     lease.vehicle.registrations[0].plate_number
                     if lease.vehicle and lease.vehicle.registrations

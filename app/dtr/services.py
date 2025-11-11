@@ -15,7 +15,7 @@ from app.dtr.exceptions import (
 )
 from app.ledger.models import LedgerBalance, PostingCategory, BalanceStatus
 from app.ledger.services import LedgerService
-from app.curb.models import CurbTrip
+from app.curb.models import CurbTrip, PaymentType
 from app.ezpass.models import EZPassTransaction
 from app.pvb.models import PVBViolation
 from app.tlc.models import TLCViolation
@@ -123,13 +123,13 @@ class DTRService:
     ) -> Decimal:
         """Get total credit card earnings from CURB for the period"""
         total = self.db.query(
-            func.coalesce(func.sum(CurbTrip.net_fare_amount), 0)
+            func.coalesce(func.sum(CurbTrip.fare + CurbTrip.tips), 0)
         ).filter(
             and_(
                 CurbTrip.driver_id == driver_id,
-                CurbTrip.trip_date >= period_start,
-                CurbTrip.trip_date <= period_end,
-                CurbTrip.payment_type == "Credit Card"
+                func.date(CurbTrip.start_time) >= period_start,
+                func.date(CurbTrip.start_time) <= period_end,
+                CurbTrip.payment_type == PaymentType.CREDIT_CARD
             )
         ).scalar()
         
@@ -145,19 +145,20 @@ class DTRService:
         trips = self.db.query(CurbTrip).filter(
             and_(
                 CurbTrip.driver_id == driver_id,
-                CurbTrip.trip_date >= period_start,
-                CurbTrip.trip_date <= period_end,
-                CurbTrip.payment_type == "Credit Card"
+                func.date(CurbTrip.start_time) >= period_start,
+                func.date(CurbTrip.start_time) <= period_end,
+                CurbTrip.payment_type == PaymentType.CREDIT_CARD
             )
-        ).order_by(CurbTrip.trip_date).all()
+        ).order_by(CurbTrip.start_time).all()
         
         trip_log = []
         for trip in trips:
+            net_fare = (trip.fare or 0) + (trip.tips or 0)
             trip_log.append({
-                "trip_date": trip.trip_date.isoformat() if trip.trip_date else None,
-                "tlc_license": trip.driver.tlc_license_number if trip.driver else None,
+                "trip_date": trip.start_time.date().isoformat() if trip.start_time else None,
+                "tlc_license": trip.driver.tlc_license.tlc_license_number if trip.driver and trip.driver.tlc_license else None,
                 "trip_number": trip.curb_trip_id,
-                "amount": float(trip.net_fare_amount) if trip.net_fare_amount else 0.00
+                "amount": float(net_fare)
             })
         
         return trip_log
@@ -172,8 +173,8 @@ class DTRService:
         trips = self.db.query(CurbTrip).filter(
             and_(
                 CurbTrip.driver_id == driver_id,
-                CurbTrip.trip_date >= period_start,
-                CurbTrip.trip_date <= period_end
+                func.date(CurbTrip.start_time) >= period_start,
+                func.date(CurbTrip.start_time) <= period_end
             )
         ).all()
         
@@ -201,20 +202,20 @@ class DTRService:
         
         for trip in trips:
             # Sum up taxes
-            if trip.airport_access_fee:
-                tax_totals["airport_access_fee"] += trip.airport_access_fee
+            if trip.airport_fee:
+                tax_totals["airport_access_fee"] += trip.airport_fee
                 trip_counts["airport_trips"] += 1
             
-            if trip.cbdt:
-                tax_totals["cbdt"] += trip.cbdt
+            if trip.cbdt_fee:
+                tax_totals["cbdt"] += trip.cbdt_fee
                 trip_counts["cbdt_trips"] += 1
             
-            if trip.congestion_surcharge:
-                tax_totals["congestion_tax"] += trip.congestion_surcharge
+            if trip.congestion_fee:
+                tax_totals["congestion_tax"] += trip.congestion_fee
                 trip_counts["congestion_trips"] += 1
             
-            if trip.mta_tax:
-                tax_totals["mta_tax"] += trip.mta_tax
+            if trip.surcharge:
+                tax_totals["mta_tax"] += trip.surcharge
                 trip_counts["mta_trips"] += 1
             
             if trip.improvement_surcharge:
@@ -222,7 +223,7 @@ class DTRService:
                 trip_counts["tif_trips"] += 1
             
             # Count trip types
-            if trip.payment_type == "Credit Card":
+            if trip.payment_type == PaymentType.CREDIT_CARD:
                 trip_types["cc_trips"] += 1
             else:
                 trip_types["cash_trips"] += 1
@@ -309,7 +310,7 @@ class DTRService:
         for txn in transactions:
             details.append({
                 "transaction_date": txn.transaction_datetime.isoformat() if txn.transaction_datetime else None,
-                "tlc_license": txn.driver.tlc_license_number if txn.driver else None,
+                "tlc_license": txn.driver.tlc_license.tlc_license_number if txn.driver and txn.driver.tlc_license else None,
                 "plate_no": txn.plate_number,
                 "agency": txn.agency_name,
                 "entry": txn.entry_plaza,
@@ -354,7 +355,7 @@ class DTRService:
             details.append({
                 "date_time": vio.issue_date.isoformat() if vio.issue_date else None,
                 "ticket": vio.violation_number,
-                "tlc_license": vio.driver.tlc_license_number if vio.driver else "Unknown",
+                "tlc_license": vio.driver.tlc_license.tlc_license_number if vio.driver and vio.driver.tlc_license else "Unknown",
                 "note": vio.violation_description,
                 "fine": float(vio.fine_amount) if vio.fine_amount else 0.00,
                 "charge": float(vio.penalties) if vio.penalties else 0.00,
@@ -398,7 +399,7 @@ class DTRService:
             details.append({
                 "date_time": ticket.issue_date.isoformat() if ticket.issue_date else None,
                 "ticket": ticket.ticket_number,
-                "tlc_license": ticket.driver.tlc_license_number if ticket.driver else None,
+                "tlc_license": ticket.driver.tlc_license.tlc_license_number if ticket.driver and ticket.driver.tlc_license else None,
                 "medallion": ticket.medallion.medallion_number if ticket.medallion else None,
                 "note": ticket.violation_description,
                 "fine": float(ticket.fine_amount) if ticket.fine_amount else 0.00,
@@ -559,26 +560,33 @@ class DTRService:
         
         alerts = []
         
-        # TLC Inspection alert
-        if vehicle.tlc_inspection_expiry:
-            alerts.append({
-                "type": "TLC Inspection",
-                "expiry_date": vehicle.tlc_inspection_expiry.isoformat()
-            })
+        # TLC Inspection alert - get from latest inspection
+        if vehicle.inspections:
+            latest_inspection = max(vehicle.inspections, key=lambda x: x.inspection_date or date.min)
+            if latest_inspection and latest_inspection.next_inspection_due_date:
+                alerts.append({
+                    "type": "TLC Inspection",
+                    "expiry_date": latest_inspection.next_inspection_due_date.isoformat()
+                })
         
-        # Mile Run alert
-        if vehicle.mile_run_expiry:
-            alerts.append({
-                "type": "Mile Run",
-                "expiry_date": vehicle.mile_run_expiry.isoformat()
-            })
+        # Mile Run alert - check if any inspection shows mile_run requirement
+        if vehicle.inspections:
+            for inspection in vehicle.inspections:
+                if inspection.mile_run and inspection.next_inspection_due_date:
+                    alerts.append({
+                        "type": "Mile Run",
+                        "expiry_date": inspection.next_inspection_due_date.isoformat()
+                    })
+                    break  # Only add one mile run alert
         
-        # DMV Registration alert
-        if vehicle.dmv_registration_expiry:
-            alerts.append({
-                "type": "DMV Registration",
-                "expiry_date": vehicle.dmv_registration_expiry.isoformat()
-            })
+        # DMV Registration alert - get from latest registration
+        if vehicle.registrations:
+            latest_registration = max(vehicle.registrations, key=lambda x: x.created_on or date.min)
+            if latest_registration and hasattr(latest_registration, 'registration_expiry_date') and latest_registration.registration_expiry_date:
+                alerts.append({
+                    "type": "DMV Registration",
+                    "expiry_date": latest_registration.registration_expiry_date.isoformat()
+                })
         
         return alerts
     
@@ -590,18 +598,18 @@ class DTRService:
         
         alerts = []
         
-        # TLC License expiry
-        if driver.tlc_license_expiry:
+        # TLC License expiry - get from TLC license relationship
+        if driver.tlc_license and driver.tlc_license.tlc_license_expiry_date:
             alerts.append({
                 "license_type": "TLC License 1",
-                "expiry_date": driver.tlc_license_expiry.isoformat()
+                "expiry_date": driver.tlc_license.tlc_license_expiry_date.isoformat()
             })
         
-        # DMV License expiry
-        if driver.dmv_license_expiry:
+        # DMV License expiry - get from DMV license relationship  
+        if driver.dmv_license and driver.dmv_license.dmv_license_expiry_date:
             alerts.append({
                 "license_type": "DMV License",
-                "expiry_date": driver.dmv_license_expiry.isoformat()
+                "expiry_date": driver.dmv_license.dmv_license_expiry_date.isoformat()
             })
         
         return alerts
@@ -701,11 +709,18 @@ class DTRService:
             # 7. Get driver payment preferences
             payment_method = None
             account_masked = None
-            if driver.payment_method:
-                payment_method = PaymentMethod(driver.payment_method)
-            if driver.bank_account_number:
+            if driver.pay_to_mode:
+                # Convert pay_to_mode to PaymentMethod enum if it matches
+                try:
+                    payment_method = PaymentMethod(driver.pay_to_mode)
+                except ValueError:
+                    # If pay_to_mode doesn't match enum, default to None
+                    payment_method = None
+            
+            if driver.driver_bank_account and driver.driver_bank_account.bank_account_number:
                 # Mask account number - show only last 4 digits
-                account_masked = "x" * (len(driver.bank_account_number) - 4) + driver.bank_account_number[-4:]
+                account_num_str = str(driver.driver_bank_account.bank_account_number)
+                account_masked = "x" * (len(account_num_str) - 4) + account_num_str[-4:]
             
             # 8. Create DTR record
             dtr_data = {

@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
 
-from app.leases.models import Lease
+from app.leases.models import Lease, LeaseDriver
 from app.leases.schemas import LeaseStatus
 from app.drivers.models import Driver
 from app.vehicles.models import Vehicle
@@ -108,11 +108,11 @@ class CurrentBalancesService:
         query = (
             self.db.query(Lease)
             .options(
-                joinedload(Lease.primary_driver).joinedload(Driver.tlc_license),
+                joinedload(Lease.lease_driver).joinedload(LeaseDriver.driver).joinedload(Driver.tlc_license),
                 joinedload(Lease.vehicle),
                 joinedload(Lease.medallion)
             )
-            .filter(Lease.status.in_([LeaseStatus.ACTIVE, LeaseStatus.TERMINATED]))
+            .filter(Lease.lease_status.in_([LeaseStatus.ACTIVE, LeaseStatus.TERMINATED]))
         )
         
         # Apply filters
@@ -129,7 +129,7 @@ class CurrentBalancesService:
                 )
             
             if filters.lease_status:
-                query = query.filter(Lease.status == filters.lease_status.value)
+                query = query.filter(Lease.lease_status == filters.lease_status.value)
             
             if filters.driver_status and filters.driver_status != DriverStatusEnum.ACTIVE:
                 # Filter by driver status
@@ -163,7 +163,12 @@ class CurrentBalancesService:
     ) -> WeeklyBalanceRow:
         """Calculate real-time balance for a single lease"""
         
-        driver = lease.primary_driver
+        # Get the primary driver (not additional driver)
+        driver = None
+        if lease.lease_driver:
+            primary_drivers = [ld.driver for ld in lease.lease_driver if not ld.is_additional_driver]
+            driver = primary_drivers[0] if primary_drivers else (lease.lease_driver[0].driver if lease.lease_driver else None)
+        
         vehicle = lease.vehicle
         medallion = lease.medallion
         
@@ -340,7 +345,9 @@ class CurrentBalancesService:
     
     def _get_weekly_lease_fee(self, lease: Lease) -> Decimal:
         """Get weekly lease fee"""
-        return lease.weekly_lease_amount or Decimal("0")
+        # Use overridden rate if available, otherwise use preset rate
+        weekly_rate = lease.overridden_weekly_rate or lease.preset_weekly_rate
+        return Decimal(str(weekly_rate)) if weekly_rate else Decimal("0")
     
     def _get_mta_tif_charges(self, lease_id: int, week_start: date, week_end: date) -> Decimal:
         """Get MTA/TIF charges for the week"""
@@ -407,14 +414,14 @@ class CurrentBalancesService:
     
     def _get_repairs_wtd(self, lease_id: int, week_start: date, week_end: date) -> Decimal:
         """Get repairs due this week only"""
+        # Note: LedgerBalance doesn't have due_date, so getting all open repair balances
+        # TODO: Join with repair tables to get actual due dates if needed
         result = (
             self.db.query(func.coalesce(func.sum(LedgerBalance.balance), 0))
             .filter(
                 LedgerBalance.lease_id == lease_id,
                 LedgerBalance.category == PostingCategory.REPAIR,
-                LedgerBalance.status == BalanceStatus.OPEN,
-                LedgerBalance.due_date >= week_start,
-                LedgerBalance.due_date <= week_end
+                LedgerBalance.status == BalanceStatus.OPEN
             )
             .scalar()
         )
@@ -422,14 +429,14 @@ class CurrentBalancesService:
     
     def _get_loans_wtd(self, lease_id: int, week_start: date, week_end: date) -> Decimal:
         """Get loan installments due this week only"""
+        # Note: LedgerBalance doesn't have due_date, so getting all open loan balances
+        # TODO: Join with loan tables to get actual due dates if needed
         result = (
             self.db.query(func.coalesce(func.sum(LedgerBalance.balance), 0))
             .filter(
                 LedgerBalance.lease_id == lease_id,
                 LedgerBalance.category == PostingCategory.LOAN,
-                LedgerBalance.status == BalanceStatus.OPEN,
-                LedgerBalance.due_date >= week_start,
-                LedgerBalance.due_date <= week_end
+                LedgerBalance.status == BalanceStatus.OPEN
             )
             .scalar()
         )

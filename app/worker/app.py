@@ -33,7 +33,14 @@ app.config_from_object("app.worker.config")
 app.autodiscover_tasks([
     "app.worker",
     "app.curb",
+    "app.pvb",
+    "app.ezpass",
+    "app.loans",
+    "app.repairs",
+    "app.tlc",
     "app.ledger",
+    "app.driver_payments",
+    "app.leases",
 ])
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ router = APIRouter(prefix="/ledger", tags=["Ledger"])
     response_model=PaginatedLedgerBalanceResponse,
     summary="List Ledger Balances",
 )
-async def list_ledger_balances(
+def list_ledger_balances(
     use_stubs: bool = Query(False, description="Return stubbed data for testing."),
     page: int = Query(1, ge=1, description="Page number for pagination."),
     per_page: int = Query(10, ge=1, le=100, description="Items per page."),
@@ -56,7 +56,7 @@ async def list_ledger_balances(
         return create_stub_balance_response(page, per_page)
 
     try:
-        balances, total_items = await ledger_service.list_balances(
+        balances, total_items = ledger_service.list_balances(
             page=page,
             per_page=per_page,
             sort_by=sort_by,
@@ -93,7 +93,7 @@ async def list_ledger_balances(
     response_model=PaginatedLedgerPostingResponse,
     summary="List Ledger Postings",
 )
-async def list_ledger_postings(
+def list_ledger_postings(
     use_stubs: bool = Query(False, description="Return stubbed data for testing."),
     page: int = Query(1, ge=1, description="Page number for pagination."),
     per_page: int = Query(10, ge=1, le=100, description="Items per page."),
@@ -120,7 +120,7 @@ async def list_ledger_postings(
         return create_stub_posting_response(page, per_page)
 
     try:
-        postings, total_items = await ledger_service.list_postings(
+        postings, total_items = ledger_service.list_postings(
             page=page,
             per_page=per_page,
             sort_by=sort_by,
@@ -152,7 +152,7 @@ async def list_ledger_postings(
 
 
 @router.post("/postings/{posting_id}/void", status_code=status.HTTP_200_OK)
-async def void_ledger_posting(
+def void_ledger_posting(
     posting_id: str,
     payload: VoidPostingRequest,
     db_session=Depends(get_db_with_current_user),
@@ -163,7 +163,7 @@ async def void_ledger_posting(
     Voids a specific ledger posting by creating a reversal entry.
     """
     try:
-        reversal_posting = await ledger_service.void_posting(
+        reversal_posting = ledger_service.void_posting(
             posting_id=posting_id, reason=payload.reason
         )
         return {
@@ -186,7 +186,7 @@ async def void_ledger_posting(
 
 
 @router.get("/export", summary="Export Ledger Data")
-async def export_ledger_data(
+def export_ledger_data(
     export_type: str = Query("postings", enum=["postings", "balances"]),
     format: str = Query("excel", enum=["excel", "pdf"]),
     # Pass through all filters from the list endpoints to the service layer
@@ -213,7 +213,7 @@ async def export_ledger_data(
         
         if export_type == "postings":
             filename_prefix = "ledger_postings"
-            postings, _ = await ledger_service.list_postings(
+            postings, _ = ledger_service.list_postings(
                 include_all=True, # Bypass pagination
                 sort_by=sort_by, sort_order=sort_order,
                 start_date=start_date, end_date=end_date, status=status,
@@ -223,7 +223,7 @@ async def export_ledger_data(
             data = postings
         else: # balances
             filename_prefix = "ledger_balances"
-            balances, _ = await ledger_service.list_balances(
+            balances, _ = ledger_service.list_balances(
                 include_all=True, # Bypass pagination
                 sort_by=sort_by, sort_order=sort_order, driver_name=driver_name,
                 lease_id=lease_id, status=status, category=category

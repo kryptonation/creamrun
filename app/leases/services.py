@@ -62,6 +62,7 @@ class LeaseService:
         lease_start_date: Optional[date] = None,
         lease_end_date: Optional[date] = None,
         status: Optional[str] = None,
+        lease_amount: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
         exclude_additional_drivers: Optional[bool] = True,
@@ -76,6 +77,7 @@ class LeaseService:
             joined_lease_driver = False
             joined_driver = False
             joined_tlc_license = False
+            joined_lease_configuration = False
 
             if lookup_id:
                 query = query.filter(Lease.id == lookup_id)
@@ -212,6 +214,34 @@ class LeaseService:
             if status:
                 query = query.filter(Lease.lease_status == status)
 
+            if lease_amount is not None:
+                from sqlalchemy import Float, cast
+
+                # Parse comma-separated lease amounts
+                lease_amounts = [
+                    float(amt.strip()) for amt in str(lease_amount).split(",") if amt.strip()
+                ]
+
+                if not joined_lease_configuration:
+                    query = query.join(
+                        LeaseConfiguration,
+                        and_(
+                            LeaseConfiguration.lease_id == Lease.id,
+                            LeaseConfiguration.lease_breakup_type == "lease_amount",
+                        ),
+                    )
+                    joined_lease_configuration = True
+
+                # Filter by multiple lease amounts using OR
+                query = query.filter(
+                    or_(
+                        *[
+                            cast(LeaseConfiguration.lease_limit, Float) == amt
+                            for amt in lease_amounts
+                        ]
+                    )
+                )
+
             if sort_by:
                 sort_attr = [
                     "lease_id",
@@ -226,6 +256,7 @@ class LeaseService:
                     "driver_id",
                     "driver_name",
                     "tlc_number",
+                    "lease_amount",
                 ]
                 if sort_by in sort_attr:
                     if sort_by == "vin_no":
@@ -352,6 +383,24 @@ class LeaseService:
                             Lease.lease_id.asc()
                             if sort_order == "asc"
                             else Lease.lease_id.desc()
+                        )
+                    if sort_by == "lease_amount":
+                        # Join with LeaseConfiguration and cast lease_limit to numeric for proper sorting
+                        from sqlalchemy import Float, cast
+
+                        if not joined_lease_configuration:
+                            query = query.outerjoin(
+                                LeaseConfiguration,
+                                and_(
+                                    LeaseConfiguration.lease_id == Lease.id,
+                                    LeaseConfiguration.lease_breakup_type == "lease_amount",
+                                ),
+                            )
+                            joined_lease_configuration = True
+                        query = query.order_by(
+                            cast(LeaseConfiguration.lease_limit, Float).asc()
+                            if sort_order == "asc"
+                            else cast(LeaseConfiguration.lease_limit, Float).desc()
                         )
             else:
                 query = query.order_by(Lease.updated_on.desc(), Lease.created_on.desc())

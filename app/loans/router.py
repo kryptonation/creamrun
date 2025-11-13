@@ -3,7 +3,7 @@
 import math
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Optional , List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -45,14 +45,15 @@ def list_driver_loans(
     per_page: int = Query(10, ge=1, le=100),
     sort_by: Optional[str] = Query("start_week"),
     sort_order: str = Query("desc", enum=["asc", "desc"]),
+    tlc_number : Optional[str] = Query(None),
+    lease_id : Optional[str] = Query(None),
     loan_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    status: Optional[List[str]] = Query(None),
     driver_name: Optional[str] = Query(None),
     medallion_no: Optional[str] = Query(None),
     lease_type: Optional[str] = Query(None),
     start_week: Optional[date] = Query(None),
-    loan_service: LoanService = Depends(get_loan_service),
-    current_user: User = Depends(get_current_user),
+    loan_service: LoanService = Depends(get_loan_service)
 ):
     """
     Retrieves a paginated and filterable list of all driver loans.
@@ -63,6 +64,7 @@ def list_driver_loans(
     try:
         loans, total_items = loan_service.repo.list_loans(
             page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            tlc_number=tlc_number, lease_id=lease_id,
             loan_id=loan_id, status=status, driver_name=driver_name,
             medallion_no=medallion_no, lease_type=lease_type, start_week=start_week
         )

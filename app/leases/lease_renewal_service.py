@@ -8,6 +8,8 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
+from app.audit_trail.schemas import AuditTrailType
+from app.audit_trail.services import audit_trail_service
 from app.core.config import settings
 from app.leases.models import Lease, LeaseConfiguration, LeaseDriver, LeaseSchedule
 from app.leases.schemas import (
@@ -512,9 +514,27 @@ def renew_lease(db: Session, lease: Lease, renewal_date) -> Dict[str, Any]:
         result["action"] = f"Unknown lease type: {lease_type}, no renewal performed"
         return result
 
-    # Commit the lease changes first
-    db.commit()
+    # Flush the lease changes first
+    db.flush()
     db.refresh(lease)
+
+    # Create audit trail for lease renewal
+    try:
+        audit_description = f"Lease auto-renewed. New end date: {result['new_end_date']}"
+        audit_trail_service.create_audit_trail(
+            db=db,
+            description=audit_description,
+            case=None,
+            user=None,  # Automated renewal, no user
+            meta_data={
+                "lease_id": lease.id,
+            },
+            audit_type=AuditTrailType.AUTOMATED,
+        )
+        logger.info(f"Created audit trail for lease renewal: {lease.lease_id}")
+    except Exception as e:
+        logger.error(f"Error creating audit trail for lease {lease.lease_id}: {str(e)}")
+        # Don't fail the renewal if audit trail creation fails
 
     # Create new lease schedule for the renewed lease
     try:

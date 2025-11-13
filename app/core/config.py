@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     registration: float = 0.00
 
     common_date_format: str = ""
+    common_time_format: str = ""
     common_signature_file: str = ""
 
     dov_security_deposit_cap: float = 0.00
@@ -147,6 +148,10 @@ class Settings(BaseSettings):
     lease_renewal_sms_template_key: str = "email_sms_templates/lease_renewal_sms.txt"
 
     super_admin_email_id: str = "superadmin@bat.com"
+
+    # Lease termination configuration
+    lease_termination_reasons: str = ""
+    lease_deposit_release_days: int = 30
 
     @property
     def db_url(self) -> str:

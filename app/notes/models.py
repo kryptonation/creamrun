@@ -30,13 +30,15 @@ class Note(Base, AuditMixin):
 
     def to_dict(self):
         """Convert the Note model to a dictionary"""
+        from app.core.config import settings
+
         return {
             "id": self.id,
             "note_type": self.note_type,
             "note": self.note,
-            "created_on": self.created_on,
-            "updated_on": self.updated_on,
-            "created_by": self.created_by,
+            "created_on": self.created_on.strftime(settings.common_date_format) if self.created_on and settings.common_date_format else "",
+            "updated_on": self.updated_on.strftime(settings.common_date_format) if self.updated_on and settings.common_date_format else "",
+            "created_by": self.created_by if self.created_by else "",
         }
 
 

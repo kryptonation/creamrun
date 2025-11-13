@@ -27,13 +27,16 @@ def parse_corporation(db: Session, df: pd.DataFrame):
             corporation_name = get_safe_value(row, 'corporation_name')
             primary_address = get_safe_value(row, 'primary_address')
             parent_company = get_safe_value(row, 'parent_company')
+            is_holding_entity = get_safe_value(row , "is_holding_co")
             
             # Skip rows missing mandatory fields
             if not corporation_name:
                 logger.warning("Skipping row with missing corporation_name")
                 continue
 
-            holding_entity = entity_service.get_corporation(db=db , name = parent_company , is_holding_entity=True)
+            holding_entity = None
+            if not is_holding_entity and parent_company:
+                holding_entity = entity_service.get_corporation(db=db , name = parent_company , is_holding_entity=True)
             # Lookup Address by address_line_1
             address = db.query(Address).filter_by(address_line_1=primary_address).first()
             # Check for existing records
@@ -47,7 +50,7 @@ def parse_corporation(db: Session, df: pd.DataFrame):
                 corporation.primary_contact_number = get_safe_value(row, 'primary_contact_number')
                 corporation.primary_email_address = get_safe_value(row, 'primary_email_address')
                 corporation.is_active = get_safe_value(row, 'is_active') == 'True'
-                corporation.is_holding_entity = get_safe_value(row , "is_holding_co")
+                corporation.is_holding_entity = is_holding_entity
                 corporation.linked_pad_owner_id = holding_entity.id if holding_entity else None
                 corporation.is_llc = get_safe_value(row, 'is_llc') == 'Y'
                 corporation.modified_by = SUPERADMIN_USER_ID
@@ -63,7 +66,7 @@ def parse_corporation(db: Session, df: pd.DataFrame):
                     primary_contact_number=get_safe_value(row, 'primary_contact_number'),
                     primary_email_address=get_safe_value(row, 'primary_email_address'),
                     is_active=get_safe_value(row, 'is_active') == 'True',
-                    is_holding_entity= get_safe_value(row , "is_holding_co"),
+                    is_holding_entity= is_holding_entity,
                     linked_pad_owner_id= holding_entity.id if holding_entity else None,
                     is_llc=get_safe_value(row, 'is_llc') == 'Y',
                     created_by=SUPERADMIN_USER_ID,

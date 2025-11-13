@@ -16,6 +16,7 @@ from app.interim_payments.services import InterimPaymentService
 from app.leases.services import lease_service
 from app.ledger.services import LedgerService
 from app.utils.logger import get_logger
+from app.utils.general import generate_random_string
 
 logger = get_logger(__name__)
 
@@ -26,7 +27,7 @@ entity_mapper = {
 }
 
 
-@step(step_id="301", name="Fetch - Search Driver & Enter Payment Details", operation="fetch")
+@step(step_id="210", name="Fetch - Search Driver & Enter Payment Details", operation="fetch")
 def fetch_driver_and_lease_details(db: Session, case_no: str, case_params: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Fetches driver details and active leases for the interim payment workflow.
@@ -74,7 +75,7 @@ def fetch_driver_and_lease_details(db: Session, case_no: str, case_params: Optio
         
         # Fetch active lease for the driver
         active_leases = lease_service.get_lease(
-            db, driver_id=driver.id, status="Active", exclude_additional_drivers=True, multiple=True
+            db, driver_id=driver.driver_id, status="Active", exclude_additional_drivers=True, multiple=True
         )
 
         if not active_leases or not active_leases[0]:
@@ -116,7 +117,7 @@ def fetch_driver_and_lease_details(db: Session, case_no: str, case_params: Optio
         logger.error("Error fetching driver and lease details", case_no=case_no, error=str(e))
         raise HTTPException(status_code=500, detail="An error occured while fetching driver details") from e
     
-@step(step_id="301", name="Process - Create Interim Payment Record", operation="process")
+@step(step_id="210", name="Process - Create Interim Payment Record", operation="process")
 def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str, Any]) -> Dict[str, str]:
     """
     Creates an interim payment entry record with the selected driver and lease.
@@ -147,13 +148,13 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
             raise HTTPException(status_code=404, detail="Driver not found")
         
         # Validate lease existence
-        lease = lease_service.get_lease(db, lookup_id=lease_id, status="Active")
+        lease = lease_service.get_lease(db, lease_id=lease_id, status="Active")
         if not lease:
             raise HTTPException(status_code=404, detail="Lease not found")
         
         lease_driver_exists = False
         for lease_driver in lease.lease_driver:
-            if lease_driver.driver_id == driver.id and not lease_driver.is_additional_driver:
+            if lease_driver.driver_id == driver.driver_id and not lease_driver.is_additional_driver:
                 lease_driver_exists = True
                 break
 
@@ -194,7 +195,7 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
             
         # Create new interim payment entry (draft state)
         new_interim_payment = InterimPayment(
-            payment_id=None,  # Will be generated later in step 302
+            payment_id= generate_random_string(),  # Will be generated later in step 302
             case_no=case_no,
             driver_id=driver.id,
             lease_id=lease.id,
@@ -215,7 +216,7 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
             db=db,
             case_no=case_no,
             entity_name=entity_mapper["INTERIM_PAYMENT"],
-            identifier=entity_mapper["INTERIM_PAYMENT_ID"],
+            identifier=entity_mapper["INTERIM_PAYMENT_IDENTIFIER"],
             identifier_value=str(new_interim_payment.id)
         )
         
@@ -253,7 +254,7 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
             detail=f"Failed to create interim payment entry: {str(e)}"
         ) from e
     
-@step(step_id="302", name="Fetch - Allocate Payments", operation="fetch")
+@step(step_id="211", name="Fetch - Allocate Payments", operation="fetch")
 def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Fetches outstanding ledger balances for the SPECIFIC lease selected in Step 301.
@@ -373,7 +374,7 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
             detail=f"An error occurred while fetching outstanding balances: {str(e)}"
         ) from e
 
-@step(step_id="302", name="Process - Allocate Payments", operation="process")
+@step(step_id="211", name="Process - Allocate Payments", operation="process")
 async def process_payment_allocation(db: Session, case_no: str, step_data: Dict[str, Any]) -> Dict[str, str]:
     """
     Processes the final submission of the interim payment with allocations.
@@ -539,7 +540,7 @@ async def process_payment_allocation(db: Session, case_no: str, step_data: Dict[
         allocation_dict = {alloc["reference_id"]: alloc["amount"] for alloc in formatted_allocations}
         
         ledger_service = LedgerService(db)
-        await ledger_service.apply_interim_payment(
+        ledger_service.apply_interim_payment(
             payment_amount=payment_amount,
             allocations=allocation_dict,
             driver_id=selected_driver_id,

@@ -1,4 +1,5 @@
 # Third party imports
+# import pdb
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -61,6 +62,7 @@ def load_and_process_data(
 ) -> pd.ExcelFile:
     """Load data from S3"""
     try:
+        # pdb.set_trace()
         data = s3_utils.download_file(key)
         excel_data = pd.ExcelFile(data)
 

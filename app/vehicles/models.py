@@ -254,8 +254,8 @@ class VehicleHackUp(Base, AuditMixin):
         ForeignKey("hackup_tasks.id"),
         nullable=True,
         comment="Foreign Key to HackUp Tasks table",
-        )
-    
+    )
+
     partition_task_id = Column(
         Integer,
         ForeignKey("hackup_tasks.id"),
@@ -263,7 +263,6 @@ class VehicleHackUp(Base, AuditMixin):
         comment="Foreign Key to HackUp Tasks table",
     )
 
-    
     meter_task_id = Column(
         Integer,
         ForeignKey("hackup_tasks.id"),
@@ -326,21 +325,47 @@ class VehicleHackUp(Base, AuditMixin):
         Date, nullable=True, comment="Insurance end date of the vehicle"
     )
 
-    
     status = Column(String(50), nullable=False, comment="HackUp Status")
 
     # Relationships
     vehicle = relationship("Vehicle", back_populates="hackups")
-    paint_task = relationship("HackUpTasks", foreign_keys=[paint_task_id], back_populates="paint_hackups")
-    camera_task = relationship("HackUpTasks", foreign_keys=[camera_task_id], back_populates="camera_hackups")
-    partition_task = relationship("HackUpTasks", foreign_keys=[partition_task_id], back_populates="partition_hackups")
-    meter_task = relationship("HackUpTasks", foreign_keys=[meter_task_id], back_populates="meter_hackups")
-    rooftop_task = relationship("HackUpTasks", foreign_keys=[rooftop_task_id], back_populates="rooftop_hackups")
-    dmv_registration_task = relationship("HackUpTasks", foreign_keys=[dmv_registration_task_id], back_populates="dmv_registration_hackups")
-    tlc_inspection_task = relationship("HackUpTasks", foreign_keys=[tlc_inspection_task_id], back_populates="tlc_inspection_hackups")
-    dealership_task = relationship("HackUpTasks", foreign_keys=[dealership_task_id], back_populates="dealership_hackups")
-    bat_garage_task = relationship("HackUpTasks", foreign_keys=[bat_garage_task_id], back_populates="bat_garage_hackups")
-
+    paint_task = relationship(
+        "HackUpTasks", foreign_keys=[paint_task_id], back_populates="paint_hackups"
+    )
+    camera_task = relationship(
+        "HackUpTasks", foreign_keys=[camera_task_id], back_populates="camera_hackups"
+    )
+    partition_task = relationship(
+        "HackUpTasks",
+        foreign_keys=[partition_task_id],
+        back_populates="partition_hackups",
+    )
+    meter_task = relationship(
+        "HackUpTasks", foreign_keys=[meter_task_id], back_populates="meter_hackups"
+    )
+    rooftop_task = relationship(
+        "HackUpTasks", foreign_keys=[rooftop_task_id], back_populates="rooftop_hackups"
+    )
+    dmv_registration_task = relationship(
+        "HackUpTasks",
+        foreign_keys=[dmv_registration_task_id],
+        back_populates="dmv_registration_hackups",
+    )
+    tlc_inspection_task = relationship(
+        "HackUpTasks",
+        foreign_keys=[tlc_inspection_task_id],
+        back_populates="tlc_inspection_hackups",
+    )
+    dealership_task = relationship(
+        "HackUpTasks",
+        foreign_keys=[dealership_task_id],
+        back_populates="dealership_hackups",
+    )
+    bat_garage_task = relationship(
+        "HackUpTasks",
+        foreign_keys=[bat_garage_task_id],
+        back_populates="bat_garage_hackups",
+    )
 
     def to_dict(self):
         """Convert VehicleHackUp object to a dictionary"""
@@ -356,19 +381,28 @@ class VehicleHackUp(Base, AuditMixin):
             "meter_serial_number": self.meter_serial_number,
             "meter": self.meter_task.to_dict() if self.meter_task else {},
             "rooftop": self.rooftop_task.to_dict() if self.rooftop_task else {},
-            "dmv_registration": self.dmv_registration_task.to_dict() if self.dmv_registration_task else {},
-            "tlc_inspection": self.tlc_inspection_task.to_dict() if self.tlc_inspection_task else {},
-            "dealership": self.dealership_task.to_dict() if self.dealership_task else {},
-            "bat_garage": self.bat_garage_task.to_dict() if self.bat_garage_task else {},
+            "dmv_registration": self.dmv_registration_task.to_dict()
+            if self.dmv_registration_task
+            else {},
+            "tlc_inspection": self.tlc_inspection_task.to_dict()
+            if self.tlc_inspection_task
+            else {},
+            "dealership": self.dealership_task.to_dict()
+            if self.dealership_task
+            else {},
+            "bat_garage": self.bat_garage_task.to_dict()
+            if self.bat_garage_task
+            else {},
             "status": self.status,
             "created_on": self.created_on,
             "updated_on": self.updated_on,
         }
 
-class HackUpTasks(Base , AuditMixin):
+
+class HackUpTasks(Base, AuditMixin):
     __tablename__ = "hackup_tasks"
 
-    id = Column(Integer, primary_key=True , nullable=False)
+    id = Column(Integer, primary_key=True, nullable=False)
     task_name = Column(String(255), nullable=True)
     drop_location = Column(String(255), nullable=True)
     drop_by = Column(String(255), nullable=True)
@@ -380,18 +414,52 @@ class HackUpTasks(Base , AuditMixin):
     is_task_done = Column(Boolean, nullable=True)
     is_required = Column(Boolean, nullable=True)
 
-    #relationship
-    paint_hackups = relationship("VehicleHackUp", back_populates="paint_task", foreign_keys="VehicleHackUp.paint_task_id")
-    camera_hackups = relationship("VehicleHackUp", back_populates="camera_task", foreign_keys="VehicleHackUp.camera_task_id")
-    partition_hackups = relationship("VehicleHackUp", back_populates="partition_task", foreign_keys="VehicleHackUp.partition_task_id")
-    meter_hackups = relationship("VehicleHackUp", back_populates="meter_task", foreign_keys="VehicleHackUp.meter_task_id")
-    rooftop_hackups = relationship("VehicleHackUp", back_populates="rooftop_task", foreign_keys="VehicleHackUp.rooftop_task_id")
-    dmv_registration_hackups = relationship("VehicleHackUp", back_populates="dmv_registration_task", foreign_keys="VehicleHackUp.dmv_registration_task_id")
-    tlc_inspection_hackups = relationship("VehicleHackUp", back_populates="tlc_inspection_task", foreign_keys="VehicleHackUp.tlc_inspection_task_id")
-    dealership_hackups = relationship("VehicleHackUp", back_populates="dealership_task", foreign_keys="VehicleHackUp.dealership_task_id")
-    bat_garage_hackups = relationship("VehicleHackUp", back_populates="bat_garage_task", foreign_keys="VehicleHackUp.bat_garage_task_id")
-
-
+    # relationship
+    paint_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="paint_task",
+        foreign_keys="VehicleHackUp.paint_task_id",
+    )
+    camera_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="camera_task",
+        foreign_keys="VehicleHackUp.camera_task_id",
+    )
+    partition_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="partition_task",
+        foreign_keys="VehicleHackUp.partition_task_id",
+    )
+    meter_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="meter_task",
+        foreign_keys="VehicleHackUp.meter_task_id",
+    )
+    rooftop_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="rooftop_task",
+        foreign_keys="VehicleHackUp.rooftop_task_id",
+    )
+    dmv_registration_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="dmv_registration_task",
+        foreign_keys="VehicleHackUp.dmv_registration_task_id",
+    )
+    tlc_inspection_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="tlc_inspection_task",
+        foreign_keys="VehicleHackUp.tlc_inspection_task_id",
+    )
+    dealership_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="dealership_task",
+        foreign_keys="VehicleHackUp.dealership_task_id",
+    )
+    bat_garage_hackups = relationship(
+        "VehicleHackUp",
+        back_populates="bat_garage_task",
+        foreign_keys="VehicleHackUp.bat_garage_task_id",
+    )
 
     def to_dict(self):
         return {
@@ -407,7 +475,7 @@ class HackUpTasks(Base , AuditMixin):
             "is_task_done": self.is_task_done,
             "is_required": self.is_required,
         }
-    
+
 
 class Vehicle(Base, AuditMixin):
     """
@@ -534,8 +602,38 @@ class Vehicle(Base, AuditMixin):
 
     expenses_and_compliance = relationship("VehicleExpensesAndCompliance", back_populates="vehicle")
 
+    def get_active_plate_number(self):
+        """
+        Get the plate number from the active vehicle registration.
+        Falls back to the first registration if no active one exists.
+        Returns None if no registrations exist.
+        """
+        if not self.registrations:
+            return None
+
+        # Try to find an active registration
+        active_reg = next(
+            (reg for reg in self.registrations if reg.status == "Active"),
+            None
+        )
+
+        # If no active registration, use the first one
+        if not active_reg and self.registrations:
+            active_reg = self.registrations[0]
+
+        return active_reg.plate_number if active_reg else None
+
     def to_dict(self):
         """Convert Vehicle object to a dictionary"""
+        from app.core.config import settings
+
+        # Get latest active registration
+        active_registration = None
+        if self.registrations:
+            active_registration = next(
+                (reg for reg in self.registrations if reg.status == "Active"), None
+            )
+
         return {
             "vehicle_id": self.id,
             "vin": self.vin,
@@ -562,6 +660,19 @@ class Vehicle(Base, AuditMixin):
             else None,
             "dealer_id": self.dealer_id,
             "medallion_id": self.medallion_id,
+            "plate_number": active_registration.plate_number
+            if active_registration
+            else "",
+            "registration_state": active_registration.registration_state
+            if active_registration
+            else "",
+            "registration_date": active_registration.registration_date.strftime(
+                settings.common_date_format
+            )
+            if active_registration
+            and active_registration.registration_date
+            and settings.common_date_format
+            else "",
             "created_on": self.created_on,
             "updated_on": self.updated_on,
         }

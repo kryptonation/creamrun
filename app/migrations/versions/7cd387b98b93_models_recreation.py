@@ -1,8 +1,8 @@
-"""recreating models
+"""models recreation
 
-Revision ID: 6cb65a8da121
+Revision ID: 7cd387b98b93
 Revises: 
-Create Date: 2025-11-02 20:49:16.787258
+Create Date: 2025-11-12 11:42:44.403992
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '6cb65a8da121'
+revision: str = '7cd387b98b93'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -40,6 +40,34 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
+    op.create_table('ach_batches',
+    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('batch_number', sa.String(length=20), nullable=False, comment='Format: YYMM-XXX (e.g., 2510-001)'),
+    sa.Column('batch_date', sa.DateTime(timezone=True), nullable=False, comment='When the batch was created'),
+    sa.Column('effective_date', sa.Date(), nullable=False, comment='Effective entry date for ACH processing'),
+    sa.Column('status', sa.Enum('DRAFT', 'CONFIRMED', 'NACHA_GENERATED', 'SUBMITTED', 'REVERSED', name='achbatchstatus'), nullable=False),
+    sa.Column('total_payments', sa.Integer(), nullable=False, comment='Number of payments in batch'),
+    sa.Column('total_amount', sa.Numeric(precision=12, scale=2), nullable=False, comment='Total dollar amount of batch'),
+    sa.Column('nacha_file_path', sa.String(length=500), nullable=True, comment='S3 path to generated NACHA file'),
+    sa.Column('nacha_generated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('is_reversed', sa.Boolean(), nullable=False),
+    sa.Column('reversed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('reversed_by', sa.Integer(), nullable=True),
+    sa.Column('reversal_reason', sa.Text(), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['reversed_by'], ['users.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_ach_batches_batch_number'), 'ach_batches', ['batch_number'], unique=True)
+    op.create_index(op.f('ix_ach_batches_is_reversed'), 'ach_batches', ['is_reversed'], unique=False)
+    op.create_index(op.f('ix_ach_batches_status'), 'ach_batches', ['status'], unique=False)
     op.create_table('address',
     sa.Column('id', sa.Integer(), nullable=False, comment='Primary Key for Address'),
     sa.Column('address_line_1', sa.String(length=255), nullable=True, comment='Line 1 of the Address'),
@@ -115,6 +143,26 @@ def upgrade() -> None:
     op.create_index(op.f('ix_case_types_id'), 'case_types', ['id'], unique=False)
     op.create_index(op.f('ix_case_types_name'), 'case_types', ['name'], unique=True)
     op.create_index(op.f('ix_case_types_prefix'), 'case_types', ['prefix'], unique=True)
+    op.create_table('company_bank_configuration',
+    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('company_name', sa.String(length=255), nullable=False, comment='Company name for NACHA file'),
+    sa.Column('company_tax_id', sa.String(length=10), nullable=False, comment='Company EIN or tax ID (10 digits)'),
+    sa.Column('bank_name', sa.String(length=255), nullable=False),
+    sa.Column('bank_routing_number', sa.String(length=9), nullable=False, comment='9-digit ABA routing number'),
+    sa.Column('bank_account_number', sa.String(length=17), nullable=False, comment='Company account number (up to 17 digits)'),
+    sa.Column('immediate_origin', sa.String(length=10), nullable=False, comment='10-digit originator ID for NACHA'),
+    sa.Column('immediate_destination', sa.String(length=10), nullable=False, comment='10-digit destination routing for NACHA'),
+    sa.Column('company_entry_description', sa.String(length=10), nullable=False, comment='Description for NACHA batch (max 10 chars)'),
+    sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('dealers',
     sa.Column('id', sa.Integer(), nullable=False, comment='Primary Key for Vehicles'),
     sa.Column('dealer_name', sa.String(length=255), nullable=True, comment='Name of the dealer'),
@@ -214,6 +262,26 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_esign_envelopes_envelope_id'), 'esign_envelopes', ['envelope_id'], unique=True)
     op.create_index(op.f('ix_esign_envelopes_id'), 'esign_envelopes', ['id'], unique=False)
+    op.create_table('ezpass_imports',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('file_name', sa.String(length=255), nullable=False, comment='Original name of the uploaded CSV file.'),
+    sa.Column('import_timestamp', sa.DateTime(timezone=True), nullable=False, comment='Timestamp when the import process began.'),
+    sa.Column('status', sa.Enum('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', name='ezpassimportstatus'), nullable=False),
+    sa.Column('total_records', sa.Integer(), nullable=False, comment='Total number of rows in the CSV file.'),
+    sa.Column('successful_records', sa.Integer(), nullable=False, comment='Number of records successfully imported.'),
+    sa.Column('failed_records', sa.Integer(), nullable=False, comment='Number of records that failed validation.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_ezpass_imports_id'), 'ezpass_imports', ['id'], unique=False)
+    op.create_index(op.f('ix_ezpass_imports_status'), 'ezpass_imports', ['status'], unique=False)
     op.create_table('hackup_tasks',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('task_name', sa.String(length=255), nullable=True),
@@ -326,6 +394,26 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('pvb_imports',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('file_name', sa.String(length=255), nullable=False, comment='Original name of the uploaded CSV file.'),
+    sa.Column('import_timestamp', sa.DateTime(timezone=True), nullable=False, comment='Timestamp when the import process began.'),
+    sa.Column('status', sa.Enum('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', name='pvbimportstatus'), nullable=False),
+    sa.Column('total_records', sa.Integer(), nullable=False, comment='Total number of rows in the CSV file.'),
+    sa.Column('successful_records', sa.Integer(), nullable=False, comment='Number of records successfully imported.'),
+    sa.Column('failed_records', sa.Integer(), nullable=False, comment='Number of records that failed validation.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_pvb_imports_id'), 'pvb_imports', ['id'], unique=False)
+    op.create_index(op.f('ix_pvb_imports_status'), 'pvb_imports', ['status'], unique=False)
     op.create_table('query_records',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=True),
@@ -1046,6 +1134,33 @@ def upgrade() -> None:
     sa.UniqueConstraint('lease_id')
     )
     op.create_index(op.f('ix_leases_id'), 'leases', ['id'], unique=False)
+    op.create_table('vehicle_expenses_and_compliance',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('vehicle_id', sa.Integer(), nullable=False),
+    sa.Column('category', sa.String(length=255), nullable=True),
+    sa.Column('sub_type', sa.String(length=255), nullable=True),
+    sa.Column('invoice_number', sa.String(length=255), nullable=True),
+    sa.Column('amount', sa.Float(), nullable=True),
+    sa.Column('vendor_name', sa.String(length=255), nullable=True),
+    sa.Column('issue_date', sa.Date(), nullable=True),
+    sa.Column('expiry_date', sa.Date(), nullable=True),
+    sa.Column('note', sa.Text(), nullable=True),
+    sa.Column('document_id', sa.Integer(), nullable=True),
+    sa.Column('deleted_at', sa.DateTime(), nullable=True),
+    sa.Column('deleted_by', sa.Integer(), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['deleted_by'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['document_id'], ['document.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('vehicle_hackups',
     sa.Column('id', sa.Integer(), nullable=False, comment='Primary Key for Vehicle HackUp'),
     sa.Column('vehicle_id', sa.Integer(), nullable=False, comment='Foreign Key to Vehicles table'),
@@ -1151,6 +1266,291 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('curb_trips',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('curb_trip_id', sa.String(length=255), nullable=False, comment='Unique identifier for the trip from CURB (e.g., ROWID).'),
+    sa.Column('curb_period', sa.String(length=50), nullable=True, comment="The accounting period from CURB (e.g., '201903')."),
+    sa.Column('status', sa.Enum('UNRECONCILED', 'RECONCILED', 'POSTED_TO_LEDGER', 'ERROR', name='curbtripstatus'), nullable=False, comment='The processing status of the trip within the BAT system.'),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('curb_driver_id', sa.String(length=100), nullable=False, comment='The raw driver identifier from CURB.'),
+    sa.Column('curb_cab_number', sa.String(length=100), nullable=True, comment='The raw cab/medallion number from CURB.'),
+    sa.Column('plate', sa.String(length=50), nullable=True, comment='Vehicle plate number, if available.'),
+    sa.Column('start_time', sa.DateTime(timezone=True), nullable=False, comment='The start date and time of the trip.'),
+    sa.Column('end_time', sa.DateTime(timezone=True), nullable=False, comment='The end date and time of the trip.'),
+    sa.Column('fare', sa.Numeric(precision=10, scale=2), nullable=False, comment='Base fare amount.'),
+    sa.Column('tips', sa.Numeric(precision=10, scale=2), nullable=False, comment='Tip amount.'),
+    sa.Column('tolls', sa.Numeric(precision=10, scale=2), nullable=False, comment='Toll charges.'),
+    sa.Column('extras', sa.Numeric(precision=10, scale=2), nullable=True, comment='Extra charges.'),
+    sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total amount charged for the trip.'),
+    sa.Column('surcharge', sa.Numeric(precision=10, scale=2), nullable=True, comment='State Surcharge (TAX).'),
+    sa.Column('improvement_surcharge', sa.Numeric(precision=10, scale=2), nullable=True, comment='Improvement Surcharge (IMPTAX / TIF).'),
+    sa.Column('congestion_fee', sa.Numeric(precision=10, scale=2), nullable=True, comment='Congestion Fee (CongFee).'),
+    sa.Column('airport_fee', sa.Numeric(precision=10, scale=2), nullable=True, comment='Airport Fee (airportFee).'),
+    sa.Column('cbdt_fee', sa.Numeric(precision=10, scale=2), nullable=True, comment='Congestion Relief Zone Toll (cbdt).'),
+    sa.Column('payment_type', sa.Enum('CASH', 'CREDIT_CARD', 'PRIVATE', 'UNKNOWN', name='paymenttype'), nullable=False, comment='Method of payment (Cash, Credit, etc.).'),
+    sa.Column('reconciliation_id', sa.String(length=100), nullable=True, comment='The reconciliation identifier sent back to CURB.'),
+    sa.Column('reconciled_at', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when the trip was reconciled.'),
+    sa.Column('start_long', sa.Numeric(precision=10, scale=7), nullable=True, comment='Starting longitude of the trip.'),
+    sa.Column('start_lat', sa.Numeric(precision=10, scale=7), nullable=True, comment='Starting latitude of the trip.'),
+    sa.Column('end_long', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending longitude of the trip.'),
+    sa.Column('end_lat', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending latitude of the trip.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_curb_trips_curb_cab_number'), 'curb_trips', ['curb_cab_number'], unique=False)
+    op.create_index(op.f('ix_curb_trips_curb_driver_id'), 'curb_trips', ['curb_driver_id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_curb_trip_id'), 'curb_trips', ['curb_trip_id'], unique=True)
+    op.create_index(op.f('ix_curb_trips_driver_id'), 'curb_trips', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_id'), 'curb_trips', ['id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_lease_id'), 'curb_trips', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_medallion_id'), 'curb_trips', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_reconciliation_id'), 'curb_trips', ['reconciliation_id'], unique=False)
+    op.create_index(op.f('ix_curb_trips_status'), 'curb_trips', ['status'], unique=False)
+    op.create_index(op.f('ix_curb_trips_vehicle_id'), 'curb_trips', ['vehicle_id'], unique=False)
+    op.create_table('driver_loans',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('loan_id', sa.String(length=50), nullable=False, comment='System-generated unique ID for the loan (e.g., DLN-YYYY-###).'),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('medallion_id', sa.Integer(), nullable=False),
+    sa.Column('principal_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The total principal amount of the loan.'),
+    sa.Column('interest_rate', sa.Numeric(precision=5, scale=2), nullable=False, comment='Annual interest rate (e.g., 10.00 for 10%).'),
+    sa.Column('notes', sa.Text(), nullable=True),
+    sa.Column('status', sa.Enum('DRAFT', 'OPEN', 'CLOSED', 'HOLD', 'CANCELLED', name='loanstatus'), nullable=False),
+    sa.Column('start_week', sa.Date(), nullable=False, comment='The Sunday that marks the beginning of the first repayment period.'),
+    sa.Column('loan_date', sa.Date(), nullable=False, comment='The date the loan was disbursed.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_driver_loans_driver_id'), 'driver_loans', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_driver_loans_id'), 'driver_loans', ['id'], unique=False)
+    op.create_index(op.f('ix_driver_loans_lease_id'), 'driver_loans', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_driver_loans_loan_id'), 'driver_loans', ['loan_id'], unique=True)
+    op.create_index(op.f('ix_driver_loans_medallion_id'), 'driver_loans', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_driver_loans_status'), 'driver_loans', ['status'], unique=False)
+    op.create_table('driver_transaction_receipts',
+    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('receipt_number', sa.String(length=20), nullable=False, comment='Unique receipt identifier (format: RCPT-XXXXX)'),
+    sa.Column('week_start_date', sa.Date(), nullable=False, comment='Sunday 00:00 AM - start of payment period'),
+    sa.Column('week_end_date', sa.Date(), nullable=False, comment='Saturday 11:59:59 PM - end of payment period'),
+    sa.Column('generation_date', sa.DateTime(timezone=True), nullable=False, comment='When this DTR was generated'),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('credit_card_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total CURB credit card earnings for the week'),
+    sa.Column('lease_amount', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_fees_total', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all MTA-related fees'),
+    sa.Column('mta_fee_mta', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_fee_tif', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_fee_congestion', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_fee_crbt', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_fee_airport', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('ezpass_tolls', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('pvb_violations', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('tlc_tickets', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('repairs', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('driver_loans', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('misc_charges', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('subtotal_deductions', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all deductions'),
+    sa.Column('net_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='credit_card_earnings - subtotal_deductions'),
+    sa.Column('total_due_to_driver', sa.Numeric(precision=10, scale=2), nullable=False, comment='Final amount owed to driver'),
+    sa.Column('status', sa.Enum('DRAFT', 'GENERATED', 'PAID', 'VOID', name='dtrstatus'), nullable=False),
+    sa.Column('ach_batch_id', sa.Integer(), nullable=True),
+    sa.Column('check_number', sa.String(length=50), nullable=True, comment='Manual check number if paid by check'),
+    sa.Column('payment_date', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['ach_batch_id'], ['ach_batches.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('driver_id', 'lease_id', 'week_start_date', name='uq_dtr_driver_lease_week')
+    )
+    op.create_index('idx_dtr_driver_lease', 'driver_transaction_receipts', ['driver_id', 'lease_id'], unique=False)
+    op.create_index('idx_dtr_status_payment', 'driver_transaction_receipts', ['status', 'ach_batch_id', 'check_number'], unique=False)
+    op.create_index('idx_dtr_week', 'driver_transaction_receipts', ['week_start_date', 'week_end_date'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_ach_batch_id'), 'driver_transaction_receipts', ['ach_batch_id'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_check_number'), 'driver_transaction_receipts', ['check_number'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_driver_id'), 'driver_transaction_receipts', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_lease_id'), 'driver_transaction_receipts', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_receipt_number'), 'driver_transaction_receipts', ['receipt_number'], unique=True)
+    op.create_index(op.f('ix_driver_transaction_receipts_status'), 'driver_transaction_receipts', ['status'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_week_end_date'), 'driver_transaction_receipts', ['week_end_date'], unique=False)
+    op.create_index(op.f('ix_driver_transaction_receipts_week_start_date'), 'driver_transaction_receipts', ['week_start_date'], unique=False)
+    op.create_table('dtrs',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('dtr_number', sa.String(length=50), nullable=False, comment='Unique DTR number (BAT system generated)'),
+    sa.Column('receipt_number', sa.String(length=50), nullable=False, comment='Receipt number for payment tracking'),
+    sa.Column('period_start_date', sa.Date(), nullable=False, comment='Payment period start (Sunday 00:00)'),
+    sa.Column('period_end_date', sa.Date(), nullable=False, comment='Payment period end (Saturday 23:59)'),
+    sa.Column('generation_date', sa.DateTime(), nullable=False, comment='Date and time DTR was generated'),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('status', sa.Enum('DRAFT', 'PENDING', 'FINALIZED', 'PAID', 'VOIDED', name='dtrstatus'), nullable=False),
+    sa.Column('gross_cc_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total credit card earnings from CURB'),
+    sa.Column('gross_cash_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total cash earnings (if tracked)'),
+    sa.Column('total_gross_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total gross earnings'),
+    sa.Column('lease_amount', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('mta_tif_fees', sa.Numeric(precision=10, scale=2), nullable=False, comment='MTA, TIF, Congestion, CRBT, Airport fees'),
+    sa.Column('ezpass_tolls', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('violation_tickets', sa.Numeric(precision=10, scale=2), nullable=False, comment='PVB violations'),
+    sa.Column('tlc_tickets', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('repairs', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('driver_loans', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('misc_charges', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('subtotal_charges', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all charges'),
+    sa.Column('prior_balance', sa.Numeric(precision=10, scale=2), nullable=False, comment='Outstanding balance from previous periods'),
+    sa.Column('net_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Gross earnings - subtotal - prior balance'),
+    sa.Column('total_due_to_driver', sa.Numeric(precision=10, scale=2), nullable=False, comment='Final amount payable to driver (can be negative)'),
+    sa.Column('payment_method', sa.Enum('ACH', 'CHECK', 'CASH', 'DIRECT_DEPOSIT', name='paymentmethod'), nullable=True),
+    sa.Column('payment_date', sa.DateTime(), nullable=True, comment='Date payment was processed'),
+    sa.Column('ach_batch_number', sa.String(length=50), nullable=True, comment='ACH batch number if paid via ACH'),
+    sa.Column('check_number', sa.String(length=50), nullable=True, comment='Check number if paid by check'),
+    sa.Column('account_number_masked', sa.String(length=20), nullable=True, comment='Last 4 digits of bank account (for security)'),
+    sa.Column('is_additional_driver_dtr', sa.Boolean(), nullable=False, comment='True if this is an additional driver DTR'),
+    sa.Column('parent_dtr_id', sa.Integer(), nullable=True, comment='Reference to primary DTR if this is additional driver'),
+    sa.Column('tax_breakdown', sa.JSON(), nullable=True, comment='Detailed tax breakdown (Airport, CBDT, Congestion, MTA, TIF)'),
+    sa.Column('ezpass_detail', sa.JSON(), nullable=True, comment='EZPass transaction details'),
+    sa.Column('pvb_detail', sa.JSON(), nullable=True, comment='PVB violation details'),
+    sa.Column('tlc_detail', sa.JSON(), nullable=True, comment='TLC ticket details'),
+    sa.Column('repair_detail', sa.JSON(), nullable=True, comment='Repair invoice details'),
+    sa.Column('loan_detail', sa.JSON(), nullable=True, comment='Loan installment details'),
+    sa.Column('trip_log', sa.JSON(), nullable=True, comment='Credit card trip log from CURB'),
+    sa.Column('alerts', sa.JSON(), nullable=True, comment='Vehicle and driver alerts (expiry dates, etc.)'),
+    sa.Column('notes', sa.Text(), nullable=True, comment='Additional notes or comments'),
+    sa.Column('voided_reason', sa.Text(), nullable=True, comment='Reason if DTR was voided'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['parent_dtr_id'], ['dtrs.id'], ),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_dtrs_ach_batch_number'), 'dtrs', ['ach_batch_number'], unique=False)
+    op.create_index(op.f('ix_dtrs_driver_id'), 'dtrs', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_dtrs_dtr_number'), 'dtrs', ['dtr_number'], unique=True)
+    op.create_index(op.f('ix_dtrs_id'), 'dtrs', ['id'], unique=False)
+    op.create_index(op.f('ix_dtrs_lease_id'), 'dtrs', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_dtrs_medallion_id'), 'dtrs', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_dtrs_period_end_date'), 'dtrs', ['period_end_date'], unique=False)
+    op.create_index(op.f('ix_dtrs_period_start_date'), 'dtrs', ['period_start_date'], unique=False)
+    op.create_index(op.f('ix_dtrs_receipt_number'), 'dtrs', ['receipt_number'], unique=True)
+    op.create_index(op.f('ix_dtrs_status'), 'dtrs', ['status'], unique=False)
+    op.create_index(op.f('ix_dtrs_vehicle_id'), 'dtrs', ['vehicle_id'], unique=False)
+    op.create_table('ezpass_transactions',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('import_id', sa.Integer(), nullable=False),
+    sa.Column('transaction_id', sa.String(length=255), nullable=False, comment='Unique Lane Txn ID from the CSV.'),
+    sa.Column('tag_or_plate', sa.String(length=100), nullable=False, comment='The tag or plate number from the CSV.'),
+    sa.Column('agency', sa.String(length=100), nullable=False, comment='Tolling agency (e.g., MTAB&T).'),
+    sa.Column('entry_plaza', sa.String(length=100), nullable=True),
+    sa.Column('exit_plaza', sa.String(length=100), nullable=True),
+    sa.Column('transaction_datetime', sa.DateTime(timezone=True), nullable=False, comment='The precise date and time of the toll transaction.'),
+    sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The cost of the toll.'),
+    sa.Column('med_from_csv', sa.String(length=50), nullable=True, comment="The 'MED' column from the CSV, stored for reference."),
+    sa.Column('status', sa.Enum('IMPORTED', 'ASSOCIATION_PENDING', 'ASSOCIATION_FAILED', 'ASSOCIATED', 'POSTING_PENDING', 'POSTING_FAILED', 'POSTED_TO_LEDGER', name='ezpasstransactionstatus'), nullable=False),
+    sa.Column('failure_reason', sa.Text(), nullable=True, comment='Stores the reason for an association or posting failure.'),
+    sa.Column('posting_date', sa.DateTime(timezone=True), nullable=True, comment='The date the transaction was posted to the ledger.'),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['import_id'], ['ezpass_imports.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_ezpass_transactions_driver_id'), 'ezpass_transactions', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_id'), 'ezpass_transactions', ['id'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_import_id'), 'ezpass_transactions', ['import_id'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_lease_id'), 'ezpass_transactions', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_medallion_id'), 'ezpass_transactions', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_status'), 'ezpass_transactions', ['status'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_tag_or_plate'), 'ezpass_transactions', ['tag_or_plate'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_transaction_datetime'), 'ezpass_transactions', ['transaction_datetime'], unique=False)
+    op.create_index(op.f('ix_ezpass_transactions_transaction_id'), 'ezpass_transactions', ['transaction_id'], unique=True)
+    op.create_index(op.f('ix_ezpass_transactions_vehicle_id'), 'ezpass_transactions', ['vehicle_id'], unique=False)
+    op.create_table('interim_payments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('payment_id', sa.String(length=50), nullable=False, comment='System-generated unique ID for the payment (e.g., INTPAY-[YYYY]-[#####]).'),
+    sa.Column('case_no', sa.String(length=255), nullable=False, comment='Links to the BPM case used for creation.'),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('payment_date', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The total amount received from the driver.'),
+    sa.Column('payment_method', sa.Enum('CASH', 'CHECK', 'ACH', name='paymentmethod'), nullable=False),
+    sa.Column('notes', sa.String(length=255), nullable=True, comment='Optional notes from the cashier.'),
+    sa.Column('allocations', sa.JSON(), nullable=True, comment='A JSON object detailing how the payment was allocated to different ledger balances.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_interim_payments_case_no'), 'interim_payments', ['case_no'], unique=False)
+    op.create_index(op.f('ix_interim_payments_driver_id'), 'interim_payments', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_interim_payments_id'), 'interim_payments', ['id'], unique=False)
+    op.create_index(op.f('ix_interim_payments_lease_id'), 'interim_payments', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_interim_payments_payment_id'), 'interim_payments', ['payment_id'], unique=True)
     op.create_table('lease_configuration',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('lease_id', sa.Integer(), nullable=True),
@@ -1240,6 +1640,239 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_lease_schedule_id'), 'lease_schedule', ['id'], unique=False)
+    op.create_table('ledger_balances',
+    sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('category', sa.Enum('LEASE', 'REPAIR', 'LOAN', 'EZPASS', 'PVB', 'TLC', 'TAXES', 'MISC', 'EARNINGS', 'INTERIM_PAYMENT', 'DEPOSIT', 'CANCELLATION_FEE', name='postingcategory'), nullable=False),
+    sa.Column('reference_id', sa.String(length=255), nullable=False, comment='Traceability ID to the source obligation (e.g., RepairInvoice ID, Loan ID)'),
+    sa.Column('original_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The immutable initial obligation amount'),
+    sa.Column('prior_balance', sa.Numeric(precision=10, scale=2), nullable=False, comment='Carried over unpaid portion from previous DTR cycle'),
+    sa.Column('balance', sa.Numeric(precision=10, scale=2), nullable=False, comment='The current remaining unpaid portion of the obligation'),
+    sa.Column('status', sa.Enum('OPEN', 'CLOSED', name='balancestatus'), nullable=False),
+    sa.Column('applied_payment_refs', sa.JSON(), nullable=True, comment='Stores a list of Posting_IDs for payments/earnings applied to this balance'),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('vin', sa.String(length=64), nullable=True, comment='Denormalized for filtering/reconciliation'),
+    sa.Column('plate', sa.String(length=255), nullable=True, comment='Denormalized for filtering/reconciliation'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_ledger_balances_category'), 'ledger_balances', ['category'], unique=False)
+    op.create_index(op.f('ix_ledger_balances_driver_id'), 'ledger_balances', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_ledger_balances_lease_id'), 'ledger_balances', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_ledger_balances_medallion_id'), 'ledger_balances', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_ledger_balances_reference_id'), 'ledger_balances', ['reference_id'], unique=False)
+    op.create_index(op.f('ix_ledger_balances_vehicle_id'), 'ledger_balances', ['vehicle_id'], unique=False)
+    op.create_table('ledger_postings',
+    sa.Column('id', sa.String(length=36), nullable=False),
+    sa.Column('category', sa.Enum('LEASE', 'REPAIR', 'LOAN', 'EZPASS', 'PVB', 'TLC', 'TAXES', 'MISC', 'EARNINGS', 'INTERIM_PAYMENT', 'DEPOSIT', 'CANCELLATION_FEE', name='postingcategory'), nullable=False),
+    sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Positive for debit (obligation), Negative for credit (earning/payment)'),
+    sa.Column('entry_type', sa.Enum('DEBIT', 'CREDIT', name='entrytype'), nullable=False),
+    sa.Column('status', sa.Enum('POSTED', 'VOIDED', name='postingstatus'), nullable=False),
+    sa.Column('reference_id', sa.String(length=255), nullable=False, comment='Traceability ID to the source record (e.g., LeaseSchedule ID, RepairInvoice ID)'),
+    sa.Column('reversal_for_id', sa.String(length=36), nullable=True, comment='If this is a reversal, points to the original posting ID'),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('vin', sa.String(length=64), nullable=True, comment='Denormalized for filtering/reconciliation'),
+    sa.Column('plate', sa.String(length=255), nullable=True, comment='Denormalized for filtering/reconciliation'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['reversal_for_id'], ['ledger_postings.id'], ),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_ledger_postings_category'), 'ledger_postings', ['category'], unique=False)
+    op.create_index(op.f('ix_ledger_postings_driver_id'), 'ledger_postings', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_ledger_postings_lease_id'), 'ledger_postings', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_ledger_postings_medallion_id'), 'ledger_postings', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_ledger_postings_reference_id'), 'ledger_postings', ['reference_id'], unique=False)
+    op.create_index(op.f('ix_ledger_postings_vehicle_id'), 'ledger_postings', ['vehicle_id'], unique=False)
+    op.create_table('miscellaneous_expenses',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('expense_id', sa.String(length=50), nullable=False, comment='System-generated unique ID (e.g., MISC-YYYY-#####).'),
+    sa.Column('case_no', sa.String(length=255), nullable=False, comment='Links to the BPM case used for creation.'),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('vehicle_id', sa.Integer(), nullable=False),
+    sa.Column('medallion_id', sa.Integer(), nullable=False),
+    sa.Column('expense_date', sa.Date(), nullable=False),
+    sa.Column('category', sa.String(length=100), nullable=False, comment='Dropdown category (e.g., Lost Key, Cleaning Fee).'),
+    sa.Column('reference_number', sa.String(length=255), nullable=True, comment='Optional user-entered reference.'),
+    sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The total amount of the charge.'),
+    sa.Column('notes', sa.Text(), nullable=True, comment='Optional free-text notes for details.'),
+    sa.Column('status', sa.Enum('OPEN', 'RECOVERED', 'VOIDED', name='miscellaneousexpensestatus'), nullable=False),
+    sa.Column('ledger_posting_ref', sa.String(length=255), nullable=False, comment='Reference to the LedgerPosting ID created upon save.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_miscellaneous_expenses_case_no'), 'miscellaneous_expenses', ['case_no'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_driver_id'), 'miscellaneous_expenses', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_expense_id'), 'miscellaneous_expenses', ['expense_id'], unique=True)
+    op.create_index(op.f('ix_miscellaneous_expenses_id'), 'miscellaneous_expenses', ['id'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_lease_id'), 'miscellaneous_expenses', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_medallion_id'), 'miscellaneous_expenses', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_status'), 'miscellaneous_expenses', ['status'], unique=False)
+    op.create_index(op.f('ix_miscellaneous_expenses_vehicle_id'), 'miscellaneous_expenses', ['vehicle_id'], unique=False)
+    op.create_table('pvb_violations',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('import_id', sa.Integer(), nullable=True),
+    sa.Column('source', sa.Enum('CSV_IMPORT', 'MANUAL_ENTRY', name='pvbsource'), nullable=False),
+    sa.Column('case_no', sa.String(length=255), nullable=True, comment='Links to the BPM case if created manually.'),
+    sa.Column('plate', sa.String(length=50), nullable=False),
+    sa.Column('state', sa.String(length=10), nullable=False),
+    sa.Column('type', sa.String(length=50), nullable=False),
+    sa.Column('summons', sa.String(length=255), nullable=False),
+    sa.Column('issue_date', sa.Date(), nullable=False),
+    sa.Column('issue_time', sa.Time(), nullable=True),
+    sa.Column('fine', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('penalty', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('interest', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('reduction', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('amount_due', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('status', sa.Enum('IMPORTED', 'ASSOCIATION_PENDING', 'ASSOCIATION_FAILED', 'ASSOCIATED', 'POSTING_PENDING', 'POSTING_FAILED', 'POSTED_TO_LEDGER', name='pvbviolationstatus'), nullable=False),
+    sa.Column('failure_reason', sa.Text(), nullable=True),
+    sa.Column('posting_date', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['import_id'], ['pvb_imports.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_pvb_violations_case_no'), 'pvb_violations', ['case_no'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_driver_id'), 'pvb_violations', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_id'), 'pvb_violations', ['id'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_import_id'), 'pvb_violations', ['import_id'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_lease_id'), 'pvb_violations', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_medallion_id'), 'pvb_violations', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_plate'), 'pvb_violations', ['plate'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_source'), 'pvb_violations', ['source'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_status'), 'pvb_violations', ['status'], unique=False)
+    op.create_index(op.f('ix_pvb_violations_summons'), 'pvb_violations', ['summons'], unique=True)
+    op.create_index(op.f('ix_pvb_violations_vehicle_id'), 'pvb_violations', ['vehicle_id'], unique=False)
+    op.create_table('repair_invoices',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('repair_id', sa.String(length=50), nullable=False, comment='System-generated unique internal ID for the repair (e.g., RPR-YYYY-#####).'),
+    sa.Column('invoice_number', sa.String(length=255), nullable=False, comment='Actual invoice number from the workshop.'),
+    sa.Column('invoice_date', sa.Date(), nullable=False),
+    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('vehicle_id', sa.Integer(), nullable=False),
+    sa.Column('medallion_id', sa.Integer(), nullable=False),
+    sa.Column('workshop_type', sa.Enum('BIG_APPLE', 'EXTERNAL', name='workshoptype'), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('status', sa.Enum('DRAFT', 'OPEN', 'CLOSED', 'HOLD', 'CANCELLED', name='repairinvoicestatus'), nullable=False),
+    sa.Column('start_week', sa.Date(), nullable=False, comment='The Sunday that marks the beginning of the first payment period.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_repair_invoices_driver_id'), 'repair_invoices', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_id'), 'repair_invoices', ['id'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_invoice_number'), 'repair_invoices', ['invoice_number'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_lease_id'), 'repair_invoices', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_medallion_id'), 'repair_invoices', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_repair_id'), 'repair_invoices', ['repair_id'], unique=True)
+    op.create_index(op.f('ix_repair_invoices_status'), 'repair_invoices', ['status'], unique=False)
+    op.create_index(op.f('ix_repair_invoices_vehicle_id'), 'repair_invoices', ['vehicle_id'], unique=False)
+    op.create_table('tlc_violations',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('case_no', sa.String(length=255), nullable=False, comment='Links to the BPM case used for creation.'),
+    sa.Column('summons_no', sa.String(length=255), nullable=False),
+    sa.Column('issue_date', sa.Date(), nullable=False),
+    sa.Column('issue_time', sa.Time(), nullable=True),
+    sa.Column('violation_type', sa.Enum('FI', 'FN', 'RF', name='tlcviolationtype'), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True, comment='Required only if type is FN.'),
+    sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Base ticket amount.'),
+    sa.Column('service_fee', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('total_payable', sa.Numeric(precision=10, scale=2), nullable=False, comment='Calculated as Amount + Service Fee.'),
+    sa.Column('disposition', sa.Enum('PAID', 'REDUCED', 'DISMISSED', name='tlcdisposition'), nullable=False),
+    sa.Column('driver_id', sa.Integer(), nullable=True),
+    sa.Column('medallion_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False),
+    sa.Column('attachment_document_id', sa.Integer(), nullable=False, comment='FK to the uploaded ticket scan.'),
+    sa.Column('status', sa.Enum('PENDING', 'POSTED', 'REVERSED', name='tlcviolationstatus'), nullable=False),
+    sa.Column('original_posting_id', sa.String(length=255), nullable=True, comment='Reference to the initial ledger posting.'),
+    sa.Column('reversal_posting_id', sa.String(length=255), nullable=True, comment='Reference to the reversal posting if disposition is changed.'),
+    sa.Column('plate', sa.String(length=50), nullable=False, comment='License plate number of the vehicle.'),
+    sa.Column('state', sa.String(length=10), nullable=False, comment='State of the license plate.'),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['attachment_document_id'], ['document.id'], ),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
+    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
+    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_tlc_violations_case_no'), 'tlc_violations', ['case_no'], unique=False)
+    op.create_index(op.f('ix_tlc_violations_driver_id'), 'tlc_violations', ['driver_id'], unique=False)
+    op.create_index(op.f('ix_tlc_violations_id'), 'tlc_violations', ['id'], unique=False)
+    op.create_index(op.f('ix_tlc_violations_lease_id'), 'tlc_violations', ['lease_id'], unique=False)
+    op.create_index(op.f('ix_tlc_violations_medallion_id'), 'tlc_violations', ['medallion_id'], unique=False)
+    op.create_index(op.f('ix_tlc_violations_summons_no'), 'tlc_violations', ['summons_no'], unique=True)
     op.create_table('lease_driver_documents',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('lease_driver_id', sa.Integer(), nullable=False, comment='Foreign Key to Lease Driver Table'),
@@ -1263,15 +1896,128 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_lease_driver_documents_document_id'), 'lease_driver_documents', ['document_id'], unique=False)
     op.create_index(op.f('ix_lease_driver_documents_id'), 'lease_driver_documents', ['id'], unique=False)
+    op.create_table('loan_installments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('loan_id', sa.Integer(), nullable=False),
+    sa.Column('installment_id', sa.String(length=60), nullable=False, comment='Unique ID for the installment (e.g., DLN-YYYY-###-01).'),
+    sa.Column('week_start_date', sa.Date(), nullable=False),
+    sa.Column('week_end_date', sa.Date(), nullable=False),
+    sa.Column('principal_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The principal portion of this installment.'),
+    sa.Column('interest_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The calculated interest portion for this period.'),
+    sa.Column('total_due', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total amount due for this installment (Principal + Interest).'),
+    sa.Column('status', sa.Enum('SCHEDULED', 'DUE', 'POSTED', 'PAID', name='loaninstallmentstatus'), nullable=False),
+    sa.Column('ledger_posting_ref', sa.String(length=255), nullable=True, comment='Reference to the LedgerPosting ID.'),
+    sa.Column('posted_on', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['loan_id'], ['driver_loans.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_loan_installments_id'), 'loan_installments', ['id'], unique=False)
+    op.create_index(op.f('ix_loan_installments_installment_id'), 'loan_installments', ['installment_id'], unique=True)
+    op.create_index(op.f('ix_loan_installments_loan_id'), 'loan_installments', ['loan_id'], unique=False)
+    op.create_index(op.f('ix_loan_installments_status'), 'loan_installments', ['status'], unique=False)
+    op.create_table('repair_installments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('invoice_id', sa.Integer(), nullable=False),
+    sa.Column('installment_id', sa.String(length=60), nullable=False, comment='Unique ID for the installment (e.g., RPR-YYYY-#####-01).'),
+    sa.Column('week_start_date', sa.Date(), nullable=False),
+    sa.Column('week_end_date', sa.Date(), nullable=False),
+    sa.Column('principal_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Portion of the installment that reduces the principal loan balance.'),
+    sa.Column('status', sa.Enum('SCHEDULED', 'DUE', 'POSTED', 'PAID', name='repairinstallmentstatus'), nullable=False),
+    sa.Column('ledger_posting_ref', sa.String(length=255), nullable=True, comment='Reference to the LedgerPosting ID once created.'),
+    sa.Column('posted_on', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
+    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
+    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
+    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
+    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
+    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['invoice_id'], ['repair_invoices.id'], ),
+    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_repair_installments_id'), 'repair_installments', ['id'], unique=False)
+    op.create_index(op.f('ix_repair_installments_installment_id'), 'repair_installments', ['installment_id'], unique=True)
+    op.create_index(op.f('ix_repair_installments_invoice_id'), 'repair_installments', ['invoice_id'], unique=False)
+    op.create_index(op.f('ix_repair_installments_status'), 'repair_installments', ['status'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_repair_installments_status'), table_name='repair_installments')
+    op.drop_index(op.f('ix_repair_installments_invoice_id'), table_name='repair_installments')
+    op.drop_index(op.f('ix_repair_installments_installment_id'), table_name='repair_installments')
+    op.drop_index(op.f('ix_repair_installments_id'), table_name='repair_installments')
+    op.drop_table('repair_installments')
+    op.drop_index(op.f('ix_loan_installments_status'), table_name='loan_installments')
+    op.drop_index(op.f('ix_loan_installments_loan_id'), table_name='loan_installments')
+    op.drop_index(op.f('ix_loan_installments_installment_id'), table_name='loan_installments')
+    op.drop_index(op.f('ix_loan_installments_id'), table_name='loan_installments')
+    op.drop_table('loan_installments')
     op.drop_index(op.f('ix_lease_driver_documents_id'), table_name='lease_driver_documents')
     op.drop_index(op.f('ix_lease_driver_documents_document_id'), table_name='lease_driver_documents')
     op.drop_table('lease_driver_documents')
+    op.drop_index(op.f('ix_tlc_violations_summons_no'), table_name='tlc_violations')
+    op.drop_index(op.f('ix_tlc_violations_medallion_id'), table_name='tlc_violations')
+    op.drop_index(op.f('ix_tlc_violations_lease_id'), table_name='tlc_violations')
+    op.drop_index(op.f('ix_tlc_violations_id'), table_name='tlc_violations')
+    op.drop_index(op.f('ix_tlc_violations_driver_id'), table_name='tlc_violations')
+    op.drop_index(op.f('ix_tlc_violations_case_no'), table_name='tlc_violations')
+    op.drop_table('tlc_violations')
+    op.drop_index(op.f('ix_repair_invoices_vehicle_id'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_status'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_repair_id'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_medallion_id'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_lease_id'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_invoice_number'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_id'), table_name='repair_invoices')
+    op.drop_index(op.f('ix_repair_invoices_driver_id'), table_name='repair_invoices')
+    op.drop_table('repair_invoices')
+    op.drop_index(op.f('ix_pvb_violations_vehicle_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_summons'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_status'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_source'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_plate'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_medallion_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_lease_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_import_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_driver_id'), table_name='pvb_violations')
+    op.drop_index(op.f('ix_pvb_violations_case_no'), table_name='pvb_violations')
+    op.drop_table('pvb_violations')
+    op.drop_index(op.f('ix_miscellaneous_expenses_vehicle_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_status'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_medallion_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_lease_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_expense_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_driver_id'), table_name='miscellaneous_expenses')
+    op.drop_index(op.f('ix_miscellaneous_expenses_case_no'), table_name='miscellaneous_expenses')
+    op.drop_table('miscellaneous_expenses')
+    op.drop_index(op.f('ix_ledger_postings_vehicle_id'), table_name='ledger_postings')
+    op.drop_index(op.f('ix_ledger_postings_reference_id'), table_name='ledger_postings')
+    op.drop_index(op.f('ix_ledger_postings_medallion_id'), table_name='ledger_postings')
+    op.drop_index(op.f('ix_ledger_postings_lease_id'), table_name='ledger_postings')
+    op.drop_index(op.f('ix_ledger_postings_driver_id'), table_name='ledger_postings')
+    op.drop_index(op.f('ix_ledger_postings_category'), table_name='ledger_postings')
+    op.drop_table('ledger_postings')
+    op.drop_index(op.f('ix_ledger_balances_vehicle_id'), table_name='ledger_balances')
+    op.drop_index(op.f('ix_ledger_balances_reference_id'), table_name='ledger_balances')
+    op.drop_index(op.f('ix_ledger_balances_medallion_id'), table_name='ledger_balances')
+    op.drop_index(op.f('ix_ledger_balances_lease_id'), table_name='ledger_balances')
+    op.drop_index(op.f('ix_ledger_balances_driver_id'), table_name='ledger_balances')
+    op.drop_index(op.f('ix_ledger_balances_category'), table_name='ledger_balances')
+    op.drop_table('ledger_balances')
     op.drop_index(op.f('ix_lease_schedule_id'), table_name='lease_schedule')
     op.drop_table('lease_schedule')
     op.drop_index(op.f('ix_lease_notes_note_id'), table_name='lease_notes')
@@ -1282,12 +2028,72 @@ def downgrade() -> None:
     op.drop_table('lease_drivers')
     op.drop_index(op.f('ix_lease_configuration_id'), table_name='lease_configuration')
     op.drop_table('lease_configuration')
+    op.drop_index(op.f('ix_interim_payments_payment_id'), table_name='interim_payments')
+    op.drop_index(op.f('ix_interim_payments_lease_id'), table_name='interim_payments')
+    op.drop_index(op.f('ix_interim_payments_id'), table_name='interim_payments')
+    op.drop_index(op.f('ix_interim_payments_driver_id'), table_name='interim_payments')
+    op.drop_index(op.f('ix_interim_payments_case_no'), table_name='interim_payments')
+    op.drop_table('interim_payments')
+    op.drop_index(op.f('ix_ezpass_transactions_vehicle_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_transaction_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_transaction_datetime'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_tag_or_plate'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_status'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_medallion_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_lease_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_import_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_id'), table_name='ezpass_transactions')
+    op.drop_index(op.f('ix_ezpass_transactions_driver_id'), table_name='ezpass_transactions')
+    op.drop_table('ezpass_transactions')
+    op.drop_index(op.f('ix_dtrs_vehicle_id'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_status'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_receipt_number'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_period_start_date'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_period_end_date'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_medallion_id'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_lease_id'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_id'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_dtr_number'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_driver_id'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_ach_batch_number'), table_name='dtrs')
+    op.drop_table('dtrs')
+    op.drop_index(op.f('ix_driver_transaction_receipts_week_start_date'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_week_end_date'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_status'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_receipt_number'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_lease_id'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_driver_id'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_check_number'), table_name='driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_transaction_receipts_ach_batch_id'), table_name='driver_transaction_receipts')
+    op.drop_index('idx_dtr_week', table_name='driver_transaction_receipts')
+    op.drop_index('idx_dtr_status_payment', table_name='driver_transaction_receipts')
+    op.drop_index('idx_dtr_driver_lease', table_name='driver_transaction_receipts')
+    op.drop_table('driver_transaction_receipts')
+    op.drop_index(op.f('ix_driver_loans_status'), table_name='driver_loans')
+    op.drop_index(op.f('ix_driver_loans_medallion_id'), table_name='driver_loans')
+    op.drop_index(op.f('ix_driver_loans_loan_id'), table_name='driver_loans')
+    op.drop_index(op.f('ix_driver_loans_lease_id'), table_name='driver_loans')
+    op.drop_index(op.f('ix_driver_loans_id'), table_name='driver_loans')
+    op.drop_index(op.f('ix_driver_loans_driver_id'), table_name='driver_loans')
+    op.drop_table('driver_loans')
+    op.drop_index(op.f('ix_curb_trips_vehicle_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_status'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_reconciliation_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_medallion_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_lease_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_driver_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_curb_trip_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_curb_driver_id'), table_name='curb_trips')
+    op.drop_index(op.f('ix_curb_trips_curb_cab_number'), table_name='curb_trips')
+    op.drop_table('curb_trips')
     op.drop_table('vehicle_registration')
     op.drop_index(op.f('ix_vehicle_notes_vehicle_id'), table_name='vehicle_notes')
     op.drop_index(op.f('ix_vehicle_notes_note_id'), table_name='vehicle_notes')
     op.drop_table('vehicle_notes')
     op.drop_table('vehicle_inspections')
     op.drop_table('vehicle_hackups')
+    op.drop_table('vehicle_expenses_and_compliance')
     op.drop_index(op.f('ix_leases_id'), table_name='leases')
     op.drop_table('leases')
     op.drop_table('vehicles')
@@ -1352,6 +2158,9 @@ def downgrade() -> None:
     op.drop_table('roles')
     op.drop_index(op.f('ix_query_records_id'), table_name='query_records')
     op.drop_table('query_records')
+    op.drop_index(op.f('ix_pvb_imports_status'), table_name='pvb_imports')
+    op.drop_index(op.f('ix_pvb_imports_id'), table_name='pvb_imports')
+    op.drop_table('pvb_imports')
     op.drop_table('notes')
     op.drop_table('medallion_storage')
     op.drop_table('medallion_renewals')
@@ -1361,6 +2170,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_lease_payment_configuration_id'), table_name='lease_payment_configuration')
     op.drop_table('lease_payment_configuration')
     op.drop_table('hackup_tasks')
+    op.drop_index(op.f('ix_ezpass_imports_status'), table_name='ezpass_imports')
+    op.drop_index(op.f('ix_ezpass_imports_id'), table_name='ezpass_imports')
+    op.drop_table('ezpass_imports')
     op.drop_index(op.f('ix_esign_envelopes_id'), table_name='esign_envelopes')
     op.drop_index(op.f('ix_esign_envelopes_envelope_id'), table_name='esign_envelopes')
     op.drop_table('esign_envelopes')
@@ -1368,6 +2180,7 @@ def downgrade() -> None:
     op.drop_table('driver_dmv_license')
     op.drop_table('document')
     op.drop_table('dealers')
+    op.drop_table('company_bank_configuration')
     op.drop_index(op.f('ix_case_types_prefix'), table_name='case_types')
     op.drop_index(op.f('ix_case_types_name'), table_name='case_types')
     op.drop_index(op.f('ix_case_types_id'), table_name='case_types')
@@ -1378,6 +2191,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_case_entities_id'), table_name='case_entities')
     op.drop_table('case_entities')
     op.drop_table('address')
+    op.drop_index(op.f('ix_ach_batches_status'), table_name='ach_batches')
+    op.drop_index(op.f('ix_ach_batches_is_reversed'), table_name='ach_batches')
+    op.drop_index(op.f('ix_ach_batches_batch_number'), table_name='ach_batches')
+    op.drop_table('ach_batches')
     op.drop_index(op.f('ix_users_id'), table_name='users')
     op.drop_table('users')
     # ### end Alembic commands ###

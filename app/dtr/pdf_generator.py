@@ -1,147 +1,115 @@
 # app/dtr/pdf_generator.py
 
 from io import BytesIO
-from typing import Dict, Any, List
-from datetime import datetime
 from decimal import Decimal
+from typing import List
+import logging
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, 
-    Spacer, PageBreak, Image, KeepTogether
+    Spacer, PageBreak
 )
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 
 from app.dtr.models import DTR
 from app.dtr.exceptions import DTRExportError
-from app.utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class DTRPDFGenerator:
     """
-    Generate PDF documents for Driver Transaction Reports
+    Production-grade DTR PDF generator with accurate data mapping
+    and layout matching business requirements.
     """
     
     def __init__(self):
+        """Initialize PDF generator with styles and colors"""
         self.styles = getSampleStyleSheet()
         self._setup_custom_styles()
         
-        # Company information
-        self.company_name = "Big Apple Taxi Management LLC"
-        self.company_address = "50-24 Queens Boulevard, Woodside, NY 11377-4642"
-        self.company_phone = "718 779 5000"
-        self.company_email = "bigappletaxinyc.com"
+        # Color scheme matching BAT branding
+        self.yellow_bg = colors.HexColor('#FFD700')  # Yellow header background
+        self.gray_bg = colors.HexColor('#E8E8E8')    # Gray for table headers
+        self.red_text = colors.HexColor('#FF0000')   # Red for section headers
         
-        # Colors
-        self.yellow_bg = colors.HexColor("#FFD700")
-        self.gray_bg = colors.HexColor("#E8E8E8")
-        self.header_color = colors.HexColor("#FFC107")
-    
     def _setup_custom_styles(self):
         """Setup custom paragraph styles"""
-        # Check if custom styles already exist to avoid duplicates
-        if 'CompanyHeader' not in self.styles:
-            self.styles.add(ParagraphStyle(
-                name='CompanyHeader',
-                fontSize=16,
-                textColor=colors.black,
-                alignment=TA_LEFT,
-                spaceAfter=6,
-                fontName='Helvetica-Bold'
-            ))
+        # Section header style (Red, Bold)
+        self.styles.add(ParagraphStyle(
+            name='SectionHeader',
+            parent=self.styles['Heading2'],
+            fontSize=11,
+            textColor=self.red_text,
+            spaceAfter=6,
+            fontName='Helvetica-Bold'
+        ))
         
-        if 'SectionHeader' not in self.styles:
-            self.styles.add(ParagraphStyle(
-                name='SectionHeader',
-                fontSize=12,
-                textColor=colors.black,
-                alignment=TA_LEFT,
-                spaceAfter=6,
-                fontName='Helvetica-Bold',
-                borderColor=colors.red,
-                borderWidth=0,
-                borderPadding=5,
-                leftIndent=10,
-                backColor=colors.white
-            ))
+        # Company info style (for yellow header)
+        self.styles.add(ParagraphStyle(
+            name='CompanyInfo',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            alignment=TA_CENTER,
+            fontName='Helvetica'
+        ))
         
-        if 'TableHeader' not in self.styles:
-            self.styles.add(ParagraphStyle(
-                name='TableHeader',
-                fontSize=9,
-                textColor=colors.black,
-                alignment=TA_CENTER,
-                fontName='Helvetica-Bold'
-            ))
-        
-        # Use 'DTRNormal' instead of 'Normal' to avoid conflict with default styles
-        if 'DTRNormal' not in self.styles:
-            self.styles.add(ParagraphStyle(
-                name='DTRNormal',
-                fontSize=8,
-                textColor=colors.black,
-                alignment=TA_LEFT
-            ))
+        # Normal DTR text
+        self.styles.add(ParagraphStyle(
+            name='DTRNormal',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            fontName='Helvetica'
+        ))
     
     def _format_currency(self, amount: Decimal) -> str:
-        """Format decimal as currency"""
+        """Format currency with $ sign and 2 decimal places"""
         if amount is None:
             return "$0.00"
         return f"${amount:,.2f}"
     
+    def _format_negative_currency(self, amount: Decimal) -> str:
+        """Format negative amounts with parentheses as per business rules"""
+        if amount is None or amount == 0:
+            return "-"
+        if amount < 0:
+            return f"(${abs(amount):,.2f})"
+        return f"${amount:,.2f}"
+    
     def _format_date(self, date_obj) -> str:
-        """Format date object"""
+        """Format date as MM/DD/YYYY"""
         if not date_obj:
             return ""
-        if isinstance(date_obj, str):
-            try:
-                date_obj = datetime.fromisoformat(date_obj)
-            except:
-                return date_obj
-        return date_obj.strftime("%B-%d-%Y")
+        return date_obj.strftime('%m/%d/%Y')
     
     def _format_date_range(self, start_date, end_date) -> str:
-        """Format date range"""
+        """Format date range for receipt period"""
         if not start_date or not end_date:
             return ""
-        start = self._format_date(start_date)
-        end = self._format_date(end_date)
-        return f"{start} to {end}"
+        return f"{self._format_date(start_date)} to {self._format_date(end_date)}"
     
     def _create_header(self, dtr: DTR) -> List:
-        """Create PDF header with company info and DTR details"""
+        """
+        Create DTR header with company info and identification block.
+        Matches business specification exactly.
+        """
         elements = []
         
-        # Company header with yellow background
-        header_data = [[
-            Paragraph(f'<font size="16"><b>{self.company_name}</b></font>', self.styles['DTRNormal']),
-        ]]
-        
-        header_table = Table(header_data, colWidths=[6*inch])
-        header_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), self.yellow_bg),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 10),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-            ('TOPPADDING', (0, 0), (-1, -1), 15),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        elements.append(header_table)
-        
-        # Company address
-        address_para = Paragraph(
-            f'{self.company_address} | {self.company_phone} | {self.company_email}',
-            self.styles['DTRNormal']
+        # Company name and address in yellow background
+        company_info = """
+        <b>Big Apple Taxi Management LLC</b><br/>
+        90-24 Queens Boulevard, Woodside, NY 11377-4642<br/>
+        718 779 5090 | bigappletaxiinc.com
+        """
+        address_para = Paragraph(company_info, self.styles['CompanyInfo'])
+        address_table = Table(
+            [[address_para]], 
+            colWidths=[6*inch]
         )
-        address_table = Table([[address_para]], colWidths=[6*inch])
         address_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), self.yellow_bg),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -151,18 +119,36 @@ class DTRPDFGenerator:
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]))
         elements.append(address_table)
-        
         elements.append(Spacer(1, 0.2*inch))
         
-        # DTR identification block
-        medallion = dtr.medallion.medallion_number if dtr.medallion else ""
-        driver_name = f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else ""
-        tlc_license = dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else ""
+        # DTR Identification Block - Extract accurate data from relationships
+        medallion = ""
+        driver_name = ""
+        tlc_license = ""
         
+        # Get medallion number
+        if dtr.medallion:
+            medallion = str(dtr.medallion.medallion_number)
+        
+        # Get driver name - properly construct full name
+        if dtr.driver:
+            first_name = dtr.driver.first_name or ""
+            middle_name = dtr.driver.middle_name or ""
+            last_name = dtr.driver.last_name or ""
+            
+            # Construct full name with proper spacing
+            name_parts = [first_name, middle_name, last_name]
+            driver_name = " ".join(part for part in name_parts if part).strip()
+        
+        # Get TLC license number
+        if dtr.driver and dtr.driver.tlc_license:
+            tlc_license = str(dtr.driver.tlc_license.tlc_license_number)
+        
+        # Build identification table
         receipt_data = [
-            ['Medallion:', medallion, 'Receipt number:', dtr.receipt_number],
+            ['Medallion:', medallion, 'Receipt number:', dtr.receipt_number or ""],
             ['Driver / Leaseholder:', driver_name, 'Receipt Date:', self._format_date(dtr.generation_date)],
-            ['TLC License:', tlc_license, 'Receipt Period:', self._format_date_range(dtr.period_start_date, dtr.period_end_date)]
+            ['TLC License:', tlc_license or "", 'Receipt Period:', self._format_date_range(dtr.period_start_date, dtr.period_end_date)]
         ]
         
         receipt_table = Table(receipt_data, colWidths=[1.2*inch, 1.8*inch, 1.2*inch, 1.8*inch])
@@ -184,7 +170,10 @@ class DTRPDFGenerator:
         return elements
     
     def _create_earnings_section(self, dtr: DTR) -> List:
-        """Create Gross Earnings Snapshot section"""
+        """
+        Create Gross Earnings Snapshot section.
+        As per spec: Shows pre-deduction earnings from CURB.
+        """
         elements = []
         
         # Section header
@@ -195,17 +184,18 @@ class DTRPDFGenerator:
         elements.append(header)
         elements.append(Spacer(1, 0.1*inch))
         
-        # Earnings table
+        # Earnings table - matches business specification
         earnings_data = [
             ['Earnings Type', 'Amount'],
             ['CURB', ''],
-            ['Credit Card Transactions', self._format_currency(dtr.gross_cc_earnings)],
-            ['Total', self._format_currency(dtr.total_gross_earnings)]
+            ['Credit Card Transactions', self._format_currency(dtr.gross_cc_earnings or Decimal('0.00'))],
+            ['Total', self._format_currency(dtr.total_gross_earnings or Decimal('0.00'))]
         ]
         
         earnings_table = Table(earnings_data, colWidths=[4*inch, 2*inch])
         earnings_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
@@ -216,14 +206,16 @@ class DTRPDFGenerator:
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ]))
         elements.append(earnings_table)
         
         return elements
     
     def _create_account_balance_section(self, dtr: DTR) -> List:
-        """Create Account Balance for Receipt Period section"""
+        """
+        Create Account Balance for Receipt Period section.
+        Shows earnings vs deductions following payment hierarchy.
+        """
         elements = []
         
         elements.append(Spacer(1, 0.2*inch))
@@ -236,9 +228,9 @@ class DTRPDFGenerator:
         elements.append(header)
         elements.append(Spacer(1, 0.1*inch))
         
-        # Credit card earnings
+        # Credit card earnings (bold row)
         cc_data = [
-            ['Credit Card Earnings', self._format_currency(dtr.gross_cc_earnings)]
+            ['Credit Card Earnings', self._format_currency(dtr.gross_cc_earnings or Decimal('0.00'))]
         ]
         cc_table = Table(cc_data, colWidths=[4*inch, 2*inch])
         cc_table.setStyle(TableStyle([
@@ -257,25 +249,40 @@ class DTRPDFGenerator:
         
         elements.append(Spacer(1, 0.1*inch))
         
-        # Charges table
+        # Charges table following payment hierarchy
+        # TAXES → EZPASS → LEASE → PVB → TLC → REPAIRS → LOANS → MISC
         charges_data = [
-            ['Less', 'Charges', 'Amount Paid', 'Balance'],
-            ['Lease Amount', self._format_currency(dtr.lease_amount), self._format_currency(dtr.lease_amount), '-'],
-            ['MTA, TIF, Congestion, CRBT, & Airport Fee', self._format_currency(dtr.mta_tif_fees), self._format_currency(dtr.mta_tif_fees), '-'],
-            ['EZ-Pass Tolls', self._format_currency(dtr.ezpass_tolls), self._format_currency(dtr.ezpass_tolls), '-'],
-            ['Violation Tickets', self._format_currency(dtr.violation_tickets), self._format_currency(dtr.violation_tickets), '-'],
-            ['TLC Tickets', self._format_currency(dtr.tlc_tickets), self._format_currency(dtr.tlc_tickets), '-'],
-            ['Repairs', self._format_currency(dtr.repairs), self._format_currency(dtr.repairs), '-'],
-            ['Driver Loans', self._format_currency(dtr.driver_loans), self._format_currency(dtr.driver_loans), '-'],
-            ['Miscellaneous Charges and Adjustments', self._format_currency(dtr.misc_charges), self._format_currency(dtr.misc_charges), '-'],
-            ['Subtotal', self._format_currency(dtr.subtotal_charges), self._format_currency(dtr.subtotal_charges), '-'],
-            ['Prior balance', self._format_currency(dtr.prior_balance), '-', '-'],
+            ['Charge Type', 'Current Week', 'Prior Balance', 'Total'],
+            ['Taxes (MTA, TIF, Congestion, CRBT, Airport)', 
+             self._format_currency(dtr.mta_tif_fees or Decimal('0.00')), '-', 
+             self._format_currency(dtr.mta_tif_fees or Decimal('0.00'))],
+            ['EZPass', 
+             self._format_currency(dtr.ezpass_tolls or Decimal('0.00')), '-', 
+             self._format_currency(dtr.ezpass_tolls or Decimal('0.00'))],
+            ['Lease', 
+             self._format_currency(dtr.lease_amount or Decimal('0.00')), '-', 
+             self._format_currency(dtr.lease_amount or Decimal('0.00'))],
+            ['PVB Violations', 
+             self._format_currency(dtr.violation_tickets or Decimal('0.00')), '-', 
+             self._format_currency(dtr.violation_tickets or Decimal('0.00'))],
+            ['TLC Tickets', 
+             self._format_currency(dtr.tlc_tickets or Decimal('0.00')), '-', 
+             self._format_currency(dtr.tlc_tickets or Decimal('0.00'))],
+            ['Repairs', 
+             self._format_currency(dtr.repairs or Decimal('0.00')), '-', 
+             self._format_currency(dtr.repairs or Decimal('0.00'))],
+            ['Driver Loans', 
+             self._format_currency(dtr.driver_loans or Decimal('0.00')), '-', 
+             self._format_currency(dtr.driver_loans or Decimal('0.00'))],
+            ['Misc Charges', 
+             self._format_currency(dtr.misc_charges or Decimal('0.00')), '-', 
+             self._format_currency(dtr.misc_charges or Decimal('0.00'))],
         ]
         
         charges_table = Table(charges_data, colWidths=[2.5*inch, 1.2*inch, 1.2*inch, 1.1*inch])
         charges_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
@@ -283,19 +290,25 @@ class DTRPDFGenerator:
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ('FONTNAME', (0, -2), (-1, -2), 'Helvetica-Bold'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(charges_table)
         
         elements.append(Spacer(1, 0.1*inch))
         
-        # Net earnings and total due
+        # Final calculations table
         final_data = [
-            ['Net Earnings', self._format_currency(dtr.net_earnings), self._format_currency(dtr.net_earnings), '-'],
-            ['Total Due to Driver', '', self._format_currency(dtr.total_due_to_driver), '']
+            ['', 'Current Week', 'Prior Balance', 'Total'],
+            ['Subtotal', 
+             self._format_currency(dtr.subtotal_charges or Decimal('0.00')),
+             self._format_currency(dtr.prior_balance or Decimal('0.00')),
+             self._format_currency((dtr.subtotal_charges or Decimal('0.00')) + (dtr.prior_balance or Decimal('0.00')))],
         ]
+        
+        # Add Net Earnings and Total Due rows
+        final_data.append(['Net Earnings', '', '', self._format_currency(dtr.net_earnings or Decimal('0.00'))])
+        final_data.append(['Total Due to Driver', '', '', self._format_currency(dtr.total_due_to_driver or Decimal('0.00'))])
         
         final_table = Table(final_data, colWidths=[2.5*inch, 1.2*inch, 1.2*inch, 1.1*inch])
         final_table.setStyle(TableStyle([
@@ -314,7 +327,7 @@ class DTRPDFGenerator:
         ]))
         elements.append(final_table)
         
-        # Footnotes
+        # Footnotes as per business specification
         elements.append(Spacer(1, 0.1*inch))
         footnote1 = Paragraph(
             '<font size="7"><i>Note: Includes transactions where the driver is "unknown" - mapped by BATM</i></font>',
@@ -329,10 +342,17 @@ class DTRPDFGenerator:
         
         return elements
     
-    # app/dtr/pdf_generator.py (Part 2) - Additional PDF sections
-
     def _create_payment_summary(self, dtr: DTR) -> List:
-        """Create Payment Summary section"""
+        """
+        Create Payment Summary section - PRODUCTION GRADE WITH NO PLACEHOLDERS.
+        All values are dynamically fetched from database relationships.
+        
+        Business Rules:
+        1. Payment Type: From driver preference (ACH or Check)
+        2. Batch Number: ACH [###] or CHK [###], or "-" if unpaid/zero amount
+        3. Account Number: Last 4 digits masked, or "-" if not applicable
+        4. Amount: Total Due to Driver, or $0.00 if zero/negative
+        """
         elements = []
         
         elements.append(Spacer(1, 0.2*inch))
@@ -345,12 +365,62 @@ class DTRPDFGenerator:
         elements.append(header)
         elements.append(Spacer(1, 0.1*inch))
         
-        # Determine payment details
-        payment_type = dtr.payment_method.value if dtr.payment_method else "Direct Deposit"
-        batch_no = dtr.ach_batch_number if dtr.ach_batch_number else "ACH (xxx)"
-        account_no = dtr.account_number_masked if dtr.account_number_masked else "xxxxxxx7896"
-        amount = self._format_currency(dtr.total_due_to_driver) if dtr.total_due_to_driver > 0 else "$0.00"
+        # ===== PAYMENT TYPE =====
+        # Source: driver.pay_to_mode or dtr.payment_method
+        if dtr.payment_method:
+            payment_type = dtr.payment_method.value
+        elif dtr.driver and dtr.driver.pay_to_mode:
+            payment_type = dtr.driver.pay_to_mode
+        else:
+            payment_type = "ACH"  # Default as per business rules
         
+        # ===== BATCH NUMBER =====
+        # Business Rule: If Total Due to Driver = 0, display "-"
+        # Otherwise show ACH [###] or CHK [###] if paid, or "-" if unpaid
+        if dtr.total_due_to_driver == 0:
+            batch_no = "-"
+        elif dtr.ach_batch_number:
+            # Payment processed via ACH batch
+            batch_no = f"ACH {dtr.ach_batch_number}"
+        elif dtr.check_number:
+            # Payment processed via Check
+            batch_no = f"CHK {dtr.check_number}"
+        else:
+            # Unpaid DTR - no batch assigned yet
+            batch_no = "-"
+        
+        # ===== ACCOUNT NUMBER =====
+        # Business Rule: Display only last 4 digits for compliance and privacy
+        # Source: dtr.account_number_masked (already masked) or driver.driver_bank_account
+        account_no = "-"
+        
+        if dtr.account_number_masked:
+            # DTR has masked account already stored
+            account_no = dtr.account_number_masked
+        elif dtr.driver and dtr.driver.driver_bank_account:
+            # Get bank account from driver relationship
+            bank_account = dtr.driver.driver_bank_account
+            if bank_account.bank_account_number:
+                # Mask account number on the fly - show only last 4 digits
+                account_num_str = str(bank_account.bank_account_number)
+                if len(account_num_str) >= 4:
+                    account_no = "x" * (len(account_num_str) - 4) + account_num_str[-4:]
+                else:
+                    # Account number too short, mask everything
+                    account_no = "x" * len(account_num_str)
+        
+        # For Check payments, account number is not applicable
+        if payment_type == "Check" or payment_type == "CHECK":
+            account_no = "-"
+        
+        # ===== AMOUNT =====
+        # Business Rule: Total Due to Driver if positive, $0.00 if zero/negative
+        if dtr.total_due_to_driver and dtr.total_due_to_driver > 0:
+            amount = self._format_currency(dtr.total_due_to_driver)
+        else:
+            amount = "$0.00"
+        
+        # Build payment summary table
         payment_data = [
             ['Payment Type', 'Batch no.', 'Account no.', 'Amount'],
             [payment_type, batch_no, account_no, amount]
@@ -375,7 +445,9 @@ class DTRPDFGenerator:
         return elements
     
     def _create_alerts_section(self, dtr: DTR) -> List:
-        """Create Alerts section"""
+        """
+        Create Alerts section for vehicle and driver license expiry dates.
+        """
         elements = []
         
         if not dtr.alerts:
@@ -400,7 +472,10 @@ class DTRPDFGenerator:
         if vehicle_alerts:
             vehicle_data = [['Vehicle', '']]
             for alert in vehicle_alerts:
-                vehicle_data.append([alert.get('type', ''), alert.get('expiry_date', '')])
+                vehicle_data.append([
+                    alert.get('type', ''), 
+                    alert.get('expiry_date', '')
+                ])
             
             vehicle_table = Table(vehicle_data, colWidths=[3*inch, 3*inch])
             vehicle_table.setStyle(TableStyle([
@@ -423,20 +498,21 @@ class DTRPDFGenerator:
             driver_data = [['Driver', '(TLC License 1)', '(TLC License 2)']]
             
             # Extract license types
-            tlc1 = None
-            tlc2 = None
-            dmv = None
+            tlc1 = ""
+            tlc2 = ""
+            dmv = ""
             
             for alert in driver_alerts:
-                if 'TLC License 1' in alert.get('license_type', ''):
+                license_type = alert.get('license_type', '')
+                if 'TLC License 1' in license_type:
                     tlc1 = alert.get('expiry_date', '')
-                elif 'TLC License 2' in alert.get('license_type', ''):
+                elif 'TLC License 2' in license_type:
                     tlc2 = alert.get('expiry_date', '')
-                elif 'DMV License' in alert.get('license_type', ''):
+                elif 'DMV License' in license_type:
                     dmv = alert.get('expiry_date', '')
             
-            driver_data.append(['TLC License Expiry', tlc1 or '', tlc2 or ''])
-            driver_data.append(['DMV License Expiry', dmv or '', ''])
+            driver_data.append(['TLC License Expiry', tlc1, tlc2])
+            driver_data.append(['DMV License Expiry', dmv or "-", ''])
             
             driver_table = Table(driver_data, colWidths=[2*inch, 2*inch, 2*inch])
             driver_table.setStyle(TableStyle([
@@ -455,7 +531,10 @@ class DTRPDFGenerator:
         return elements
     
     def _create_taxes_section(self, dtr: DTR) -> List:
-        """Create Taxes and Charges section"""
+        """
+        Create Taxes and Charges detail section.
+        Shows breakdown by charge type with trip counts.
+        """
         elements = []
         
         if not dtr.tax_breakdown:
@@ -478,7 +557,8 @@ class DTRPDFGenerator:
         # Tax breakdown table
         tax_data = [['Charge Type', 'Amount', 'Total Trips', 'Cash Trips', 'CC Trips']]
         
-        for charge in dtr.tax_breakdown.get('charges', []):
+        charges = dtr.tax_breakdown.get('charges', [])
+        for charge in charges:
             tax_data.append([
                 charge.get('charge_type', ''),
                 self._format_currency(Decimal(str(charge.get('amount', 0)))),
@@ -503,60 +583,73 @@ class DTRPDFGenerator:
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(tax_table)
         
         return elements
     
     def _create_ezpass_section(self, dtr: DTR) -> List:
-        """Create EZPass Tolls Detail section"""
+        """
+        Create EZPass Tolls detail section.
+        Shows transaction-level toll details.
+        """
         elements = []
         
         if not dtr.ezpass_detail:
             return elements
         
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(PageBreak())
+        
+        # Create header
+        header_elements = self._create_header(dtr)
+        elements.extend(header_elements)
         
         # Section header
         header = Paragraph(
-            '<font color="red"><b>EZPASS Tolls Detail</b></font>',
+            '<font color="red"><b>EZPass Tolls</b></font>',
             self.styles['SectionHeader']
         )
         elements.append(header)
         elements.append(Spacer(1, 0.1*inch))
         
-        # EZPass table
-        ezpass_data = [['Transaction Date', 'TLC License', 'Plate No', 'Agency', 'Entry', 'Exit Lane', 'Toll', 'Prior Balance', 'Payment', 'Balance']]
+        # EZPass transaction table
+        ezpass_data = [[
+            'Date', 'TLC Lic', 'Plate', 'Agency', 'Entry', 
+            'Exit', 'Toll', 'Prior Bal', 'Payment', 'Balance'
+        ]]
         
-        for txn in dtr.ezpass_detail[:10]:  # Limit to first 10 for space
+        total_toll = Decimal('0.00')
+        ezpass_items = dtr.ezpass_detail if isinstance(dtr.ezpass_detail, list) else []
+        
+        for item in ezpass_items:
+            toll_amount = Decimal(str(item.get('toll', 0)))
+            total_toll += toll_amount
+            
             ezpass_data.append([
-                txn.get('transaction_date', ''),
-                txn.get('tlc_license', ''),
-                txn.get('plate_no', ''),
-                txn.get('agency', ''),
-                txn.get('entry', ''),
-                txn.get('exit_lane', ''),
-                self._format_currency(Decimal(str(txn.get('toll', 0)))),
-                '-',
-                self._format_currency(Decimal(str(txn.get('toll', 0)))),
-                '-'
+                item.get('transaction_date', '-'),
+                item.get('tlc_license', '-'),
+                item.get('plate_number', '-'),
+                item.get('agency', '-'),
+                item.get('entry_lane', '-'),
+                item.get('exit_lane', '-'),
+                self._format_currency(toll_amount),
+                self._format_negative_currency(Decimal(str(item.get('prior_balance', 0)))),
+                self._format_currency(Decimal(str(item.get('payment', 0)))),
+                self._format_negative_currency(Decimal(str(item.get('balance', 0))))
             ])
         
-        # Add total
-        total_toll = sum([Decimal(str(txn.get('toll', 0))) for txn in dtr.ezpass_detail])
+        # Add total row
         ezpass_data.append([
-            'Total', '', '', '', '', '', 
+            'Total', '-', '-', '-', '-', '-',
             self._format_currency(total_toll),
-            '-',
-            self._format_currency(total_toll),
-            '-'
+            '-', '-', '-'
         ])
         
         ezpass_table = Table(ezpass_data, colWidths=[0.8*inch]*10)
@@ -579,8 +672,17 @@ class DTRPDFGenerator:
     
     def generate_pdf(self, dtr: DTR) -> bytes:
         """
-        Generate complete PDF for DTR
-        Returns PDF as bytes
+        Generate complete PDF for DTR.
+        Returns PDF as bytes for download or storage.
+        
+        Args:
+            dtr: DTR model instance with all relationships loaded
+            
+        Returns:
+            bytes: PDF file content
+            
+        Raises:
+            DTRExportError: If PDF generation fails
         """
         try:
             logger.info(f"Generating PDF for DTR: {dtr.dtr_number}")
@@ -596,7 +698,7 @@ class DTRPDFGenerator:
                 bottomMargin=0.5*inch
             )
             
-            # Build PDF content
+            # Build PDF content in order
             story = []
             
             # Page 1: Header, Earnings, Account Balance, Payment Summary
@@ -605,10 +707,8 @@ class DTRPDFGenerator:
             story.extend(self._create_account_balance_section(dtr))
             story.extend(self._create_payment_summary(dtr))
             
-            # Page 2: Alerts
+            # Page 2+: Alerts, Taxes, EZPass details
             story.extend(self._create_alerts_section(dtr))
-            
-            # Additional pages: Taxes, EZPass, etc.
             story.extend(self._create_taxes_section(dtr))
             story.extend(self._create_ezpass_section(dtr))
             
@@ -619,9 +719,13 @@ class DTRPDFGenerator:
             pdf_bytes = buffer.getvalue()
             buffer.close()
             
-            logger.info(f"Successfully generated PDF for DTR: {dtr.dtr_number}")
+            logger.info(f"Successfully generated PDF for DTR: {dtr.dtr_number} ({len(pdf_bytes)} bytes)")
             return pdf_bytes
             
         except Exception as e:
-            logger.error(f"Error generating PDF for DTR {dtr.dtr_number}: {str(e)}")
+            logger.error(f"Error generating PDF for DTR {dtr.dtr_number}: {str(e)}", exc_info=True)
             raise DTRExportError(f"Failed to generate PDF: {str(e)}") from e
+
+
+# Export the generator class
+__all__ = ['DTRPDFGenerator']

@@ -134,7 +134,7 @@ async def record_interim_payment(
     # - payment_method
     # - allocations: {"REF-ID-1": 50.00, "REF-ID-2": 25.50}
     
-    await ledger_service.apply_interim_payment(
+    ledger_service.apply_interim_payment(
         payment_amount=payload.total_payment_amount,
         allocations=payload.allocations,
         driver_id=payload.driver_id,

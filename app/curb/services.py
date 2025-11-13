@@ -661,65 +661,6 @@ class CurbService:
             self.db.rollback()
             logger.error("Database error during reconciliation status update: %s", e, exc_info=True)
             raise ReconciliationError(f"DB error during reconciliation: {e}") from e
-
-    # def post_earnings_to_ledger(self, start_date: date, end_date: date, ledger_service: LedgerService):
-    #     """
-    #     Finds all reconciled credit card trips for the period and posts them as
-    #     earnings to the centralized ledger.
-    #     """
-    #     logger.info(f"Starting process to post earnings to ledger for period: {start_date} to {end_date}")
-    #     trips_to_post = self.repo.get_unposted_credit_card_trips_for_period(start_date, end_date)
-
-    #     if not trips_to_post:
-    #         logger.info("No new credit card earnings to post to the ledger.")
-    #         return {"posted_count": 0, "total_amount": 0.0}
-        
-    #     # Group earnings by driver to make one ledger call per driver
-    #     earnings_by_driver: Dict[int, Decimal] = {}
-    #     lease_id_map: Dict[int, int] = {}
-
-    #     for trip in trips_to_post:
-    #         if trip.driver_id is None:
-    #             logger.warning(f"Skipping trip {trip.curb_trip_id} as it has no associated driver_id.")
-    #             continue
-            
-    #         # Earnings are net of taxes/surcharges, so we sum the core components
-    #         net_earning = trip.fare + trip.tips
-            
-    #         earnings_by_driver.setdefault(trip.driver_id, Decimal("0.0"))
-    #         earnings_by_driver[trip.driver_id] += net_earning
-    #         lease_id_map[trip.driver_id] = trip.lease_id
-
-    #     posted_count = 0
-    #     total_posted_amount = Decimal("0.0")
-        
-    #     for driver_id, total_earnings in earnings_by_driver.items():
-    #         try:
-    #             lease_id = lease_id_map[driver_id]
-    #             logger.info(f"Posting total earnings of ${total_earnings} for driver_id {driver_id} to lease {lease_id}.")
-                
-    #             # This service call will create the CREDIT posting and apply it against open balances
-    #             ledger_service.apply_weekly_earnings(
-    #                 driver_id=driver_id,
-    #                 earnings_amount=total_earnings,
-    #                 lease_id=lease_id,
-    #             )
-                
-    #             posted_count += 1
-    #             total_posted_amount += total_earnings
-    #         except (ValueError, SQLAlchemyError) as e:
-    #             logger.error(f"Failed to post earnings for driver {driver_id}: {e}", exc_info=True)
-    #             # Continue to other drivers, do not rollback successful postings
-        
-    #     # After processing all drivers, update the status of the trips that were included
-    #     for trip in trips_to_post:
-    #         if trip.driver_id in earnings_by_driver:
-    #             self.repo.update_trip_status(trip.id, CurbTripStatus.POSTED_TO_LEDGER)
-
-    #     self.db.commit()
-    #     logger.info(f"Successfully posted earnings for {posted_count} drivers. Total amount: ${total_posted_amount}")
-
-    #     return {"posted_count": posted_count, "total_amount": float(total_posted_amount)}
     
     def import_and_map_data_for_active_leases(self, start_date: date, end_date: date) -> Dict:
         """
@@ -945,14 +886,13 @@ class CurbService:
             try:
                 # Fetch data for this specific driver
                 trips_log_xml = self.api_service.get_trips_log10(
-                    from_date_str, 
-                    to_date_str, 
+                    from_date_str,
+                    to_date_str,
                     tlc_license
                 )
                 trans_xml = self.api_service.get_trans_by_date_cab12(
-                    from_date_str, 
-                    to_date_str, 
-                    tlc_license
+                    from_date_str,
+                    to_date_str,
                 )
                 
                 # Parse and combine data
@@ -1270,21 +1210,16 @@ class CurbService:
                 )
                 
                 # Create async ledger service with proper async session
-                async def post_earnings_async():
-                    async with AsyncSessionLocal() as async_session:
-                        ledger_repo = LedgerRepository(async_session)
-                        ledger_service = LedgerService(ledger_repo)
-                        
-                        await ledger_service.apply_weekly_earnings(
-                            driver_id=driver_id,
-                            earnings_amount=total_earnings,
-                            lease_id=lease_id,
-                        )
-                        
-                        await async_session.commit()
+                ledger_repo = LedgerRepository(self.db)
+                ledger_service = LedgerService(ledger_repo)
                 
-                # Execute the async ledger operation
-                asyncio.run(post_earnings_async())
+                ledger_service.apply_weekly_earnings(
+                    driver_id=driver_id,
+                    earnings_amount=total_earnings,
+                    lease_id=lease_id,
+                )
+                logger.info("Applied earnings to ledger successfully. ##############")
+                self.db.commit()
                 
                 posted_count += 1
                 total_posted_amount += total_earnings
@@ -1381,7 +1316,7 @@ def post_earnings_to_ledger_task():
         # Find the most recent Saturday
         end_date = today
         # Find the Sunday at the start of that week
-        start_date = end_date - timedelta(days=6)
+        start_date = end_date - timedelta(days=12)
         
         return curb_service.post_earnings_to_ledger(start_date, end_date)
     finally:

@@ -386,6 +386,14 @@ class Lease(Base, AuditMixin):
     )
     override_reason: Mapped[Optional[str]] = mapped_column(String(255))
 
+    # Termination information
+    termination_date: Mapped[Optional[Date]] = mapped_column(
+        Date, nullable=True, comment="Date when the lease was terminated"
+    )
+    termination_reason: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="Reason for lease termination"
+    )
+
     # Relationships
     medallion: Mapped["Medallion"] = relationship(
         back_populates="lease", foreign_keys=[medallion_id]
@@ -419,6 +427,11 @@ class Lease(Base, AuditMixin):
 
     def to_dict(self):
         """Convert the Lease model to a dictionary"""
+        # Check if lease has any active drivers
+        is_driver_associated = False
+        if self.lease_driver:
+            is_driver_associated = any(ld.is_active for ld in self.lease_driver)
+
         return {
             "id": self.id,
             "lease_id": self.lease_id,
@@ -442,6 +455,9 @@ class Lease(Base, AuditMixin):
             "management_recommendation_amount": self.management_recommendation_amount,
             "lease_remark": self.lease_remark,
             "cancellation_fee": self.cancellation_fee,
+            "termination_date": self.termination_date.strftime(settings.common_date_format) if self.termination_date else None,
+            "termination_reason": self.termination_reason,
+            "is_driver_associated": is_driver_associated,
             "medallion": self.medallion.to_dict() if self.medallion else None,
             "vehicle": self.vehicle.to_dict() if self.vehicle else None,
             "lease_driver": [

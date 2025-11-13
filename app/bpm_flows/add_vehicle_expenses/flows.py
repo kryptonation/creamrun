@@ -1,23 +1,24 @@
 from pydantic import ValidationError
 
-from app.utils.logger import get_logger
-from app.bpm.step_info import step
-from app.bpm.services import bpm_service
 from app.audit_trail.services import audit_trail_service
-from app.uploads.services import upload_service
-from app.vehicles.services import vehicle_service
+from app.bpm.services import bpm_service
+from app.bpm.step_info import step
 from app.bpm_flows.allocate_medallion_vehicle.utils import format_vehicle_details
-from app.vehicles.utils import format_vehicle_expense
+from app.uploads.services import upload_service
+from app.utils.logger import get_logger
 from app.vehicles.schemas import VehicleExpensesAndComplianceSchema
+from app.vehicles.services import vehicle_service
+from app.vehicles.utils import format_vehicle_expense
 
 logger = get_logger(__name__)
 
 enity_mapper = {
-   "VEHICLE": "vehicles_expenses",
-   "VEHICLE_IDENTIFIER": "id",
+    "VEHICLE": "vehicles_expenses",
+    "VEHICLE_IDENTIFIER": "id",
 }
 
-@step(step_id="202" , name="Fetch - Vehicle Expenses and Compliance", operation='fetch')
+
+@step(step_id="202", name="Fetch - Vehicle Expenses and Compliance", operation="fetch")
 def fetch_vehicle_expenses_and_compliance(db, case_no, case_params=None):
     try:
         logger.info("Fetch vehicle expenses and compliance")
@@ -28,33 +29,31 @@ def fetch_vehicle_expenses_and_compliance(db, case_no, case_params=None):
 
         if case_params and case_params.get("object_name") == "vehicle":
             vehicle = vehicle_service.get_vehicles(
-                db=db , vehicle_id=int(case_params['object_lookup'])
+                db=db, vehicle_id=int(case_params["object_lookup"])
             )
-            
+
         if case_entity:
             expense = vehicle_service.get_vehicle_expenses(
-                db=db , lookup_id=int(case_entity.identifier_value)
+                db=db, lookup_id=int(case_entity.identifier_value)
             )
-            vehicle = vehicle_service.get_vehicles(
-                db=db , vehicle_id= expense.vehicle_id
-            )
-        
+            vehicle = vehicle_service.get_vehicles(db=db, vehicle_id=expense.vehicle_id)
 
         if not vehicle:
             return {}
-        
+
         if not case_entity:
             expense = vehicle_service.upsert_vehicle_expenses(
-                db=db , vehicle_expenses={
-                    "vehicle_id": vehicle.id
-                }
+                db=db, vehicle_expenses={"vehicle_id": vehicle.id}
             )
 
         vehicle_details = format_vehicle_details(vehicle)
         expense_details = format_vehicle_expense(expense)
 
         invoice = upload_service.get_documents(
-            db=db , object_type="vehicle_expenses" , object_id=expense.id , document_type="document"
+            db=db,
+            object_type="vehicle_expenses",
+            object_id=expense.id,
+            document_type="document",
         )
 
         expense_details["invoice"] = invoice
@@ -65,34 +64,48 @@ def fetch_vehicle_expenses_and_compliance(db, case_no, case_params=None):
                 case_no=case_no,
                 entity_name=enity_mapper["VEHICLE"],
                 identifier=enity_mapper["VEHICLE_IDENTIFIER"],
-                identifier_value=str(expense.id)
+                identifier_value=str(expense.id),
             )
 
         expenses_types = {
-                'vehicle expenses': [
-                    'vehicle purchase', 'Hackup', 'tlc preparation',
-                    'repairs & maintenance', 'others'
-                ],
-                'vehicle compliance': [
-                    'tlc inspection', 'mile run inspection', 'dmv inspection',
-                    'state inspection', 'insurance', 'others'
-                ],
-                'vehicle documents': [
-                    'ownership report', 'plate receipt', 'warranty',
-                    'loan agreement', 'accident report', 'others'
-                ]
-            }
+            "vehicle expenses": [
+                "vehicle purchase",
+                "Hackup",
+                "tlc preparation",
+                "repairs & maintenance",
+                "others",
+            ],
+            "vehicle compliance": [
+                "tlc inspection",
+                "mile run inspection",
+                "dmv inspection",
+                "state inspection",
+                "insurance",
+                "others",
+            ],
+            "vehicle documents": [
+                "ownership report",
+                "plate receipt",
+                "warranty",
+                "loan agreement",
+                "accident report",
+                "others",
+            ],
+        }
 
         return {
             "vehicle_details": vehicle_details,
             "expense_details": expense_details,
-            "expenses_types": expenses_types
+            "expenses_types": expenses_types,
         }
     except Exception as e:
         logger.error("Error fetching vehicle expenses and compliance: %s", str(e))
         raise e
-    
-@step(step_id="202" , name="process - Vehicle Expenses and Compliance", operation="process")
+
+
+@step(
+    step_id="202", name="process - Vehicle Expenses and Compliance", operation="process"
+)
 def process_vehicle_expenses_and_compliance(db, case_no, step_data):
     """
     Process the vehicle expenses and compliance for the new vehicle step
@@ -105,22 +118,25 @@ def process_vehicle_expenses_and_compliance(db, case_no, step_data):
         case_entity = bpm_service.get_case_entity(db, case_no=case_no)
         if not case_entity:
             return {}
-        
+
         expense = vehicle_service.get_vehicle_expenses(
-            db=db , lookup_id=int(case_entity.identifier_value)
+            db=db, lookup_id=int(case_entity.identifier_value)
         )
 
         if not expense:
             raise ValueError("Vehicle expense not found")
-        
+
         invoice = upload_service.get_documents(
-            db=db , object_type="vehicle_expenses" , object_id=expense.id , document_type="document"
+            db=db,
+            object_type="vehicle_expenses",
+            object_id=expense.id,
+            document_type="document",
         )
         expn_data = {**step_data}
         expn_data["id"] = expense.id
         expn_data["vehicle_id"] = expense.vehicle_id
 
-        if invoice and invoice.get("document_path" , None):
+        if invoice and invoice.get("document_path", None):
             expn_data["document_id"] = invoice.get("id")
 
         try:
@@ -133,13 +149,13 @@ def process_vehicle_expenses_and_compliance(db, case_no, step_data):
             db=db, vehicle_expenses=expense_data.dict()
         )
 
-        case = bpm_service.get_cases(db=db , case_no= case_no)
+        case = bpm_service.get_cases(db=db, case_no=case_no)
         if case:
             audit_trail_service.create_audit_trail(
                 db=db,
                 case=case,
-                description=f"Vehicle expenses and compliance processed for vehicle {expense.vehicle.vin if expense.vehicle else "N/A"}",
-                meta_data={"vehicle_id":expense.vehicle_id}
+                description=f"Vehicle expenses and compliance processed for vehicle {expense.vehicle.vin if expense.vehicle else 'N/A'}",
+                meta_data={"vehicle_id": expense.vehicle_id},
             )
 
         return "Ok"

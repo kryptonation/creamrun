@@ -52,24 +52,31 @@ def format_lease_response(db: Session, lease):
     if lease_config and lease_config.lease_limit:
         lease_amount = float(lease_config.lease_limit)
 
-    # Get latest case associated with this lease
+    # Get driver lease case (DRVLEA) - regardless of status
     case_detail = None
-    case_entity = (
+    lease_termination_case_no = None
+
+    from app.bpm.models import Case, CaseStatus, CaseType
+
+    # Get DRIVERLEASE case (prefix DRVLEA) - regardless of status
+    driverlease_case_entity = (
         db.query(CaseEntity)
+        .join(Case, CaseEntity.case_no == Case.case_no)
+        .join(CaseType, Case.case_type_id == CaseType.id)
         .filter(
             CaseEntity.entity_name == "lease",
             CaseEntity.identifier == "id",
             CaseEntity.identifier_value == str(lease.id),
+            CaseType.prefix == "DRVLEA",
         )
         .order_by(CaseEntity.created_on.desc())
         .first()
     )
 
-    if case_entity:
+    if driverlease_case_entity:
         case = (
             db.query(Case)
-            .filter(Case.case_no == case_entity.case_no)
-            .order_by(Case.created_on.desc())
+            .filter(Case.case_no == driverlease_case_entity.case_no)
             .first()
         )
         if case:
@@ -77,6 +84,26 @@ def format_lease_response(db: Session, lease):
                 "case_no": case.case_no,
                 "case_status": case.case_status.name if case.case_status else None,
             }
+
+    # Check for TERMINATELEASE case (prefix TERMLEA) - only OPEN/IN_PROGRESS
+    terminate_case_entity = (
+        db.query(CaseEntity)
+        .join(Case, CaseEntity.case_no == Case.case_no)
+        .join(CaseType, Case.case_type_id == CaseType.id)
+        .join(CaseStatus, Case.case_status_id == CaseStatus.id)
+        .filter(
+            CaseEntity.entity_name == "lease",
+            CaseEntity.identifier == "id",
+            CaseEntity.identifier_value == str(lease.id),
+            CaseType.prefix == "TERMLEA",
+            CaseStatus.name.in_(["OPEN", "IN_PROGRESS"]),
+        )
+        .order_by(CaseEntity.created_on.desc())
+        .first()
+    )
+
+    if terminate_case_entity:
+        lease_termination_case_no = terminate_case_entity.case_no
 
     # Determine shift information for shift-lease types
     shift_type = ""
@@ -113,6 +140,7 @@ def format_lease_response(db: Session, lease):
         "total_segments": lease.total_segments,
         "lease_amount": f"{lease_amount:,.2f}",
         "case_detail": case_detail,
+        "lease_termination_case_no": lease_termination_case_no,
         "shift_type": shift_type,
         "driver": [],
         "removed_drivers": [],

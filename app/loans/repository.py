@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
 
-from app.drivers.models import Driver
+from app.drivers.models import Driver , TLCLicense
 from app.leases.models import Lease
 from app.medallions.models import Medallion
 from app.loans.models import (
@@ -100,8 +100,10 @@ class LoanRepository:
         per_page: int,
         sort_by: str,
         sort_order: str,
+        tlc_number : Optional[str] = None,
+        lease_id : Optional[str] = None,
         loan_id: Optional[str] = None,
-        status: Optional[str] = None,
+        status: Optional[List[str]] = None,
         driver_name: Optional[str] = None,
         medallion_no: Optional[str] = None,
         lease_type: Optional[str] = None,
@@ -123,12 +125,20 @@ class LoanRepository:
         )
 
         # Apply filters
+
+        if tlc_number:
+            query = (
+                query.join(TLCLicense, TLCLicense.id == Driver.tlc_license_number_id)
+                    .filter(TLCLicense.tlc_license_number.ilike(f"%{tlc_number}%"))
+            )
+        if lease_id:
+            query = query.filter(Lease.lease_id == lease_id)
         if loan_id:
             query = query.filter(DriverLoan.loan_id.ilike(f"%{loan_id}%"))
         if status:
             try:
-                status_enum = LoanStatus[status.upper()]
-                query = query.filter(DriverLoan.status == status_enum)
+                status_enums = [LoanStatus[s.upper()] for s in status]
+                query = query.filter(DriverLoan.status.in_(status_enums))
             except KeyError:
                 logger.warning(f"Invalid status filter for loans: {status}")
         if driver_name:

@@ -27,8 +27,10 @@ class LeaseStatus(str, PyEnum):
 
     IN_PROGRESS = "In Progress"
     ACTIVE = "Active"
-    INACTIVE = "Inactive"
+    SUSPENDED = "Suspended"
     TERMINATED = "Terminated"
+    EXPIRED = "Expired"
+    CANCELLED = "Cancelled"
 
 
 class LongTermFinancialInfo(BaseModel):

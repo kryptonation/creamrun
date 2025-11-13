@@ -30,6 +30,7 @@ router = APIRouter(prefix="/trips/pvb", tags=["PVB"])
 
 # Dependency to inject the PVBService
 def get_pvb_service(db: Session = Depends(get_db)) -> PVBService:
+    """Provides an instance of PVBService with the given database session."""
     return PVBService(db)
 
 
@@ -54,10 +55,10 @@ async def upload_pvb_csv(
         return JSONResponse(content=result, status_code=status.HTTP_202_ACCEPTED)
     except PVBError as e:
         logger.warning("Business logic error during PVB CSV upload: %s", e, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("Error processing PVB CSV: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during file processing.")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during file processing.") from e
 
 
 @router.get("", response_model=PaginatedPVBViolationResponse, summary="List PVB Violations")

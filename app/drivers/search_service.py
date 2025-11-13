@@ -342,6 +342,7 @@ def get_formatted_drivers(drivers: List[Driver], db: Session):
             "lease_info": {
                 "has_active_lease": has_active_lease,
                 "lease_type": driver.lease_drivers[0].lease.lease_type if driver.lease_drivers else None,
+                "lease_data": [ld.lease.to_dict() for ld in driver.lease_drivers] if driver.lease_drivers else []
             },
             "has_documents": has_documents,
             "has_vehicle": has_vehicle,

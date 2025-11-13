@@ -184,6 +184,7 @@ def list_leases(
         None, description="Filter by lease end date"
     ),
     status: Optional[str] = Query(None, description="Filter by lease status"),
+    lease_amount: Optional[str] = Query(None, description="Filter by lease amount (comma-separated for multiple)"),
     sort_by: Optional[str] = Query(None, description="Sort by field"),
     sort_order: Optional[str] = Query(None, description="Sort order"),
     exclude_additional_drivers: Optional[bool] = Query(
@@ -210,6 +211,7 @@ def list_leases(
             lease_start_date=lease_start_date,
             lease_end_date=lease_end_date,
             status=status,
+            lease_amount=lease_amount,
             sort_by=sort_by,
             sort_order=sort_order,
             exclude_additional_drivers=exclude_additional_drivers,
@@ -812,4 +814,56 @@ def send_lease_renewal_reminders(
         logger.error(f"Error sending renewal reminders: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error sending renewal reminders: {str(e)}"
+        ) from e
+
+
+@router.post("/lease/process-expiries", summary="Process lease expiries")
+def process_lease_expiries_endpoint(
+    db: Session = Depends(get_db),
+    check_date: Optional[str] = Query(
+        None,
+        description="Date to check expiries for (YYYY-MM-DD). Defaults to today.",
+    ),
+    logged_in_user: User = Depends(get_current_user),
+):
+    """
+    Process lease expiries for leases past their end date with auto-renewal disabled.
+
+    This endpoint:
+    1. Finds all active leases with is_auto_renewed = False that have passed their lease_end_date
+    2. Marks them as EXPIRED
+    3. Sends admin notification email with summary of all expired leases
+
+    This is separate from auto-renewal:
+    - Auto-renewal handles active renewal of leases
+    - This endpoint handles marking leases as expired when they won't renew
+    """
+    try:
+        from datetime import datetime
+
+        from app.leases.lease_expiry_service import process_lease_expiries
+
+        # Parse check date or use today
+        if check_date:
+            try:
+                parsed_date = datetime.strptime(check_date, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date format. Use YYYY-MM-DD",
+                )
+        else:
+            parsed_date = datetime.now().date()
+
+        # Process lease expiries
+        result = process_lease_expiries(db, parsed_date)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing lease expiries: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Error processing lease expiries: {str(e)}"
         ) from e

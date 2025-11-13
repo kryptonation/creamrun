@@ -21,7 +21,7 @@ def parse_lease_driver(db:Session , df: pd.DataFrame) :
 
     try:
         for _, row in df.iterrows():
-            driver_id = get_safe_value(row , 'driver_id')
+            tlc_license = get_safe_value(row , 'tlc_license')
             lease_id = get_safe_value(row , 'lease_id')
             driver_role = get_safe_value(row , 'driver_role')
             is_day_night_shift = get_safe_value(row , 'is_day_night_shift')
@@ -46,12 +46,12 @@ def parse_lease_driver(db:Session , df: pd.DataFrame) :
             
             date_added = convert_date(date_added)
 
-            driver = driver_service.get_drivers(db=db ,tlc_license_number=driver_id)
+            driver = driver_service.get_drivers(db=db ,tlc_license_number=tlc_license)
 
             lease = db.query(Lease).filter_by(lease_id=lease_id).first()
 
             if not lease or not driver:
-                logger.warning("No lease or driver found for lease ID: %s and driver ID: %s. Skipping.", lease_id, driver_id)
+                logger.warning("No lease or driver found for lease ID: %s and driver ID: %s. Skipping.", lease_id, tlc_license)
                 continue
 
 
@@ -59,7 +59,7 @@ def parse_lease_driver(db:Session , df: pd.DataFrame) :
             driver.is_active = True
             db.add(driver)
 
-            lease_driver = db.query(LeaseDriver).filter_by(driver_id=driver_id, lease_id=lease_id).first()
+            lease_driver = db.query(LeaseDriver).filter_by(driver_id=driver.driver_id, lease_id=lease_id).first()
 
             if lease_driver is not None :
                 # update the exiting Lease Driver
@@ -86,7 +86,7 @@ def parse_lease_driver(db:Session , df: pd.DataFrame) :
                 db.add(driver_lease)
 
             db.flush()
-            logger.info("Lease Driver '%s' added to Lease '%s'the database.", driver_id , lease_id)
+            logger.info("Lease Driver '%s' added to Lease '%s'the database.", tlc_license , lease_id)
 
         db.commit()
     except Exception as e :

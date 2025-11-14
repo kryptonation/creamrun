@@ -24,6 +24,7 @@ class CurbTripStatus(str, PyEnum):
 
     UNRECONCILED = "UNRECONCILED"
     RECONCILED = "RECONCILED"
+    MAPPED = "MAPPED"
     POSTED_TO_LEDGER = "POSTED_TO_LEDGER"
     ERROR = "ERROR"
 
@@ -155,6 +156,10 @@ class CurbTrip(Base, AuditMixin):
     )
     end_lat: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(10, 7), comment="Ending latitude of the trip."
+    )
+    num_service: Mapped[Optional[int]] = mapped_column(
+        Integer, comment="Number of services during the trip.",
+        nullable=True
     )
 
     # --- Relationships ---

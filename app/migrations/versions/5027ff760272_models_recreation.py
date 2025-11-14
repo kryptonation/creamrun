@@ -1,8 +1,8 @@
 """models recreation
 
-Revision ID: 7cd387b98b93
+Revision ID: 5027ff760272
 Revises: 
-Create Date: 2025-11-12 11:42:44.403992
+Create Date: 2025-11-13 23:47:01.331978
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '7cd387b98b93'
+revision: str = '5027ff760272'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -1120,6 +1120,8 @@ def upgrade() -> None:
     sa.Column('preset_weekly_rate', sa.Float(), nullable=True, comment='The default rate from the LeasePreset table at time of creation'),
     sa.Column('overridden_weekly_rate', sa.Float(), nullable=True, comment='The manually overridden rate, if any'),
     sa.Column('override_reason', sa.String(length=255), nullable=True),
+    sa.Column('termination_date', sa.Date(), nullable=True, comment='Date when the lease was terminated'),
+    sa.Column('termination_reason', sa.String(length=500), nullable=True, comment='Reason for lease termination'),
     sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
     sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
     sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
@@ -1270,7 +1272,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('curb_trip_id', sa.String(length=255), nullable=False, comment='Unique identifier for the trip from CURB (e.g., ROWID).'),
     sa.Column('curb_period', sa.String(length=50), nullable=True, comment="The accounting period from CURB (e.g., '201903')."),
-    sa.Column('status', sa.Enum('UNRECONCILED', 'RECONCILED', 'POSTED_TO_LEDGER', 'ERROR', name='curbtripstatus'), nullable=False, comment='The processing status of the trip within the BAT system.'),
+    sa.Column('status', sa.Enum('UNRECONCILED', 'RECONCILED', 'MAPPED', 'POSTED_TO_LEDGER', 'ERROR', name='curbtripstatus'), nullable=False, comment='The processing status of the trip within the BAT system.'),
     sa.Column('driver_id', sa.Integer(), nullable=True),
     sa.Column('lease_id', sa.Integer(), nullable=True),
     sa.Column('vehicle_id', sa.Integer(), nullable=True),
@@ -1297,6 +1299,7 @@ def upgrade() -> None:
     sa.Column('start_lat', sa.Numeric(precision=10, scale=7), nullable=True, comment='Starting latitude of the trip.'),
     sa.Column('end_long', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending longitude of the trip.'),
     sa.Column('end_lat', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending latitude of the trip.'),
+    sa.Column('num_service', sa.Integer(), nullable=True, comment='Number of services during the trip.'),
     sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
     sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
     sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),

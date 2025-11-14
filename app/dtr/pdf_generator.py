@@ -4,6 +4,8 @@ from io import BytesIO
 from decimal import Decimal
 from typing import List
 import logging
+import math
+from datetime import datetime, timedelta
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -14,9 +16,12 @@ from reportlab.platypus import (
     Spacer, PageBreak
 )
 from reportlab.lib.enums import TA_CENTER
+from sqlalchemy.orm import Session
 
 from app.dtr.models import DTR
 from app.dtr.exceptions import DTRExportError
+from app.curb.models import CurbTrip, PaymentType
+from app.core.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +35,34 @@ class DTRPDFGenerator:
     def __init__(self):
         """Initialize PDF generator with styles and colors"""
         self.styles = getSampleStyleSheet()
-        self._setup_custom_styles()
         
         # Color scheme matching BAT branding
         self.yellow_bg = colors.HexColor('#FFD700')  # Yellow header background
         self.gray_bg = colors.HexColor('#E8E8E8')    # Gray for table headers
         self.red_text = colors.HexColor('#FF0000')   # Red for section headers
+        
+        self._setup_custom_styles()
+
+    # --- Formatting Helpers ---
+    def _format_currency(self, amount: Decimal) -> str:
+        if amount is None: return "$0.00"
+        return f"${amount:,.2f}"
+
+    def _format_negative_currency(self, amount: Decimal) -> str:
+        if amount is None or amount == 0: return "-"
+        return f"(${abs(amount):,.2f})" if amount < 0 else f"${amount:,.2f}"
+
+    def _format_date(self, date_obj) -> str:
+        if not date_obj: return ""
+        return date_obj.strftime('%m/%d/%Y')
+
+    def _format_datetime(self, datetime_obj) -> str:
+        if not datetime_obj: return ""
+        return datetime_obj.strftime('%m/%d/%Y')
+
+    def _format_date_range(self, start_date, end_date) -> str:
+        if not start_date or not end_date: return ""
+        return f"{self._format_date(start_date)} to {self._format_date(end_date)}"
         
     def _setup_custom_styles(self):
         """Setup custom paragraph styles"""
@@ -63,6 +90,15 @@ class DTRPDFGenerator:
             name='DTRNormal',
             parent=self.styles['Normal'],
             fontSize=9,
+            fontName='Helvetica'
+        ))
+        
+        # Right-aligned text (for currency amounts)
+        self.styles.add(ParagraphStyle(
+            name='RightAlign',
+            parent=self.styles['Normal'],
+            fontSize=9,
+            alignment=2,  # 2 = TA_RIGHT in reportlab
             fontName='Helvetica'
         ))
     
@@ -670,6 +706,106 @@ class DTRPDFGenerator:
         
         return elements
     
+    def _build_trip_sub_table(self, trips: List[CurbTrip]) -> Table:
+        """Helper to build and style one of the three trip log columns."""
+        if not trips:
+            # Return an empty paragraph to maintain layout spacing
+            return Paragraph("", self.styles['Normal'])
+
+        data = [['Date', 'TLC', 'Trip #', 'Amount']]
+        for trip in trips:
+            # Safely get TLC from related driver or fall back to curb_driver_id
+            tlc_license = "N/A"
+            if trip.driver and trip.driver.tlc_license:
+                tlc_license = trip.driver.tlc_license.tlc_license_number
+            elif trip.curb_driver_id:
+                tlc_license = trip.curb_driver_id
+
+            # Extract just the numeric part of the trip ID for display
+            trip_number = trip.curb_trip_id.split('-')[-1]
+
+            data.append([
+                self._format_datetime(trip.start_time),
+                tlc_license,
+                trip_number,
+                Paragraph(self._format_currency(trip.total_amount), self.styles['RightAlign']),
+            ])
+        
+        table = Table(data, colWidths=[0.8*inch, 0.8*inch, 0.5*inch, 0.7*inch])
+        table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        return table
+    
+    def _create_trip_log_section(self, dtr: DTR) -> List:
+        """
+        Creates the Trip Log section with a three-column layout.
+        Fetches the relevant credit card trips from the CurbTrip table.
+        """
+        db = next(get_db())
+        elements = []
+        
+        # Query for all credit card trips associated with this DTR's context
+        credit_card_trips = (
+            db.query(CurbTrip)
+            .filter(
+                CurbTrip.driver_id == dtr.driver_id,
+                CurbTrip.lease_id == dtr.lease_id,
+                CurbTrip.payment_type == PaymentType.CREDIT_CARD,
+                CurbTrip.start_time >= dtr.period_start_date,
+                CurbTrip.end_time <= (dtr.period_end_date + timedelta(days=1))
+            )
+            .order_by(CurbTrip.start_time.asc())
+            .all()
+        )
+
+        if not credit_card_trips:
+            return elements # Return empty if no trips to show
+
+        elements.append(PageBreak())
+        elements.extend(self._create_header(dtr))
+        elements.append(Paragraph("DTR Details - Trip Log (Credit Card Trips Only)", self.styles['SectionHeader']))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        # --- Logic to split trips into three columns ---
+        total_trips = len(credit_card_trips)
+        rows_per_column = math.ceil(total_trips / 3.0)
+
+        col1_trips = credit_card_trips[0:rows_per_column]
+        col2_trips = credit_card_trips[rows_per_column : 2 * rows_per_column]
+        col3_trips = credit_card_trips[2 * rows_per_column :]
+
+        # --- Build the three nested tables ---
+        table1 = self._build_trip_sub_table(col1_trips)
+        table2 = self._build_trip_sub_table(col2_trips)
+        table3 = self._build_trip_sub_table(col3_trips)
+
+        # --- Assemble the main three-column table ---
+        main_table = Table([[table1, table2, table3]], colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
+        main_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5), # Add some space between columns
+        ]))
+
+        elements.append(main_table)
+        
+        # Add the required footnote
+        elements.append(Spacer(1, 0.1*inch))
+        footnote = Paragraph(
+            '<font size="7"><i>Note: This table lists only credit card transactions during the Receipt Period. Cash transactions are not captured in the above table.</i></font>',
+            self.styles['DTRNormal']
+        )
+        elements.append(footnote)
+
+        return elements
+    
     def generate_pdf(self, dtr: DTR) -> bytes:
         """
         Generate complete PDF for DTR.
@@ -706,6 +842,9 @@ class DTRPDFGenerator:
             story.extend(self._create_earnings_section(dtr))
             story.extend(self._create_account_balance_section(dtr))
             story.extend(self._create_payment_summary(dtr))
+
+            # Trip Log Section (if applicable)
+            story.extend(self._create_trip_log_section(dtr))
             
             # Page 2+: Alerts, Taxes, EZPass details
             story.extend(self._create_alerts_section(dtr))

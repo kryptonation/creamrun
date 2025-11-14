@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone, timedelta
 
 from fastapi import Depends
 from sqlalchemy.exc import SQLAlchemyError
@@ -177,60 +178,43 @@ class LedgerService:
         Returns a dictionary of reference_id: amount_applied.
         """
         if earnings_amount <= 0:
-            raise InvalidLedgerOperationError("Earnings amount must be positive.")
+            return []
 
+        remaining_earnings = earnings_amount
+        created_postings = []
         try:
-            open_balances = self.repo.get_open_balances_for_driver(driver_id, lease_id)
-            if not open_balances:
-                logger.info("No open balances found for driver.", driver_id=driver_id)
-                return {}
+            earnings_posting = LedgerPosting(
+                category=PostingCategory.EARNINGS,
+                amount=-earnings_amount,
+                entry_type=EntryType.CREDIT,
+                reference_id=f"EARNINGS-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+                driver_id=driver_id,
+                lease_id=lease_id,
+            )
+            self.repo.create_posting(earnings_posting)
+            created_postings.append(earnings_posting)
 
-            remaining_earnings = earnings_amount
-            allocation_summary = {}
+            open_balances = self.repo.get_open_balances_for_driver(driver_id)
 
             for balance in open_balances:
                 if remaining_earnings <= 0:
                     break
 
-                # Calculate how much to apply to this balance
-                amount_to_apply = min(remaining_earnings, balance.balance)
-
-                # Create CREDIT posting
-                credit_posting = LedgerPosting(
-                    category=balance.category,
-                    amount=-amount_to_apply,
-                    entry_type=EntryType.CREDIT,
-                    status=PostingStatus.POSTED,
-                    reference_id=f"EARNINGS-{balance.reference_id}",
-                    driver_id=driver_id,
-                    lease_id=balance.lease_id,
-                    vehicle_id=balance.vehicle_id,
-                    medallion_id=balance.medallion_id,
+                payment_amount = min(remaining_earnings, balance.balance)
+                new_balance_amount = balance.balance - payment_amount
+                self.repo.update_balance(
+                    balance=balance,
+                    new_balance_amount=new_balance_amount,
+                    payment_ref_id=earnings_posting.id,
                 )
-                self.repo.create_posting(credit_posting)
+                remaining_earnings -= payment_amount
 
-                # Update balance
-                new_balance_amount = balance.balance - amount_to_apply
-                new_status = BalanceStatus.CLOSED if new_balance_amount <= 0 else BalanceStatus.OPEN
-                self.repo.update_balance(balance, new_balance_amount, new_status)
-
-                # Track allocation
-                allocation_summary[balance.reference_id] = amount_to_apply
-                remaining_earnings -= amount_to_apply
-                self.repo.db.commit()
-            
-            logger.info(
-                "Successfully applied weekly earnings.",
-                driver_id=driver_id,
-                earnings_amount=earnings_amount,
-                allocated_amount=earnings_amount - remaining_earnings,
-                remaining=remaining_earnings,
-            )
-            return allocation_summary
-
+            self.repo.db.commit()
+            logger.info("Successfully applied weekly earnings.", driver_id=driver_id, total_earnings=earnings_amount)
+            return created_postings
         except (SQLAlchemyError, LedgerError) as e:
             self.repo.db.rollback()
-            logger.error("Failed to apply weekly earnings.", error=str(e), exc_info=True)
+            logger.error("Failed to apply weekly earnings.", driver_id=driver_id, error=str(e), exc_info=True)
             raise
 
     def void_posting(self, posting_id: str, reason: str) -> LedgerPosting:

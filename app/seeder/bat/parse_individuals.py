@@ -131,7 +131,6 @@ def parse_individuals(db: Session, df: pd.DataFrame):
                 individual_owner.primary_address_id = primary_address_id
                 individual_owner.medallion_owner_status = "Y"
                 individual_owner.modified_by = SUPERADMIN_USER_ID
-                individual_owner.updated_on = datetime.now()
             else:
                 individual_owner = MedallionOwner(
                     medallion_owner_type='I',
@@ -141,8 +140,7 @@ def parse_individuals(db: Session, df: pd.DataFrame):
                     individual_id=individual.id,
                     medallion_owner_status="Y",
                     is_active=True,
-                    created_by=SUPERADMIN_USER_ID,
-                    created_on=datetime.now()
+                    created_by=SUPERADMIN_USER_ID
                 )
             
                 db.add(individual_owner)

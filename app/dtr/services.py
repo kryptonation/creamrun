@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 from app.dtr.models import DTR, DTRStatus, PaymentMethod
 from app.dtr.repository import DTRRepository
@@ -24,6 +24,7 @@ from app.loans.models import DriverLoan
 from app.leases.models import Lease
 from app.drivers.models import Driver
 from app.vehicles.models import Vehicle
+from app.leases.schemas import LeaseStatus
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -123,7 +124,7 @@ class DTRService:
     ) -> Decimal:
         """Get total credit card earnings from CURB for the period"""
         total = self.db.query(
-            func.coalesce(func.sum(CurbTrip.fare + CurbTrip.tips), 0)
+            func.coalesce(func.sum(CurbTrip.total_amount), 0)
         ).filter(
             and_(
                 CurbTrip.driver_id == driver_id,
@@ -910,3 +911,183 @@ class DTRService:
             skip=skip,
             limit=limit
         )
+    
+    def generate_dtrs_for_period(
+        self,
+        period_start: date,
+        period_end: date,
+        auto_finalize: bool = False,
+        regenerate_existing: bool = False,
+        lease_status_filter: Optional[str] = None
+    ) -> Dict:
+        """
+        Generate DTRs for all leases for a specified period.
+        
+        Args:
+            period_start: Start date of the period
+            period_end: End date of the period
+            auto_finalize: Whether to automatically finalize generated DTRs
+            regenerate_existing: Whether to regenerate existing DTRs
+            lease_status_filter: Optional lease status filter (e.g., "ACTIVE")
+            
+        Returns:
+            Dictionary with generation results:
+            {
+                'total_leases': int,
+                'generated_count': int,
+                'skipped_count': int,
+                'failed_count': int,
+                'generated': [list of generated DTR info],
+                'skipped': [list of skipped lease info],
+                'failed': [list of failed lease info with errors]
+            }
+        """
+        try:
+            logger.info(
+                f"Generating DTRs for period {period_start} to {period_end}, "
+                f"auto_finalize={auto_finalize}, regenerate={regenerate_existing}"
+            )
+            
+            # Build query for active leases during the period
+            query = self.db.query(Lease)
+            
+            # Filter leases that were active during the period
+            query = query.filter(
+                and_(
+                    Lease.lease_start_date <= period_end,
+                    or_(
+                        Lease.lease_end_date.is_(None),
+                        Lease.lease_end_date >= period_start
+                    )
+                )
+            )
+            
+            # Apply status filter if provided
+            if lease_status_filter:
+                try:
+                    status_enum = LeaseStatus[lease_status_filter.upper()]
+                    query = query.filter(Lease.lease_status == status_enum)
+                except KeyError as e:
+                    raise DTRValidationError(
+                        f"Invalid lease status: {lease_status_filter}. "
+                        f"Valid statuses: {', '.join([s.name for s in LeaseStatus])}"
+                    ) from e
+            else:
+                # Default: only active leases
+                query = query.filter(Lease.lease_status == LeaseStatus.ACTIVE)
+            
+            # Get all matching leases
+            leases = query.all()
+            
+            logger.info(f"Found {len(leases)} leases for DTR generation")
+            
+            results = {
+                'total_leases': len(leases),
+                'generated_count': 0,
+                'skipped_count': 0,
+                'failed_count': 0,
+                'generated': [],
+                'skipped': [],
+                'failed': []
+            }
+            
+            # Generate DTR for each lease
+            for lease in leases:
+                try:
+                    # Check if DTR already exists for this period
+                    existing_dtr = self.db.query(DTR).filter(
+                        and_(
+                            DTR.lease_id == lease.id,
+                            DTR.period_start_date == period_start,
+                            DTR.period_end_date == period_end
+                        )
+                    ).first()
+
+                    driver_id = None
+                    for driver in lease.lease_driver:
+                        if not driver.is_additional_driver:
+                            driver_id = driver.driver_id
+                            break
+
+                    from app.drivers.services import driver_service
+                    driver = driver_service.get_drivers(db=self.db, tlc_license_number=driver_id)
+                    
+                    if existing_dtr and not regenerate_existing:
+                        # Skip - DTR already exists
+                        results['skipped_count'] += 1
+                        results['skipped'].append({
+                            'lease_id': lease.lease_id,
+                            'driver_id': driver_id,
+                            'driver_name': f"{driver.first_name} {driver.last_name}" if driver else None,
+                            'dtr_number': existing_dtr.dtr_number,
+                            'dtr_status': existing_dtr.status.value,
+                            'reason': 'DTR already exists for this period'
+                        })
+                        logger.debug(f"Skipped lease {lease.lease_id} - DTR already exists")
+                        continue
+                    
+                    # Delete existing DTR if regenerating
+                    if existing_dtr and regenerate_existing:
+                        logger.info(f"Regenerating DTR for lease {lease.lease_id}")
+                        self.db.delete(existing_dtr)
+                        self.db.commit()
+                    
+                    # Get driver for this lease
+                    if not driver_id:
+                        results['failed_count'] += 1
+                        results['failed'].append({
+                            'lease_id': lease.lease_id,
+                            'driver_id': None,
+                            'error': 'Lease has no assigned driver'
+                        })
+                        continue
+                    
+                    # Generate DTR
+                    dtr = self.generate_dtr(
+                        lease_id=lease.id,
+                        driver_id=driver.id,
+                        period_start=period_start,
+                        period_end=period_end,
+                        auto_finalize=auto_finalize
+                    )
+                    
+                    results['generated_count'] += 1
+                    results['generated'].append({
+                        'lease_id': lease.lease_id,
+                        'driver_id': driver_id,
+                        'driver_name': f"{driver.first_name} {driver.last_name}" if driver else None,
+                        'dtr_id': dtr.id,
+                        'dtr_number': dtr.dtr_number,
+                        'dtr_status': dtr.status.value,
+                        'total_earnings': float(dtr.total_gross_earnings),
+                        'net_earnings': float(dtr.net_earnings),
+                        'total_due': float(dtr.total_due_to_driver)
+                    })
+                    
+                    logger.debug(f"Generated DTR {dtr.dtr_number} for lease {lease.lease_id}")
+                    
+                except Exception as e:
+                    # Log error and continue with next lease
+                    results['failed_count'] += 1
+                    results['failed'].append({
+                        'lease_id': lease.lease_id,
+                        'driver_id': driver_id if driver_id else None,
+                        'error': str(e)
+                    })
+                    logger.error(
+                        f"Failed to generate DTR for lease {lease.lease_id}: {str(e)}",
+                        exc_info=True
+                    )
+                    # Rollback this transaction and continue
+                    self.db.rollback()
+            
+            logger.info(
+                f"DTR generation completed: {results['generated_count']} generated, "
+                f"{results['skipped_count']} skipped, {results['failed_count']} failed"
+            )
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error in generate_dtrs_for_period: {str(e)}", exc_info=True)
+            raise DTRGenerationError(f"Failed to generate DTRs for period: {str(e)}") from e

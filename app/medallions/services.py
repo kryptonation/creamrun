@@ -241,18 +241,20 @@ class MedallionService:
                 if not joined_corporation:
                     query = query.outerjoin(Corporation, MedallionOwner.corporation_id == Corporation.id)
                     joined_corporation = True
+
                 if not joined_individual:
                     query = query.outerjoin(Individual, MedallionOwner.individual_id == Individual.id)
                     joined_individual = True
 
-                    owner_name = case(
-                        (Corporation.name != None, Corporation.name),
-                        else_=Individual.full_name
-                    )
+                owner_name = case(
+                    (Corporation.name != None, Corporation.name),
+                    else_=Individual.full_name
+                )
 
-                    query = query.order_by(
-                        asc(owner_name) if sort_order == "asc" else desc(owner_name)
-                    )
+                query = query.order_by(
+                    asc(owner_name) if sort_order == "asc" else desc(owner_name)
+                )
+
             elif sort_by == "ssn":
                 if not joined_individual:
                     query = query.outerjoin(Individual, MedallionOwner.individual_id == Individual.id)
@@ -297,7 +299,12 @@ class MedallionService:
                     asc(Corporation.is_holding_entity) if sort_order == "asc" else desc(Corporation.is_holding_entity)
                 )
             else:
-                query = query.order_by(MedallionOwner.updated_on.desc(), MedallionOwner.created_on.desc())
+                latest_ts = func.coalesce(MedallionOwner.updated_on, MedallionOwner.created_on)
+
+                query = query.order_by(
+                    latest_ts.desc(),
+                    MedallionOwner.id.desc()
+                )
 
             total_count = query.count()
 

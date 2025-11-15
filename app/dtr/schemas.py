@@ -9,6 +9,37 @@ from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from app.dtr.models import DTRStatus, PaymentMethod
 
 
+class PeriodDTRGenerationRequest(BaseModel):
+    """Request schema for generating DTRs by period"""
+    period_start_date: date = Field(..., description="Period start date (Sunday)")
+    period_end_date: date = Field(..., description="Period end date (Saturday)")
+    auto_finalize: bool = Field(default=False, description="Automatically finalize DTRs after generation")
+    regenerate_existing: bool = Field(default=False, description="Regenerate if DTR already exists for period")
+    lease_status_filter: Optional[str] = Field(None, description="Filter by lease status (ACTIVE, TERMINATED, etc.)")
+    
+    @field_validator('period_end_date')
+    @classmethod
+    def validate_period(cls, v, info: ValidationInfo):
+        data = info.data if hasattr(info, 'data') else {}
+        if 'period_start_date' in data and v < data['period_start_date']:
+            raise ValueError('Period end date must be after start date')
+        return v
+
+
+class DTRGenerationSummary(BaseModel):
+    """Summary of DTR generation results"""
+    total_leases_found: int
+    dtrs_generated: int
+    dtrs_skipped: int
+    dtrs_failed: int
+    generation_time_seconds: float
+    period_start: date
+    period_end: date
+    generated_dtrs: List[dict]
+    skipped_dtrs: List[dict]
+    failed_dtrs: List[dict]
+
+
 class DTRGenerationRequest(BaseModel):
     """Request schema for DTR generation"""
     lease_id: int = Field(..., description="Lease ID")

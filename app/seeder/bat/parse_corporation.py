@@ -86,7 +86,6 @@ def parse_corporation(db: Session, df: pd.DataFrame):
                 medallion_owenr.primary_address_id = address.id if address else None
                 medallion_owenr.medallion_owner_status = "Y"
                 medallion_owenr.modified_by = SUPERADMIN_USER_ID
-                medallion_owenr.updated_on = datetime.now()
 
             else:
                 medallion_owenr = MedallionOwner(
@@ -98,7 +97,6 @@ def parse_corporation(db: Session, df: pd.DataFrame):
                     medallion_owner_status="Y",
                     is_active=True,
                     created_by=SUPERADMIN_USER_ID,
-                    created_on=datetime.now()
                 )
 
                 db.add(medallion_owenr)

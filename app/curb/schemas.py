@@ -20,8 +20,19 @@ class CurbTripResponse(BaseModel):
     tlc_license_no: Optional[str] = None
     vehicle_plate: Optional[str] = Field(None, alias="plate")
     medallion_no: Optional[str] = Field(None, alias="curb_cab_number")
-    total_amount: Decimal
     payment_mode: PaymentType = Field(..., alias="payment_type")
+    
+    total_amount: Decimal
+    fare: Decimal
+    tips: Decimal
+    tolls: Decimal
+    extras: Decimal
+
+    surcharge: Decimal
+    improvement_surcharge: Decimal
+    congestion_fee: Decimal
+    airport_fee: Decimal
+    cbdt_fee: Decimal
 
     # Raw datetime fields from database (used to populate formatted fields)
     start_datetime: Optional[datetime] = Field(None, alias="start_time")

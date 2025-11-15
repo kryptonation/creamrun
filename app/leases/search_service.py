@@ -326,6 +326,7 @@ def format_lease_response(db: Session, lease):
 
 def format_lease_export(db: Session, lease):
     """Format a lease response"""
+    import json
     from app.bpm.models import Case, CaseEntity
     from app.leases.models import LeaseConfiguration
 
@@ -343,27 +344,6 @@ def format_lease_export(db: Session, lease):
     if lease_config and lease_config.lease_limit:
         lease_amount = float(lease_config.lease_limit)
 
-    # Get latest case associated with this lease
-    case_detail = None
-    case_entity = (
-        db.query(CaseEntity)
-        .filter(
-            CaseEntity.entity_name == "leases",
-            CaseEntity.identifier == "lease_id",
-            CaseEntity.identifier_value == str(lease.id),
-        )
-        .order_by(CaseEntity.created_on.desc())
-        .first()
-    )
-
-    if case_entity:
-        case = db.query(Case).filter(Case.case_no == case_entity.case_no).first()
-        if case:
-            case_detail = {
-                "case_no": case.case_no,
-                "case_status": case.case_status.name if case.case_status else None,
-            }
-
     # Determine shift information for shift-lease types
     shift_type = None
     if lease.lease_type == "shift-lease":
@@ -373,6 +353,8 @@ def format_lease_export(db: Session, lease):
             shift_type = "Day"
         elif lease.is_night_shift:
             shift_type = "Night"
+
+    temp_lease_drivers = [] 
 
     lease_details = {
         "lease_id": lease.lease_id,
@@ -388,15 +370,8 @@ def format_lease_export(db: Session, lease):
         else "N/A",
         "lease_type": lease.lease_type if lease.lease_type else "N/A",
         "lease_amount": f"{lease_amount:,.2f}",
-        "case_detail": case_detail,
         "shift_type": shift_type,
-        "driver_id": "N/A",
-        "tlc_license_no": "N/A",
-        "dmv_license_no": "N/A",
-        "ssn": "N/A",
-        "phone_number": "N/A",
-        "driver_name": "N/A",
-        "is_driver_manager": False,
+        # The key 'lease_drivers' will be populated via temp_lease_drivers and serialized
         "has_documents": False,
     }
 
@@ -414,10 +389,23 @@ def format_lease_export(db: Session, lease):
         if not driver:
             continue
 
-        lease_details["driver_lease_id"] = lease_driver.id
-        lease_details["driver_id"] = driver.driver_id
-        lease_details["tlc_license_no"] = (
-            driver.tlc_license.tlc_license_number if driver.tlc_license else None
+        temp_lease_drivers.append(
+            {
+                "driver_id": driver.driver_id,
+                "tlc_license_no": driver.tlc_license.tlc_license_number
+                if driver.tlc_license and driver.tlc_license.tlc_license_number
+                else None,
+                "dmv_license_no": driver.dmv_license.dmv_license_number
+                if driver.dmv_license and driver.dmv_license.dmv_license_number
+                else None,
+                "ssn": f"xxx-xx-{driver.ssn[-4:]}" if driver.ssn and len(driver.ssn) >= 4 else None,
+                # Ensure phone number is passed as a string/None
+                "phone_number": format_us_phone_number(str(driver.phone_number_1) if driver.phone_number_1 else None),
+                "driver_name": f"{driver.first_name} {driver.last_name}",
+                "is_driver_manager": bool(lease_driver.documents),
+                "is_active": lease_driver.is_active,
+                "is_additional_driver": lease_driver.is_additional_driver
+            }
         )
         lease_details["dmv_license_no"] = (
             driver.dmv_license.dmv_license_number if driver.dmv_license else None
@@ -428,4 +416,9 @@ def format_lease_export(db: Session, lease):
         lease_details["is_driver_manager"] = bool(lease_driver.documents)
         break
 
+    # --- FIX: Convert unhashable types (list/dict) to hashable strings (JSON) ---
+    
+    # 1. Serialize the list of driver dictionaries
+    lease_details["lease_drivers"] = json.dumps(temp_lease_drivers)
+    
     return lease_details

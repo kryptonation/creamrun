@@ -536,8 +536,7 @@ class CurbService:
                     continue
                 
                 # Earnings are net of taxes/surcharges, so we sum the core components
-                net_earning = (trip.fare or Decimal("0.0")) + (trip.tips or Decimal("0.0"))
-                
+                net_earning = (trip.total_amount or Decimal("0.0"))                
                 key = (trip.driver_id, trip.lease_id)
                 earnings_by_driver_lease.setdefault(key, Decimal("0.0"))
                 trips_by_driver_lease.setdefault(key, [])

@@ -251,17 +251,14 @@ def export_trips(
     Exports filtered trip data to the specified format (Excel or PDF).
     """
     try:
-        trips, _ = curb_service.repo.list_curb_data(
+        trips, _ = curb_service.repo.list_trips(
             page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
-            trip_id=trip_id, driver_id=driver_id, medallion_no=medallion_no,
+            trip_id=trip_id, driver_id_tlc=driver_id, medallion_no=medallion_no,
             start_date=start_date, end_date=end_date,
         )
 
         if not trips:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No trip data available for export with the given filters.",
-            )
+            raise ValueError("No trip data available for export with the given filters.")
 
         export_data = [CurbTripResponse.model_validate(trip).model_dump() for trip in trips]
         

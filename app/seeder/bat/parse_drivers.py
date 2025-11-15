@@ -141,9 +141,14 @@ def parse_drivers(db: Session, df: pd.DataFrame):
                 if not driver.driver_bank_account:
                     db.add(bank_account)
                     driver.driver_bank_account = bank_account
+                    driver.pay_to_mode = "ACH"
                     created_bank_accounts += 1
                 else:
                     updated_bank_accounts += 1
+            else:
+                driver.driver_bank_account = None
+                driver.pay_to_mode = get_safe_value(row, "pay_to_mode")
+                driver.pay_to = driver.full_name
 
         db.commit()
         logger.info("✅ Data successfully processed.")

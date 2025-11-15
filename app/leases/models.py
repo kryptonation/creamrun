@@ -227,7 +227,7 @@ class LeaseDriver(Base, AuditMixin):
 
     driver_id: Mapped[Optional[str]] = mapped_column(
         String(128),
-        ForeignKey("drivers.driver_id"),
+        ForeignKey("drivers.driver_id", onupdate="CASCADE"),
         nullable=True,
         index=True,
         comment="Foreign Key to driver.driver_id",

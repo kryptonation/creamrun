@@ -31,6 +31,30 @@ def create_stub_curb_trip_response(
     for i in range(per_page):
         start_time = _generate_random_datetime()
         end_time = start_time + timedelta(minutes=random.randint(5, 45))
+
+        fare = Decimal(str(round(random.uniform(8.0, 40.0), 2)))
+        tips = Decimal(str(round(random.uniform(0.0, 10.0), 2)))
+        tolls = Decimal(str(round(random.uniform(0.0, 15.0), 2)))
+        extras = Decimal(str(round(random.uniform(0.0, 5.0), 2)))
+
+
+        surcharge = Decimal("0.50")
+        improvement_surcharge = Decimal("0.30")
+        congestion_fee = Decimal("2.75")
+        airport_fee = Decimal("0.00")
+        cbdt_fee = Decimal("0.00")
+
+        total_amount = (
+            fare
+            + tips
+            + tolls
+            + extras
+            + surcharge
+            + improvement_surcharge
+            + congestion_fee
+            + airport_fee
+            + cbdt_fee
+        )
         
         item = CurbTripResponse(
             curb_trip_id=f"TRPN{random.randint(100, 999)}",
@@ -38,7 +62,16 @@ def create_stub_curb_trip_response(
             tlc_license_no=random.choice(FAKE_DRIVERS),
             plate=random.choice(FAKE_PLATES),
             curb_cab_number=random.choice(FAKE_MEDALLIONS),
-            total_amount=Decimal(str(round(random.uniform(15.0, 250.0), 2))),
+            fare=fare,
+            tips=tips,
+            tolls=tolls,
+            extras=extras,
+            surcharge=surcharge,
+            improvement_surcharge=improvement_surcharge,
+            congestion_fee=congestion_fee,
+            airport_fee=airport_fee,
+            cbdt_fee=cbdt_fee,
+            total_amount=total_amount,
             payment_mode=random.choice(list(PaymentType)),
             start_time=start_time,
             end_time=end_time,

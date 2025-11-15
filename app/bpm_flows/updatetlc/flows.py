@@ -185,7 +185,8 @@ def set_tlc_license_information(db, case_no, step_data):
 
         driver_service.upsert_driver(db, {
             "id": driver.id,
-            "tlc_license_number_id": tlc_license.id
+            "tlc_license_number_id": tlc_license.id,
+            "driver_id": tlc_number
         })
 
         case = bpm_service.get_cases(db=db , case_no= case_no)

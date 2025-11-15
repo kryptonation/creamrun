@@ -64,7 +64,8 @@ def parse_vehicle_hackup_information(db: Session, df: pd.DataFrame):
             if vehicle_hackup is not None:
                 # Update existing hackup details
                 logger.info("Updating existing vehicle installation for VIN: %s", vehicle_vin)
-                vehicle_hackup.status = status
+                vehicle.vehicle_status = VehicleStatus.HACKED_UP
+                medallion.medallion_status = MedallionStatus.ACTIVE
             else:
                 # Insert new vehicle hackup
                 logger.info("Inserting new vehicle hackup for VIN: %s", vehicle_vin)

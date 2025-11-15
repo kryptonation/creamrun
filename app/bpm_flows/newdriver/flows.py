@@ -409,12 +409,14 @@ def create_or_update_driver_information(db, case_no, step_data):
 
         # Create or update the related entities
         dmv_license_data = {
+            "id": driver.dmv_license_number_id,
             **dmv_license_details
         }
         dmv_license = driver_service.upsert_dmv_license(db, dmv_license_data)
         driver_data["dmv_license_number_id"] = dmv_license.id
 
         tlc_data = {
+            "id": driver.tlc_license_number_id,
             **tlc_license_details,
         }
         tlc_license = driver_service.upsert_tlc_license(db, tlc_data)

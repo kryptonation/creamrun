@@ -25,8 +25,8 @@ entity_mapper = {
     "DRIVER_LOAN_ID": "id",
 }
 
-
-@step(step_id="303", name="Fetch - Search Driver & Enter Loan Details", operation="fetch")
+#@step(step_id="303", name="Fetch - Search Driver & Enter Loan Details", operation="fetch")
+@step(step_id="219", name="Fetch - Search Driver & Enter Loan Details", operation="fetch")
 def enter_loan_details_fetch(db: Session, case_no: str, case_params: Optional[Dict] = None) -> Dict[str, Any]:
     """
     Fetches driver details and active leases for the driver loan workflow.
@@ -143,8 +143,8 @@ def enter_loan_details_fetch(db: Session, case_no: str, case_params: Optional[Di
             detail=f"An error occurred while fetching driver details: {str(e)}"
         ) from e
 
-
-@step(step_id="303", name="Process - Create Driver Loan", operation="process")
+#@step(step_id="303", name="Process - Create Driver Loan", operation="process")
+@step(step_id="219", name="Process - Create Driver Loan", operation="process")
 async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[str, Any], user_id: int = None) -> Dict[str, Any]:
     """
     Creates a new driver loan with installment schedule.
@@ -230,6 +230,7 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
         
         # Validate lease exists and is active
         lease = lease_service.get_lease(db, lookup_id=lease_id)
+        driver_lease = lease_service.get_lease_drivers(db=db , lease_id=lease.id, driver_id=driver.driver_id)
         if not lease:
             raise HTTPException(status_code=404, detail=f"Lease with ID {lease_id} not found.")
         
@@ -239,17 +240,23 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
                 detail=f"Lease {lease.lease_id} is not active. Current status: {lease.lease_status}"
             )
         
+        logger.info(f"################lease {lease.to_dict()}")
         # Validate driver is associated with the lease
-        if driver.id != lease.driver_id:
-            # Check if driver is a co-lessee
-            lease_drivers = lease_service.get_lease_drivers(db, lease_id=lease.id, multiple=True)
-            driver_ids = [ld.driver_id for ld in lease_drivers if ld.driver_id]
+        # if driver.id != lease.driver_id:
+        #     # Check if driver is a co-lessee
+        #     lease_drivers = lease_service.get_lease_drivers(db, lease_id=lease.id, multiple=True)
+        #     driver_ids = [ld.driver_id for ld in lease_drivers if ld.driver_id]
             
-            if driver.id not in driver_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Driver {driver.driver_id} is not associated with lease {lease.lease_id}."
-                )
+        #     if driver.id not in driver_ids:
+        #         raise HTTPException(
+        #             status_code=400,
+        #             detail=f"Driver {driver.driver_id} is not associated with lease {lease.lease_id}."
+        #         )
+        if not driver_lease:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Driver {driver.driver_id} is not associated with lease {lease.lease_id}."
+            )
         
         # Validate vehicle exists
         vehicle = vehicle_service.get_vehicles(db, vehicle_id=vehicle_id)
@@ -313,22 +320,22 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
         for inst in installments:
             formatted_installments.append({
                 "installment_id": inst.installment_id,
-                "week_period": f"{inst.due_date.strftime('%m/%d/%Y')}-{(inst.due_date + timedelta(days=6)).strftime('%m/%d/%Y')}",
-                "principle": float(inst.principal),
-                "interest": float(inst.interest),
+                "week_period": f"{inst.week_end_date.strftime('%m/%d/%Y')}-{(inst.week_end_date + timedelta(days=6)).strftime('%m/%d/%Y')}",
+                "principle": float(inst.principal_amount),
+                "interest": float(inst.interest_amount),
                 "total_due": float(inst.total_due),
-                "balance": float(inst.balance),
-                "due_date": inst.due_date.isoformat(),
+                "balance": float(inst.total_due-inst.principal_amount),
+                "due_date": inst.week_end_date.isoformat(),
                 "status": inst.status.value if hasattr(inst.status, 'value') else str(inst.status),
             })
         
         # Calculate totals
-        total_interest = sum(float(inst.interest) for inst in installments)
+        total_interest = sum(float(inst.interest_amount) for inst in installments)
         total_to_repay = float(loan_amount_decimal) + total_interest
         
         # Format period
-        first_due = installments[0].due_date
-        last_due = installments[-1].due_date
+        first_due = installments[0].week_end_date
+        last_due = installments[-1].week_end_date
         period = f"{first_due.strftime('%m/%d/%Y')}-{last_due.strftime('%m/%d/%Y')}"
         
         # Create audit trail

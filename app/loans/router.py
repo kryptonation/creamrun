@@ -24,10 +24,10 @@ from app.loans.schemas import (
 from app.loans.services import LoanService
 from app.loans.models import LoanInstallmentStatus
 from app.loans.stubs import create_stub_loan_response, create_stub_installment_response
+from app.leases.schemas import LeaseType
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter.excel_exporter import ExcelExporter
-from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.exporter_utils import ExporterFactory
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,43 +45,111 @@ def list_driver_loans(
     per_page: int = Query(10, ge=1, le=100),
     sort_by: Optional[str] = Query("start_week"),
     sort_order: str = Query("desc", enum=["asc", "desc"]),
-    tlc_number : Optional[str] = Query(None),
-    lease_id : Optional[str] = Query(None),
-    loan_id: Optional[str] = Query(None),
-    status: Optional[List[str]] = Query(None),
-    driver_name: Optional[str] = Query(None),
-    medallion_no: Optional[str] = Query(None),
-    lease_type: Optional[str] = Query(None),
-    start_week: Optional[date] = Query(None),
+    tlc_number: Optional[str] = Query(None, description="Filter by TLC License Number"),
+    lease_id: Optional[str] = Query(None, description="Filter by Lease ID"),
+    loan_id: Optional[str] = Query(None, description="Filter by Loan ID"),
+    status: Optional[List[str]] = Query(None, description="Filter by loan status"),
+    driver_name: Optional[str] = Query(None, description="Filter by driver name"),
+    medallion_no: Optional[str] = Query(None, description="Filter by medallion number"),
+    lease_type: Optional[str] = Query(None, description="Filter by lease type"),
+    start_week_from: Optional[date] = Query(None, description="Filter loans starting from this date (inclusive)"),
+    start_week_to: Optional[date] = Query(None, description="Filter loans starting up to this date (inclusive)"),
+    min_principal: Optional[Decimal] = Query(None, ge=0, description="Minimum principal amount"),
+    max_principal: Optional[Decimal] = Query(None, ge=0, description="Maximum principal amount"),
+    min_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100, description="Minimum interest rate (%)"),
+    max_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100, description="Maximum interest rate (%)"),
     loan_service: LoanService = Depends(get_loan_service)
 ):
     """
     Retrieves a paginated and filterable list of all driver loans.
+    
+    Features:
+    - Driver details (ID, name, TLC license)
+    - Medallion details (number, owner)
+    - Date range filter for start week
+    - Range filters for principal amount and interest rate
+    - Available lease types for frontend reference
+    
+    Date Range Example:
+    - start_week_from=2025-01-01&start_week_to=2025-03-31 returns all loans starting in Q1 2025
     """
     if use_stubs:
         return create_stub_loan_response(page, per_page)
     
     try:
         loans, total_items = loan_service.repo.list_loans(
-            page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
-            tlc_number=tlc_number, lease_id=lease_id,
-            loan_id=loan_id, status=status, driver_name=driver_name,
-            medallion_no=medallion_no, lease_type=lease_type, start_week=start_week
+            page=page, 
+            per_page=per_page, 
+            sort_by=sort_by, 
+            sort_order=sort_order,
+            tlc_number=tlc_number, 
+            lease_id=lease_id,
+            loan_id=loan_id, 
+            status=status, 
+            driver_name=driver_name,
+            medallion_no=medallion_no, 
+            lease_type=lease_type, 
+            start_week_from=start_week_from,
+            start_week_to=start_week_to,
+            min_principal=min_principal,
+            max_principal=max_principal,
+            min_interest_rate=min_interest_rate,
+            max_interest_rate=max_interest_rate,
         )
 
-        response_items = [
-            DriverLoanListResponse.model_validate(loan) for loan in loans
-        ]
+        # Build response items with enhanced details
+        response_items = []
+        for loan in loans:
+            # Extract driver details
+            driver_id = loan.driver.driver_id if loan.driver else None
+            driver_name = loan.driver.full_name if loan.driver else None
+            tlc_license = (
+                loan.driver.tlc_license.tlc_license_number 
+                if loan.driver and loan.driver.tlc_license 
+                else None
+            )
+            
+            # Extract medallion details
+            medallion_no = loan.medallion.medallion_number if loan.medallion else None
+            medallion_owner = loan.medallion.medallion_owner if loan.medallion else None
+            
+            # Extract lease type
+            lease_type_value = loan.lease.lease_type if loan.lease else None
+            
+            item = DriverLoanListResponse(
+                loan_id=loan.loan_id,
+                status=loan.status,
+                driver_id=driver_id,
+                driver_name=driver_name,
+                tlc_license=tlc_license,
+                medallion_no=medallion_no,
+                medallion_owner=medallion_owner,
+                lease_type=lease_type_value,
+                principal_amount=loan.principal_amount,
+                interest_rate=loan.interest_rate,
+                start_week=loan.start_week,
+            )
+            response_items.append(item)
         
         total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
 
+        # Get available lease types for frontend reference
+        lease_types = LeaseType.values()
+
         return PaginatedDriverLoanResponse(
-            items=response_items, total_items=total_items, page=page,
-            per_page=per_page, total_pages=total_pages
+            items=response_items, 
+            total_items=total_items, 
+            page=page,
+            per_page=per_page, 
+            total_pages=total_pages,
+            lease_types=lease_types
         )
     except Exception as e:
         logger.error("Error fetching driver loans: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching driver loans.") from e
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred while fetching driver loans."
+        ) from e
 
 @router.post("/create-case", summary="Create a New Driver Loan Case", status_code=status.HTTP_201_CREATED)
 def create_driver_loan_case(
@@ -175,50 +243,117 @@ def get_loan_details(
 
 @router.get("/export", summary="Export Driver Loan Data")
 def export_loans(
-    format: str = Query("excel", enum=["excel", "pdf"]),
+    format: str = Query("excel", enum=["excel", "pdf", "csv"]),
     sort_by: Optional[str] = Query("start_week"),
     sort_order: str = Query("desc"),
+    tlc_number: Optional[str] = Query(None),
+    lease_id: Optional[str] = Query(None),
     loan_id: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    status: Optional[List[str]] = Query(None),
     driver_name: Optional[str] = Query(None),
     medallion_no: Optional[str] = Query(None),
     lease_type: Optional[str] = Query(None),
-    start_week: Optional[date] = Query(None),
+    start_week_from: Optional[date] = Query(None, description="Export loans starting from this date"),
+    start_week_to: Optional[date] = Query(None, description="Export loans starting up to this date"),
+    min_principal: Optional[Decimal] = Query(None, ge=0),
+    max_principal: Optional[Decimal] = Query(None, ge=0),
+    min_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100),
+    max_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100),
     loan_service: LoanService = Depends(get_loan_service),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Exports filtered driver loan data to the specified format.
+    Exports filtered driver loan data to the specified format (Excel, PDF, or CSV).
+    
+    Supports all the same filters as the list endpoint for consistent data export.
     """
     try:
         loans, _ = loan_service.repo.list_loans(
-            page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
-            loan_id=loan_id, status=status, driver_name=driver_name,
-            medallion_no=medallion_no, lease_type=lease_type, start_week=start_week
+            page=1, 
+            per_page=10000, 
+            sort_by=sort_by, 
+            sort_order=sort_order,
+            tlc_number=tlc_number,
+            lease_id=lease_id,
+            loan_id=loan_id, 
+            status=status, 
+            driver_name=driver_name,
+            medallion_no=medallion_no, 
+            lease_type=lease_type, 
+            start_week_from=start_week_from,
+            start_week_to=start_week_to,
+            min_principal=min_principal,
+            max_principal=max_principal,
+            min_interest_rate=min_interest_rate,
+            max_interest_rate=max_interest_rate,
         )
 
         if not loans:
-            raise HTTPException(status_code=404, detail="No loan data for export with the given filters.")
+            raise HTTPException(
+                status_code=404, 
+                detail="No loan data available for export with the given filters."
+            )
 
-        export_data = [DriverLoanListResponse.model_validate(loan).model_dump() for loan in loans]
+        # Build export data with enhanced details
+        export_data = []
+        for loan in loans:
+            export_data.append({
+                "Loan ID": loan.loan_id,
+                "Status": loan.status.value if hasattr(loan.status, 'value') else str(loan.status),
+                "Driver ID": loan.driver.driver_id if loan.driver else "",
+                "Driver Name": loan.driver.full_name if loan.driver else "",
+                "TLC License": (
+                    loan.driver.tlc_license.tlc_license_number 
+                    if loan.driver and loan.driver.tlc_license 
+                    else ""
+                ),
+                "Medallion Number": loan.medallion.medallion_number if loan.medallion else "",
+                "Medallion Owner": loan.medallion.medallion_owner if loan.medallion else "",
+                "Lease Type": loan.lease.lease_type if loan.lease else "",
+                "Principal Amount": float(loan.principal_amount),
+                "Interest Rate (%)": float(loan.interest_rate),
+                "Start Week": loan.start_week.isoformat() if loan.start_week else "",
+            })
         
-        filename = f"driver_loans_{date.today()}.{'xlsx' if format == 'excel' else 'pdf'}"
+        # Use ExporterFactory to get the appropriate exporter
+        exporter = ExporterFactory.get_exporter(format, export_data)
+        file_content = exporter.export()
         
-        if format == "excel":
-            exporter = ExcelExporter(export_data)
-            file_content = exporter.export()
-            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        else:
-            exporter = PDFExporter(export_data)
-            file_content = exporter.export()
-            media_type = "application/pdf"
+        # Set filename and media type based on format
+        file_extensions = {
+            "excel": "xlsx",
+            "pdf": "pdf",
+            "csv": "csv"
+        }
+        
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf",
+            "csv": "text/csv"
+        }
+        
+        filename = f"driver_loans_{date.today()}.{file_extensions.get(format, 'xlsx')}"
+        media_type = media_types.get(format, "application/octet-stream")
         
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)
 
+    except ValueError as e:
+        # Catch invalid format errors from ExporterFactory
+        logger.error("Invalid export format: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid export format: {str(e)}"
+        ) from e
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error("Error exporting loan data: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred during the export process.") from e
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred during the export process."
+        ) from e
     
 
 @router.get("/fetch/installments", response_model=PaginatedLoanInstallmentResponse, summary="List Loan Installments")

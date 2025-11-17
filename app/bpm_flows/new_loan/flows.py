@@ -240,7 +240,6 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
                 detail=f"Lease {lease.lease_id} is not active. Current status: {lease.lease_status}"
             )
         
-        logger.info(f"################lease {lease.to_dict()}")
         # Validate driver is associated with the lease
         # if driver.id != lease.driver_id:
         #     # Check if driver is a co-lessee
@@ -361,7 +360,7 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
         logger.info(f"Successfully created loan {loan.loan_id} for case {case_no}")
         
         # Return data for confirmation modal
-        return "Ok"
+        return {"installments": formatted_installments, "loan_id": loan.loan_id, "status": "Ok"}
         
     except HTTPException:
         db.rollback()

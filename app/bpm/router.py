@@ -173,9 +173,9 @@ async def process_case_step(
 
         func = step_function["function"]
         if inspect.iscoroutinefunction(func):
-            await func(db, case_no, step_data.data)
+            function_result = await func(db, case_no, step_data.data)
         else:
-            func(db, case_no, step_data.data)
+            function_result = func(db, case_no, step_data.data)
     except ValueError as e:
         logger.error(e)
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -192,7 +192,10 @@ async def process_case_step(
         audit_type=AuditTrailType.AUTOMATED,
     )
     # Return the result of the function
-    return JSONResponse(content={"message": "OK"}, status_code=200)
+    return JSONResponse(
+        content={"message": "OK", "result": function_result}, 
+        status_code=200
+    )
 
 
 @router.post("/case/{case_no}/move", tags=["BPM"])

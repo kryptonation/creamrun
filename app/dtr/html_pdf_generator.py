@@ -5,8 +5,6 @@ HTML-based PDF Generator for DTR using WeasyPrint
 WeasyPrint is a modern PDF generator that works on M1 Macs without external binaries
 """
 
-import os
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -16,7 +14,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 # Try to import WeasyPrint
 try:
-    from weasyprint import CSS, HTML
+    from weasyprint import HTML
 except ImportError as e:
     raise ImportError(
         "WeasyPrint is required but not installed. Install it with: pip install weasyprint\n"

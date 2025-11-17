@@ -23,6 +23,7 @@ class DriverLoanListResponse(BaseModel):
     start_week: date
 
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
         populate_by_name = True
 
@@ -36,6 +37,10 @@ class PaginatedDriverLoanResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+    lease_types: List[str] = Field(
+        default_factory=list,
+        description="Available lease types for filtering"
+    )
 
 
 class LoanInstallmentResponse(BaseModel):

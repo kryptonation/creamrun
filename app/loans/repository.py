@@ -2,6 +2,7 @@
 
 from datetime import date
 from typing import List, Optional, Tuple
+from decimal import Decimal
 
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
@@ -100,22 +101,28 @@ class LoanRepository:
         per_page: int,
         sort_by: str,
         sort_order: str,
-        tlc_number : Optional[str] = None,
-        lease_id : Optional[str] = None,
+        tlc_number: Optional[str] = None,
+        lease_id: Optional[str] = None,
         loan_id: Optional[str] = None,
         status: Optional[List[str]] = None,
         driver_name: Optional[str] = None,
         medallion_no: Optional[str] = None,
         lease_type: Optional[str] = None,
-        start_week: Optional[date] = None,
+        start_week_from: Optional[date] = None,
+        start_week_to: Optional[date] = None,
+        min_principal: Optional[Decimal] = None,
+        max_principal: Optional[Decimal] = None,
+        min_interest_rate: Optional[Decimal] = None,
+        max_interest_rate: Optional[Decimal] = None,
     ) -> Tuple[List[DriverLoan], int]:
         """
         Retrieves a paginated, sorted, and filtered list of Driver Loans.
+        Now includes filters for principal amount, interest rate ranges, and start week date range.
         """
         query = (
             self.db.query(DriverLoan)
             .options(
-                joinedload(DriverLoan.driver),
+                joinedload(DriverLoan.driver).joinedload(Driver.tlc_license),
                 joinedload(DriverLoan.medallion),
                 joinedload(DriverLoan.lease),
             )
@@ -124,12 +131,11 @@ class LoanRepository:
             .outerjoin(Lease, DriverLoan.lease_id == Lease.id)
         )
 
-        # Apply filters
-
+        # Apply existing filters
         if tlc_number:
             query = (
                 query.join(TLCLicense, TLCLicense.id == Driver.tlc_license_number_id)
-                    .filter(TLCLicense.tlc_license_number.ilike(f"%{tlc_number}%"))
+                .filter(TLCLicense.tlc_license_number.ilike(f"%{tlc_number}%"))
             )
         if lease_id:
             query = query.filter(Lease.lease_id == lease_id)
@@ -147,8 +153,24 @@ class LoanRepository:
             query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
         if lease_type:
             query = query.filter(Lease.lease_type.ilike(f"%{lease_type}%"))
-        if start_week:
-            query = query.filter(DriverLoan.start_week == start_week)
+        
+        # UPDATED: Start week date range filter
+        if start_week_from:
+            query = query.filter(DriverLoan.start_week >= start_week_from)
+        if start_week_to:
+            query = query.filter(DriverLoan.start_week <= start_week_to)
+        
+        # Principal amount range
+        if min_principal is not None:
+            query = query.filter(DriverLoan.principal_amount >= min_principal)
+        if max_principal is not None:
+            query = query.filter(DriverLoan.principal_amount <= max_principal)
+        
+        # Interest rate range
+        if min_interest_rate is not None:
+            query = query.filter(DriverLoan.interest_rate >= min_interest_rate)
+        if max_interest_rate is not None:
+            query = query.filter(DriverLoan.interest_rate <= max_interest_rate)
 
         total_items = query.with_entities(func.count(DriverLoan.id)).scalar()
 
@@ -157,14 +179,17 @@ class LoanRepository:
             "loan_id": DriverLoan.loan_id,
             "status": DriverLoan.status,
             "driver": Driver.full_name,
+            "driver_id": Driver.driver_id,
+            "tlc_license": TLCLicense.tlc_license_number,
             "medallion_no": Medallion.medallion_number,
+            "medallion_owner": Medallion.owner,
             "lease_type": Lease.lease_type,
             "amount": DriverLoan.principal_amount,
             "rate": DriverLoan.interest_rate,
             "start_week": DriverLoan.start_week,
         }
         
-        sort_column = sort_column_map.get(sort_by, DriverLoan.loan_date)
+        sort_column = sort_column_map.get(sort_by, DriverLoan.start_week)
         if sort_order.lower() == "desc":
             query = query.order_by(sort_column.desc())
         else:

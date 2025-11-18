@@ -283,3 +283,27 @@ class LoanRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+    
+    def get_installment_by_installment_id(
+        self, installment_id: str
+    ) -> Optional[LoanInstallment]:
+        """Fetches a single loan installment by its installment id (e.g., DLN-2025-001-01)"""
+        return (
+            self.db.query(LoanInstallment)
+            .join(DriverLoan)
+            .filter(LoanInstallment.installment_id == installment_id)
+            .options(joinedload(LoanInstallment.loan))
+            .first()
+        )
+    
+    def get_installments_by_ids(
+        self, installment_ids: List[str]
+    ) -> List[LoanInstallment]:
+        """Fetches multiple loan installments by their installment_ids"""
+        return (
+            self.db.query(LoanInstallment)
+            .join(DriverLoan)
+            .filter(LoanInstallment.installment_id.in_(installment_ids))
+            .options(joinedload(LoanInstallment.loan))
+            .all()
+        )

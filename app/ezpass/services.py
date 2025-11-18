@@ -86,7 +86,11 @@ class EZPassService:
                     amount_str = row[8].replace("(", "-").replace(")", "").replace("$", "")
                     
                     transaction_datetime_str = f"{row[6]} {row[7]}"
-                    transaction_datetime = datetime.strptime(transaction_datetime_str, "%m/%d/%Y %I:%M %p")
+                    # Try parsing with seconds first, then without
+                    try:
+                        transaction_datetime = datetime.strptime(transaction_datetime_str, "%m/%d/%Y %I:%M:%S %p")
+                    except ValueError:
+                        transaction_datetime = datetime.strptime(transaction_datetime_str, "%m/%d/%Y %I:%M %p")
 
                     transaction_data = {
                         "import_id": import_record.id,
@@ -117,8 +121,7 @@ class EZPassService:
 
             logger.info(f"Successfully imported {len(transactions_to_insert)} records from {file_name}. Triggering association task.")
             
-            # Asynchronously trigger the association task
-            associate_ezpass_transactions_task.delay()
+            self.associate_transactions()
 
             return {
                 "message": "File uploaded and import process initiated.",

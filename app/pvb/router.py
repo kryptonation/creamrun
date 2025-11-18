@@ -103,7 +103,6 @@ def list_pvb_violations(
         response_items = [
             PVBViolationResponse(
                 id=v.id,
-                transaction_datetime=v.transaction_datetime,
                 plate=v.plate,
                 state=v.state,
                 type=v.type,

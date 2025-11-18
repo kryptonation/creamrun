@@ -192,10 +192,7 @@ async def process_case_step(
         audit_type=AuditTrailType.AUTOMATED,
     )
     # Return the result of the function
-    return JSONResponse(
-        content={"message": "OK", "result": function_result}, 
-        status_code=200
-    )
+    return JSONResponse(content={"message": "OK", "data": function_result}, status_code=200)
 
 
 @router.post("/case/{case_no}/move", tags=["BPM"])

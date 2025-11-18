@@ -1,6 +1,6 @@
 ### app/loans/schemas.py
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
@@ -116,3 +116,67 @@ class PaginatedLoanInstallmentResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+
+
+class PostInstallmentRequest(BaseModel):
+    """
+    Request schema for posting loan installments to ledger.
+    Either provide specific installment_ids or post_all_due flag.
+    """
+    installment_ids: Optional[List[str]]
+    post_all_due: bool = False
+
+    class Config:
+        """Pydantic configuration"""
+        json_schema_extra = {
+            "examples": [
+                {
+                    "installment_ids": ["DLN-2025-001-01", "DLN-2025-001-02"]
+                },
+                {
+                    "post_all_due": True
+                }
+            ]
+        }
+
+
+class InstallmentPostingResult(BaseModel):
+    """Result of posting a single installment."""
+    installment_id: str
+    success: bool
+    ledger_posting_id: Optional[str] = None
+    error_message: Optional[str] = None
+    posted_on: Optional[datetime] = None
+
+
+class PostInstallmentResponse(BaseModel):
+    """Response schema for posting loan installments to ledger."""
+    total_processed: int
+    successful_posts: int
+    failed_posts: int
+    results: List[InstallmentPostingResult]
+    message: str
+
+    class Config:
+        """Pydantic configuration"""
+        json_schema_extra = {
+            "example": {
+                "total_processed": 5,
+                "successful_posts": 4,
+                "failed_posts": 1,
+                "results": [
+                    {
+                        "installment_id": "DLN-2025-001-01",
+                        "success": True,
+                        "ledger_posting_id": "abc-123-def",
+                        "posted_on": "2025-11-18T10:30:00z"
+                    },
+                    {
+                        "installment_id": "DLN-2025-001-02",
+                        "success": False,
+                        "error_message": "Insufficient funds in driver's account."
+                    }
+                ],
+                "message": "Successfully posted 4 out of 5 installments."
+            }
+        }

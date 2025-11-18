@@ -1,7 +1,7 @@
 ### app/loans/router.py
 
 import math
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional , List
 
@@ -20,6 +20,9 @@ from app.loans.schemas import (
     PaginatedDriverLoanResponse,
     LoanInstallmentListResponse,
     PaginatedLoanInstallmentResponse,
+    PostInstallmentRequest,
+    PostInstallmentResponse,
+    InstallmentPostingResult
 )
 from app.loans.services import LoanService
 from app.loans.models import LoanInstallmentStatus
@@ -111,7 +114,11 @@ def list_driver_loans(
             
             # Extract medallion details
             medallion_no = loan.medallion.medallion_number if loan.medallion else None
-            medallion_owner = loan.medallion.medallion_owner if loan.medallion else None
+            owner_name = None
+            if loan.medallion.owner:
+                medallion_dict = loan.medallion.to_dict()
+                owner_name = medallion_dict["owner_name"]
+            medallion_owner = owner_name
             
             # Extract lease type
             lease_type_value = loan.lease.lease_type if loan.lease else None
@@ -241,7 +248,7 @@ def get_loan_details(
         raise HTTPException(status_code=500, detail="An error occurred while fetching loan details.") from e
 
 
-@router.get("/export", summary="Export Driver Loan Data")
+@router.get("/loans/export", summary="Export Driver Loan Data")
 def export_loans(
     format: str = Query("excel", enum=["excel", "pdf", "csv"]),
     sort_by: Optional[str] = Query("start_week"),
@@ -297,6 +304,10 @@ def export_loans(
         # Build export data with enhanced details
         export_data = []
         for loan in loans:
+            owner_name = None
+            if loan.medallion.owner:
+                medallion_dict = loan.medallion.to_dict()
+                owner_name = medallion_dict["owner_name"]
             export_data.append({
                 "Loan ID": loan.loan_id,
                 "Status": loan.status.value if hasattr(loan.status, 'value') else str(loan.status),
@@ -308,7 +319,7 @@ def export_loans(
                     else ""
                 ),
                 "Medallion Number": loan.medallion.medallion_number if loan.medallion else "",
-                "Medallion Owner": loan.medallion.medallion_owner if loan.medallion else "",
+                "Medallion Owner": owner_name,
                 "Lease Type": loan.lease.lease_type if loan.lease else "",
                 "Principal Amount": float(loan.principal_amount),
                 "Interest Rate (%)": float(loan.interest_rate),
@@ -427,3 +438,160 @@ def list_loan_installments(
     except Exception as e:
         logger.error("Error fetching loan installments: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching loan installments.") from e
+    
+
+@router.post(
+    "/installments/post-to-ledger",
+    response_model=PostInstallmentResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Post Loan Installments to Ledger"
+)
+def post_loan_installments_to_ledger(
+    request: PostInstallmentRequest,
+    loan_service: LoanService = Depends(get_loan_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually posts loan installments to the centralized ledger.
+
+    **Example Requests:**
+    
+    ```json
+    // Post specific installments
+    {
+      "installment_ids": ["DLN-2025-001-01", "DLN-2025-001-02", "DLN-2025-002-01"]
+    }
+    
+    // Post all due installments
+    {
+      "post_all_due": true
+    }
+    ```
+    """
+    logger.info(
+        f"User {current_user.id} initiated manual loan installment posting. "
+        f"Mode: {'all_due' if request.post_all_due else 'specific_ids'}"
+    )
+
+    try:
+        # Validate request
+        if not request.installment_ids and not request.post_all_due:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either provide installment_ids or set post_all_due=True"
+            )
+        
+        if request.installment_ids and request.post_all_due:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot specify both installment_ids and post_all_due. Choose one mode."
+            )
+        
+        # Post installments
+        results, successful_count, failed_count = loan_service.post_installments_to_ledger(
+            installment_ids=request.installment_ids,
+            post_all_due=request.post_all_due,
+        )
+
+        # Build response message
+        total_processed = successful_count + failed_count
+        if failed_count == 0:
+            message = f"Successfully posted all {successful_count} installments to ledger."
+        elif successful_count == 0:
+            message = f"Failed to post all {failed_count} installments"
+        else:
+            message = f"Posted {successful_count} out of {total_processed} installments. {failed_count} failed."
+
+        logger.info(
+            f"Loan installment posting completed. "
+            f"Success: {successful_count}, Failed: {failed_count}"
+        )
+
+        return PostInstallmentResponse(
+            total_processed=total_processed,
+            successful_posts=successful_count,
+            failed_posts=failed_count,
+            results=results,
+            message=message
+        )
+    
+    except ValueError as ve:
+        logger.warning(f"Validation error in loan installment posting: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        ) from ve
+    except Exception as e:
+        logger.error(
+            f"Unexpected error during loan installment posting: {e}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while posting loan installments to ledger."
+        ) from e
+
+
+@router.get(
+    "/installments/postable",
+    response_model=PaginatedDriverLoanResponse,
+    summary="Get Postable Loan Installments"
+)
+def get_postable_installments(
+    page: int = Query(1, ge=1, description="page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    loan_service: LoanService = Depends(get_loan_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieves all loan installments that are eligible for posting to the ledger.
+    """
+    try:
+        installments = loan_service.repo.get_due_installments_to_post(
+            datetime.now(timezone.utc).date()
+        )
+
+        # Apply pagination
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_items = installments[start_idx:end_idx]
+
+        response_items = []
+        for inst in paginated_items:
+            response_items.append(
+                LoanInstallmentListResponse(
+                    installment_id=inst.installment_id,
+                    loan_id=inst.loan.loan_id,
+                    driver_name=inst.loan.driver.full_name if inst.loan.driver else None,
+                    medallion_no=inst.loan.medallion.medallion_number if inst.loan.medallion else None,
+                    lease_id=inst.loan.lease.lease_id if inst.loan.lease else None,
+                    vehicle_id=inst.loan.lease.vehicle_id if inst.loan.lease else None,
+                    week_start_date=inst.week_start_date,
+                    week_end_date=inst.week_end_date,
+                    principal_amount=inst.principal_amount,
+                    interest_amount=inst.interest_amount,
+                    total_due=inst.total_due,
+                    status=inst.status,
+                    posted_on=inst.posted_on.date() if inst.posted_on else None,
+                    ledger_posting_ref=inst.ledger_posting_ref,
+                )
+            )
+        
+        total_items = len(installments)
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+        
+        return PaginatedLoanInstallmentResponse(
+            items=response_items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages
+        )
+        
+    except Exception as e:
+        logger.error(f"Error fetching postable installments: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while fetching postable installments"
+        ) from e
+    

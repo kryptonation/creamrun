@@ -1,13 +1,15 @@
 ### app/loans/services.py
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import List, Tuple, Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from app.bpm.services import bpm_service
 from app.core.db import SessionLocal
 from app.ledger.models import PostingCategory
+from app.ledger.repository import LedgerRepository
 from app.ledger.services import LedgerService
 from app.loans.exceptions import (
     InvalidLoanOperationError,
@@ -20,6 +22,7 @@ from app.loans.models import (
     LoanStatus,
 )
 from app.loans.repository import LoanRepository
+from app.loans.schemas import InstallmentPostingResult
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -209,3 +212,126 @@ class LoanService:
             raise
         finally:
             db.close()
+
+    def post_installments_to_ledger(
+        self, installment_ids: Optional[List[str]] = None,
+        post_all_due: bool = False
+    ) -> Tuple[List[InstallmentPostingResult], int, int]:
+        """Post loan installments to the ledger either by specific IDs or all due installments."""
+
+        if not installment_ids and not post_all_due:
+            raise ValueError("Either provide installment_ids or set post_all_due=True")
+        
+        ledger_repo = LedgerRepository(self.db)
+        ledger_service = LedgerService(ledger_repo)
+
+        results = []
+        successful_count = 0
+        failed_count = 0
+
+        # Determine which installments to post
+        if post_all_due:
+            installments_to_post = self.repo.get_due_installments_to_post(
+                datetime.now(timezone.utc).date()
+            )
+            logger.info(f"Found {len(installments_to_post)} due installments to post")
+        else:
+            # Fetch specific installments by their IDs
+            installments_to_post = []
+            for installment_id in installment_ids:
+                installment = self.repo.get_installment_by_installment_id(installment_id)
+                if installment:
+                    installments_to_post.append(installment)
+                else:
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment_id,
+                        success=False,
+                        error_message=f"Installment {installment_id} not found"
+                    ))
+                    failed_count += 1
+
+        # Process each installment
+        for installment in installments_to_post:
+            try:
+                # Validate installment can be posted
+                if installment.status != LoanInstallmentStatus.SCHEDULED:
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment.installment_id,
+                        success=False,
+                        error_message=f"Installment status is {installment.status.value}, must be SCHEDULES"
+                    ))
+                    failed_count += 1
+                    continue
+
+                # Validate parent loan is OPEN
+                if installment.loan.status != LoanStatus.OPEN:
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment.installment_id,
+                        success=False,
+                        error_message="Parent loan status is {installment.loan.status.value}, must be OPEN"
+                    ))
+
+                    failed_count += 1
+                    continue
+
+                # Create obligation in ledger
+                ledger_posting = ledger_service.create_obligation(
+                    category=PostingCategory.LOAN,
+                    amount=installment.total_due,
+                    reference_id=installment.installment_id,
+                    driver_id=installment.loan.driver_id,
+                    lease_id=installment.loan.lease_id,
+                    vehicle_id=installment.loan.vehicle_id,
+                    medallion_id=installment.loan.medallion_id,
+                )
+
+                # Update installment status
+                posted_on = datetime.now(timezone.utc)
+                self.repo.update_installment(installment.id, {
+                    "status": LoanInstallmentStatus.POSTED,
+                    "posted_on": posted_on,
+                    "ledger_posting_ref": ledger_posting.id
+                })
+
+                results.append(InstallmentPostingResult(
+                    installment_id=installment.installment_id,
+                    success=True,
+                    logger_posting_id=ledger_posting.id,
+                    posted_on=posted_on
+                ))
+                successful_count += 1
+
+                logger.info(
+                    f"Successfully posted installment {installment.installment_id} "
+                    f"to ledger with posting ID {ledger_posting.id}"
+                )
+
+            except Exception as e:
+                results.append(InstallmentPostingResult(
+                    installment_id=installment.installment_id,
+                    success=False,
+                    error_message=f"Ledger posting error: {str(e)}"
+                ))
+
+                failed_count += 1
+                logger.error(
+                    f"Failed to post installment {installment.installment_id}: {e}",
+                    exc_info=True
+                )
+
+        # Commit all changes if at least one succeeded
+        if successful_count > 0:
+            try:
+                self.db.commit()
+                logger.info(
+                    f"Committed {successful_count} installment postings to database"
+                )
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Failed to commit installment postings: {e}", exc_info=True)
+                raise
+        
+        return results, successful_count, failed_count
+    
+
+        

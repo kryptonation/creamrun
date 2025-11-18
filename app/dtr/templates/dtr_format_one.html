@@ -13,29 +13,26 @@
 
         body {
             font-family: Arial, sans-serif;
-            font-size: 11px;
-            line-height: 1.3;
+            font-size: 10px;
+            line-height: 1.2;
+            color: #000;
         }
 
         .page {
             width: 8.5in;
             min-height: 11in;
-            padding: 0.4in;
+            padding: 0;
             margin: 0 auto;
             background: white;
             position: relative;
-            page-break-after: always;
-        }
-
-        .page:last-child {
-            page-break-after: auto;
         }
 
         /* Yellow Header */
         .header {
             background-color: #F7B500;
-            padding: 15px;
-            margin: -0.4in -0.4in 15px -0.4in;
+            padding: 18px 40px;
+            display: table;
+            width: 100%;
         }
 
         .header-content {
@@ -63,219 +60,189 @@
         .company-info h1 {
             font-size: 16px;
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
+            color: #000;
         }
 
         .company-info p {
-            font-size: 10px;
+            font-size: 9px;
             margin: 0;
+            color: #000;
         }
 
         /* Content Area */
         .content {
-            padding: 20px;
+            padding: 20px 40px;
         }
 
-        /* Basic Info Grid */
+        /* Basic Info Grid - 2x3 layout */
         .info-grid {
-            display: table;
             width: 100%;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
+            border-collapse: collapse;
         }
 
-        .info-row {
-            display: table-row;
+        .info-grid tr {
+            height: 22px;
         }
 
-        .info-cell {
-            display: table-cell;
-            padding: 5px 0;
+        .info-grid td {
+            padding: 3px 0;
+            font-size: 10px;
+        }
+
+        .info-grid td:nth-child(1),
+        .info-grid td:nth-child(3) {
             width: 25%;
+            font-weight: normal;
+        }
+
+        .info-grid td:nth-child(2),
+        .info-grid td:nth-child(4) {
+            width: 25%;
+            font-weight: normal;
         }
 
         .info-label {
-            font-weight: normal;
             display: inline-block;
-            min-width: 140px;
-        }
-
-        .info-value {
-            font-weight: normal;
+            min-width: 150px;
         }
 
         /* Section Headers with Red Border */
-        .section {
-            margin-top: 25px;
-            margin-bottom: 15px;
-        }
-
         .section-title {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: bold;
-            padding-left: 15px;
+            padding-left: 12px;
             border-left: 4px solid #D32F2F;
-            margin-bottom: 15px;
-            color: #333;
-        }
-
-        .page-title {
-            text-align: center;
-            font-size: 14px;
-            font-weight: bold;
-            margin: 20px 0;
+            margin: 20px 0 12px 0;
+            color: #000;
         }
 
         /* Tables */
-        table {
+        table.data-table {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 15px;
+            font-size: 10px;
         }
 
-        th {
-            background-color: #f5f5f5;
-            padding: 6px 4px;
+        table.data-table th {
+            background-color: #E0E0E0;
+            padding: 8px;
             text-align: left;
             font-weight: bold;
-            border-bottom: 1px solid #ddd;
-            font-size: 10px;
+            border: 1px solid #999;
         }
 
-        td {
-            padding: 6px 4px;
-            border-bottom: 1px solid #eee;
-            font-size: 10px;
-        }
-
-        .total-row {
-            font-weight: bold;
-            background-color: #f9f9f9;
-        }
-
-        .amount-cell {
+        table.data-table th.amount-cell {
             text-align: right;
+            width: 120px;
         }
 
-        .total-row {
-            background-color: #f0f0f0;
-            font-weight: bold;
-        }
-
-        .subtotal-row {
-            background-color: #f9f9f9;
-        }
-
-        .highlight-row {
-            background-color: #fff3cd;
-        }
-
-        /* Two Column Layout */
-        .two-column {
-            display: table;
-            width: 100%;
-        }
-
-        .column {
-            display: table-cell;
-            width: 50%;
+        table.data-table td {
+            padding: 6px 8px;
+            border: 1px solid #999;
             vertical-align: top;
         }
 
-        /* Balance Section */
-        .balance-table {
-            margin-top: 10px;
+        table.data-table td.amount-cell {
+            text-align: right;
         }
 
-        .balance-table td {
-            padding: 6px 8px;
-        }
-
-        .balance-label {
-            font-weight: normal;
-            padding-left: 20px;
-        }
-
-        .balance-total {
-            background-color: #e8e8e8;
+        table.data-table tr.total-row {
+            background-color: #F5F5F5;
             font-weight: bold;
+        }
+
+        table.data-table tr.total-row td {
+            border-top: 2px solid #666;
+        }
+
+        /* Account Balance Table */
+        table.balance-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            margin-bottom: 15px;
+        }
+
+        table.balance-table th {
+            background-color: #E0E0E0;
+            padding: 8px;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #999;
+        }
+
+        table.balance-table th.amount-col {
+            text-align: right;
+            width: 100px;
+        }
+
+        table.balance-table td {
+            padding: 6px 8px;
+            border: 1px solid #999;
+        }
+
+        table.balance-table td.amount-col {
+            text-align: right;
+        }
+
+        table.balance-table tr.highlight-row {
+            background-color: #F5F5F5;
+            font-weight: bold;
+        }
+
+        table.balance-table tr.subtotal-row {
+            background-color: #F5F5F5;
+            font-weight: bold;
+        }
+
+        table.balance-table tr.balance-total {
+            background-color: #E8E8E8;
+            font-weight: bold;
+        }
+
+        table.balance-table tr.final-total {
+            background-color: #D0D0D0;
+            font-weight: bold;
+            border-top: 2px solid #666;
+        }
+
+        .indent-1 {
+            padding-left: 20px;
         }
 
         /* Notes */
         .note {
             font-size: 9px;
             font-style: italic;
+            margin: 5px 0;
+            color: #555;
+        }
+
+        .note-label {
+            font-weight: bold;
+            font-style: italic;
+        }
+
+        /* Special styling for descriptions */
+        .earning-description {
+            font-size: 9px;
             color: #666;
-            margin-top: 10px;
-            line-height: 1.3;
+            font-weight: normal;
         }
 
-        /* Watermark */
-        .watermark {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 150px;
-            color: rgba(0, 0, 0, 0.03);
-            z-index: 0;
-            pointer-events: none;
-        }
-
-        .trip-log-grid {
-            display: flex;
-            gap: 20px;
-        }
-
-        .trip-log-grid > table {
-            width: 50%;
-        }
-
-        .trip-log-table td:nth-child(5),
-        .trip-log-table th:nth-child(5) {
-            border-left: none !important;
-        }
-
-        .trip-log-table td:nth-child(4),
-        .trip-log-table th:nth-child(4) {
-            border-right: none !important;
-        }
-
-        .trip-log-table td:nth-child(5),
-        .trip-log-table th:nth-child(5) {
-            padding-left: 20px !important;
-        }
-
-
-        .trip-log-table .trip-gap {
-            border-bottom: none !important;
-            width: 20px;
-            padding: 0;
-        }
-
-        .trip-log-table th.trip-gap {
-            background: transparent !important;
-            border-bottom: none !important;
-        }
-
-        .trip-log-table td.trip-gap {
-            background: transparent !important;
+        @page {
+            size: letter;
+            margin: 0;
         }
 
         @media print {
             .page {
                 margin: 0;
-                padding: 0.4in;
+                padding: 0;
             }
-
-            .header {
-                margin: -0.4in -0.4in 15px -0.4in;
-            }
-        }
-
-        /* Special styling for wide tables */
-        @page {
-            size: letter;
-            margin: 0;
         }
     </style>
 </head>
@@ -283,749 +250,184 @@
     
 <!-- PAGE 1: Main DTR -->
 <div class="page">
+    <!-- Header -->
     <div class="header">
         <div class="header-content">
             <div class="logo">
-                <!-- Logo placeholder - replace with actual logo -->
-                <img src="http://batm-carrot-host.s3-website-us-east-1.amazonaws.com/assets/images/logo.png">
+                <img src="http://batm-carrot-host.s3-website-us-east-1.amazonaws.com/assets/images/logo.png" alt="Logo">
             </div>
             <div class="company-info">
-                <h1>{{ company_name }}</h1>
-                <p>{{ company_address }}, {{ company_phone }} | {{ company_website }}</p>
+                <h1>Big Apple Taxi Management LLC</h1>
+                <p>50-24 Queens Boulevard, Woodside, NY 11377 4442, 718 779 5000 | bigappletaxinyc.com</p>
             </div>
         </div>
     </div>
 
-    <div class="watermark">🚕</div>
-
+    <!-- Content -->
     <div class="content">
-        <!-- Basic Information -->
-        <div class="info-grid">
-            <div class="info-row">
-                <div class="info-cell">
-                    <span class="info-label">Medallion</span>
-                    <span class="info-value">: {{ medallion }}</span>
-                </div>
-                <div class="info-cell">
-                    <span class="info-label">Receipt number</span>
-                    <span class="info-value">: {{ receipt_number }}</span>
-                </div>
-            </div>
-            <div class="info-row">
-                <div class="info-cell">
-                    <span class="info-label">Driver / Leaseholder</span>
-                    <span class="info-value">: {{ driver_name }}</span>
-                </div>
-                <div class="info-cell">
-                    <span class="info-label">Receipt Date</span>
-                    <span class="info-value">: {{ receipt_date }}</span>
-                </div>
-            </div>
-            <div class="info-row">
-                <div class="info-cell">
-                    <span class="info-label">TLC License</span>
-                    <span class="info-value">: {{ tlc_license }}</span>
-                </div>
-                <div class="info-cell">
-                    <span class="info-label">Receipt Period</span>
-                    <span class="info-value">: {{ receipt_period }}</span>
-                </div>
-            </div>
-        </div>
+        <!-- Basic Information Grid -->
+        <table class="info-grid">
+            <tr>
+                <td><span class="info-label">Medallion</span></td>
+                <td>: {{ medallion }}</td>
+                <td><span class="info-label">Receipt number</span></td>
+                <td>: {{ receipt_number }}</td>
+            </tr>
+            <tr>
+                <td><span class="info-label">Driver / Leaseholder</span></td>
+                <td>: {{ driver_name }}</td>
+                <td><span class="info-label">Receipt Date</span></td>
+                <td>: {{ receipt_date }}</td>
+            </tr>
+            <tr>
+                <td><span class="info-label">TLC License</span></td>
+                <td>: {{ tlc_license }}</td>
+                <td><span class="info-label">Receipt Period</span></td>
+                <td>: {{ receipt_period }}</td>
+            </tr>
+        </table>
 
         <!-- Gross Earnings Snapshot -->
-        <div class="section">
-            <h2 class="section-title">Gross Earnings Snapshot for Receipt Period</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Earnings Type</th>
-                        <th class="amount-cell">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for earning in earnings %}
-                    <tr>
-                        <td>
-                            <strong>{{ earning.type }}</strong><br>
-                            <span style="font-size: 9px; color: #666;">{{ earning.description }}</span>
-                        </td>
-                        <td class="amount-cell">{{ earning.amount }}</td>
-                    </tr>
-                    {% endfor %}
-                    <tr class="total-row">
-                        <td><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>{{ total_earnings }}</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Account Balance -->
-        <div class="section">
-            <h2 class="section-title">Account Balance for Receipt Period</h2>
-            
-            <table class="balance-table">
-                <tr class="highlight-row">
-                    <td colspan="3"><strong>Credit Card Earnings</strong></td>
-                    <td class="amount-cell"><strong>{{ cc_earnings }}</strong></td>
-                    <td></td>
-                </tr>
+        <h2 class="section-title">Gross Earnings Snapshot for Receipt Period</h2>
+        <table class="data-table">
+            <thead>
                 <tr>
-                    <td colspan="5" style="padding: 0; border: none;">
-                        <table style="margin: 0;">
-                            <thead>
-                                <tr>
-                                    <th style="width: 40%;">Less</th>
-                                    <th class="amount-cell" style="width: 15%;">Charges</th>
-                                    <th class="amount-cell" style="width: 15%;">Amount Paid</th>
-                                    <th class="amount-cell" style="width: 15%;">Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for charge in charges %}
-                                <tr>
-                                    <td class="indent-1">{{ charge.type }}</td>
-                                    <td class="amount-cell">{{ charge.amount }}</td>
-                                    <td class="amount-cell">{{ charge.amount }}</td>
-                                    <td class="amount-cell">–</td>
-                                </tr>
-                                {% endfor %}
-                                <tr class="subtotal-row">
-                                    <td class="indent-1"><strong>Subtotal</strong></td>
-                                    <td class="amount-cell"><strong>{{ total_deductions }}</strong></td>
-                                    <td class="amount-cell"><strong>{{ total_deductions }}</strong></td>
-                                    <td class="amount-cell"><strong>–</strong></td>
-                                </tr>
-                                <tr>
-                                    <td class="indent-1">Prior balance</td>
-                                    <td class="amount-cell">–</td>
-                                    <td class="amount-cell">–</td>
-                                    <td class="amount-cell">–</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </td>
+                    <th>Earnings Type</th>
+                    <th class="amount-cell">Amount</th>
                 </tr>
-                <tr class="balance-total">
-                    <td colspan="3"><strong>Net Earnings</strong></td>
-                    <td class="amount-cell"><strong>{{ net_earnings }}</strong></td>
-                    <td class="amount-cell"><strong>{{ net_earnings }}</strong></td>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>
+                        <strong>CURB</strong><br>
+                        <span class="earning-description">Credit Card Transactions</span>
+                    </td>
+                    <td class="amount-cell">{{ cc_earnings }}</td>
                 </tr>
                 <tr class="total-row">
-                    <td colspan="4"><strong>Total Due to Driver</strong></td>
+                    <td><strong>Total</strong></td>
                     <td class="amount-cell"><strong>{{ net_earnings }}</strong></td>
                 </tr>
-            </table>
+            </tbody>
+        </table>
 
-            <p class="note">Note: Includes transactions where the driver is "unknown" – mapped by BATM</p>
-            <p class="note">Note: Negative Charges (displayed in parentheses) indicate credits or adjustments (e.g., payments received) that reduce the driver's outstanding charges</p>
-        </div>
+        <!-- Account Balance for Receipt Period -->
+        <h2 class="section-title">Account Balance for Receipt Period</h2>
+        <table class="balance-table">
+            <tr class="highlight-row">
+                <td colspan="3"><strong>Credit Card Earnings</strong></td>
+                <td class="amount-col"><strong>{{ cc_earnings }}</strong></td>
+            </tr>
+            <tr>
+                <td colspan="4" style="padding: 0; border: none;">
+                    <table style="width: 100%; border-collapse: collapse; margin: 0;">
+                        <thead>
+                            <tr>
+                                <th style="width: 40%; background-color: #E0E0E0; padding: 8px; text-align: left; border: 1px solid #999;">Less</th>
+                                <th class="amount-col" style="background-color: #E0E0E0; padding: 8px; text-align: right; border: 1px solid #999;">Charges</th>
+                                <th class="amount-col" style="background-color: #E0E0E0; padding: 8px; text-align: right; border: 1px solid #999;">Amount Paid</th>
+                                <th class="amount-col" style="background-color: #E0E0E0; padding: 8px; text-align: right; border: 1px solid #999;">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Lease Amount</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ lease_amount }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ lease_amount }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">MTA, TIF, Congestion, CHRT, & Airport Fees</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ taxes_total }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ mta_tif_fees }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">EZ-Pass Tolls</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ ezpass_tolls }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ ezpass_tolls }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Violation Tickets</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ violation_tickets }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">{{ violation_tickets }}</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">TLC Tickets</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Repairs</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Driver Loans</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Miscellaneous Charges and Adjustments</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                            <tr class="subtotal-row">
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; background-color: #F5F5F5; font-weight: bold; border: 1px solid #999;"><strong>Subtotal</strong></td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; background-color: #F5F5F5; font-weight: bold; border: 1px solid #999;"><strong>{{ subtotal_charges }}</strong></td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; background-color: #F5F5F5; font-weight: bold; border: 1px solid #999;"><strong>{{ subtotal_charges }}</strong></td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; background-color: #F5F5F5; font-weight: bold; border: 1px solid #999;"><strong>–</strong></td>
+                            </tr>
+                            <tr>
+                                <td class="indent-1" style="padding: 6px 8px 6px 28px; border: 1px solid #999;">Prior balance</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                                <td class="amount-col" style="padding: 6px 8px; text-align: right; border: 1px solid #999;">–</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+            <tr class="balance-total">
+                <td colspan="2"><strong>Net Earnings</strong></td>
+                <td class="amount-col"><strong>{{ net_earnings }}</strong></td>
+                <td class="amount-col"><strong>{{ net_earnings }}</strong></td>
+            </tr>
+            <tr class="final-total">
+                <td colspan="3"><strong>Total Due to Driver</strong></td>
+                <td class="amount-col"><strong>{{ total_due_to_driver }}</strong></td>
+            </tr>
+        </table>
+
+        <p class="note"><span class="note-label">Note:</span> Includes transactions where the driver is "unknown" – mapped by BATM</p>
+        <p class="note"><span class="note-label">Note:</span> Negative Charges (displayed in parentheses) indicate credits or adjustments (e.g., payments received) that reduce the driver's outstanding charges</p>
 
         <!-- Payment Summary -->
-        <div class="section">
-            <h2 class="section-title">Payment Summary</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Payment Type</th>
-                        <th>Batch no.</th>
-                        <th>Account no.</th>
-                        <th class="amount-cell">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>{{ payment_summary.payment_type }}</td>
-                        <td>{{ payment_summary.batch_no }}</td>
-                        <td>{{ payment_summary.account_no }}</td>
-                        <td class="amount-cell">{{ payment_summary.amount }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- PAGE 2: Alerts -->
-<div class="page">
-    <div class="header">
-        <div class="header-content">
-            <div class="logo">
-                <img src="http://batm-carrot-host.s3-website-us-east-1.amazonaws.com/assets/images/logo.png">
-            </div>
-            <div class="company-info">
-                <h1>{{ company_name }}</h1>
-                <p>{{ company_address }}, {{ company_phone }} | {{ company_website }}</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="watermark">🚕</div>
-
-    <div class="content">
-        <!-- Alerts Section -->
-        <div class="section">
-            <h2 class="section-title">Alerts</h2>
-            
-            <!-- Vehicle Alerts -->
-            <p style="margin-bottom: 10px;"><strong>Vehicle</strong></p>
-            <table>
-                <tbody>
-                    {% for alert in vehicle_alerts %}
-                    <tr>
-                        <td style="width: 50%;">{{ alert.type }}</td>
-                        <td style="width: 50%;">{{ alert.expiry_date }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% if not vehicle_alerts %}
-                    <tr>
-                        <td style="width: 50%;">TLC Inspection</td>
-                        <td style="width: 50%;">December-12-2025</td>
-                    </tr>
-                    <tr>
-                        <td>Mila Run</td>
-                        <td>October-7-2025</td>
-                    </tr>
-                    <tr>
-                        <td>DMV Registration</td>
-                        <td>December-4-2026</td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
-
-            <!-- Driver Alerts -->
-            <p style="margin: 20px 0 10px;"><strong>Driver</strong></p>
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 33%;">Driver</th>
-                        <th style="width: 33%;">(TLC License 1)</th>
-                        <th style="width: 33%;">(TLC License 2)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>TLC License Expiry</td>
-                        <td>{{ tlc1_license_date or 'January-9-2026' }}</td>
-                        <td>{{ tlc2_license_date or 'January-9-2026' }}</td>
-                    </tr>
-                    <tr>
-                        <td>DMV License Expiry</td>
-                        <td>{{ dmv_license_date or 'February-7-2028' }}</td>
-                        <td>February-7-2028</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- PAGE 3: DTR Details (1/2) -->
-<div class="page">
-    <div class="header">
-        <div class="header-content">
-            <div class="logo">
-                <img src="http://batm-carrot-host.s3-website-us-east-1.amazonaws.com/assets/images/logo.png">
-            </div>
-            <div class="company-info">
-                <h1>{{ company_name }}</h1>
-                <p>{{ company_address }}, {{ company_phone }} | {{ company_website }}</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="watermark">🚕</div>
-
-    <div class="content">
-        <h2 class="page-title">DTR Details (1/2)</h2>
-
-        <!-- Leasing Charges -->
-        <div class="section">
-            <h2 class="section-title">Leasing Charges</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Lease ID</th>
-                        <th class="amount-cell">Lease Amount</th>
-                        <th class="amount-cell">Prior Balance</th>
-                        <th class="amount-cell">Amount Paid</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>BAT System</td>
-                        <td class="amount-cell">$1,100</td>
-                        <td class="amount-cell"></td>
-                        <td class="amount-cell">$1,100</td>
-                        <td class="amount-cell">–</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Taxes and Charges -->
-        <div class="section">
-            <h2 class="section-title">Taxes and Charges</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Charge Type</th>
-                        <th class="amount-cell">Amount</th>
-                        <th class="amount-cell">Total Trips</th>
-                        <th class="amount-cell">Cash Trips</th>
-                        <th class="amount-cell">CC Trips</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for tax in tax_details %}
-                    <tr>
-                        <td>{{ tax.type }}</td>
-                        <td class="amount-cell">{{ tax.amount }}</td>
-                        <td class="amount-cell">{{ tax.total_trips }}</td>
-                        <td class="amount-cell">{{ tax.cash_trips }}</td>
-                        <td class="amount-cell">{{ tax.cc_trips }}</td>
-                    </tr>
-                    {% endfor %}
-                    <tr class="total-row">
-                        <td><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>{{ taxes_total.amount }}</strong></td>
-                        <td class="amount-cell"><strong>{{ taxes_total.total_trips }}</strong></td>
-                        <td class="amount-cell"><strong>{{ taxes_total.cash_trips }}</strong></td>
-                        <td class="amount-cell"><strong>{{ taxes_total.cc_trips }}</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- EZPASS Tolls Detail -->
-        <div class="section">
-            <h2 class="section-title">EZPASS Tolls Detail</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Transaction Date</th>
-                        <th>TLC License</th>
-                        <th>Plate No</th>
-                        <th>Agency</th>
-                        <th>Entry</th>
-                        <th>Exit Lane</th>
-                        <th class="amount-cell">Toll</th>
-                        <th class="amount-cell">Prior Balance</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for transaction in ezpass_transactions %}
-                    <tr>
-                        <td>{{ transaction.date }}</td>
-                        <td>{{ transaction.tlc_license }}</td>
-                        <td>{{ transaction.plate_no }}</td>
-                        <td>{{ transaction.agency }}</td>
-                        <td>{{ transaction.entry }}</td>
-                        <td>{{ transaction.exit_lane }}</td>
-                        <td class="amount-cell">{{ transaction.toll }}</td>
-                        <td class="amount-cell">{{ transaction.prior_balance }}</td>
-                        <td class="amount-cell">{{ transaction.payment }}</td>
-                        <td class="amount-cell">{{ transaction.balance }}</td>
-                    </tr>
-                    {% endfor %}
-                    <tr class="total-row">
-                        <td colspan="6"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>{{ ezpass_total.toll }}</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>{{ ezpass_total.payment }}</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- PVB Tickets -->
-        <div class="section">
-            <h2 class="section-title">PVB Tickets</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date & Time</th>
-                        <th>Ticket</th>
-                        <th>TLC License</th>
-                        <th>Note</th>
-                        <th class="amount-cell">Fine</th>
-                        <th class="amount-cell">Charge</th>
-                        <th class="amount-cell">Total</th>
-                        <th class="amount-cell">Prior Balance</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for ticket in pvb_tickets %}
-                    <tr>
-                        <td>{{ ticket.issue_date }}</td>
-                        <td>{{ ticket.summons }}</td>
-                        <td>{{ ticket.license }}</td>
-                        <td>{{ ticket.note }}</td>
-                        <td class="amount-cell">{{ ticket.fine }}</td>
-                        <td class="amount-cell">{{ ticket.charge }}</td>
-                        <td class="amount-cell">{{ ticket.total }}</td>
-                        <td class="amount-cell">{{ ticket.prior_balance }}</td>
-                        <td class="amount-cell">{{ ticket.payment }}</td>
-                        <td class="amount-cell">{{ ticket.balance }}</td>
-                    </tr>
-                    {% endfor %}
-                    <tr class="total-row">
-                        <td colspan="6"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>{{ pvb_tickets_total.total }}</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>{{ pvb_tickets_total.payment }}</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- TLC Tickets -->
-        <div class="section">
-            <h2 class="section-title">TLC Tickets</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date & Time</th>
-                        <th>Ticket</th>
-                        <th>TLC License</th>
-                        <th>Medallion</th>
-                        <th>Note</th>
-                        <th class="amount-cell">Fine</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Prior Balance</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for ticket in tlc_tickets %}
-                    <tr>
-                        <td>{{ ticket.issue_date }}</td>
-                        <td>{{ ticket.summons }}</td>
-                        <td>{{ ticket.license }}</td>
-                        <td>{{ medallion }}</td>
-                        <td>{{ ticket.violation }}</td>
-                        <td class="amount-cell">{{ ticket.fine }}</td>
-                        <td class="amount-cell">{{ ticket.payment }}</td>
-                        <td class="amount-cell">–</td>
-                        <td class="amount-cell">–</td>
-                        <td class="amount-cell">–</td>
-                    </tr>
-                    {% endfor %}
-                    {% if tlc_tickets %}
-                    <tr class="total-row">
-                        <td colspan="5"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$220.38</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<!-- PAGE 4: DTR Details (2/2) -->
-<div class="page">
-    <div class="header">
-        <div class="header-content">
-            <div class="logo">
-                <img src="http://batm-carrot-host.s3-website-us-east-1.amazonaws.com/assets/images/logo.png">
-            </div>
-            <div class="company-info">
-                <h1>{{ company_name }}</h1>
-                <p>{{ company_address }}, {{ company_phone }} | {{ company_website }}</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="watermark">🚕</div>
-
-    <div class="content">
-        <h2 class="page-title">DTR Details (2/2)</h2>
-
-        <!-- Trip Log -->
-        <div class="section">
-            {% set ns = namespace(count=0) %}
-            {% for trip in trip_log %}
-                {% if trip.date1 %}
-                    {% set ns.count = ns.count + 1 %}
-                {% endif %}
-                {% if trip.date2 %}
-                    {% set ns.count = ns.count + 1 %}
-                {% endif %}
-            {% endfor %}
-
-
-            <h2 class="section-title">Trip Log ({{ ns.count }} trips)</h2>
-
-            <table class="trip-log-table">
-                <thead>
-                    <tr>
-                        <th>Trip Date</th>
-                        <th>TLC License</th>
-                        <th>Trip Number</th>
-                        <th class="amount-cell">Amount</th>
-
-                        <!-- spacer column, no header text -->
-                        <th class="trip-gap"></th>
-
-                        <th>Trip Date</th>
-                        <th>TLC License</th>
-                        <th>Trip Number</th>
-                        <th class="amount-cell">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for trip in trip_log %}
-                    <tr>
-                        <td>
-                            {% if trip.date1 %}
-                                {{ trip.date1[5:7] ~ '-' ~ trip.date1[8:10] ~ '-' ~ trip.date1[0:4] }}
-                            {% else %}
-                                –
-                            {% endif %}
-                        </td>
-                        <td>{{ trip.license1 if trip.license1 else '–' }}</td>
-                        <td>{{ trip.number1 if trip.number1 else '–' }}</td>
-                        <td class="amount-cell">{{ trip.amount1 if trip.amount1 else '–' }}</td>
-
-                        <!-- spacer cell -->
-                        <td class="trip-gap"></td>
-
-                        <td>
-                            {% if trip.date2 %}
-                                {{ trip.date2[5:7] ~ '-' ~ trip.date2[8:10] ~ '-' ~ trip.date2[0:4] }}
-                            {% else %}
-                                –
-                            {% endif %}
-                        </td>
-                        <td>{{ trip.license2 if trip.license2 else '–' }}</td>
-                        <td>{{ trip.number2 if trip.number2 else '–' }}</td>
-                        <td class="amount-cell">{{ trip.amount2 if trip.amount2 else '–' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-
-            <p class="note">
-                Note: This table lists only credit card transactions during the Receipt Period.
-                Cash transactions are not captured in the above table.
-            </p>
-        </div>
-
-        <!-- Repairs -->
-        <div class="section">
-            <h2 class="section-title">Repairs</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Repair ID</th>
-                        <th>Invoice No</th>
-                        <th>Invoice Date</th>
-                        <th>Workshop</th>
-                        <th class="amount-cell">Invoice Amount</th>
-                        <th class="amount-cell">Amount Paid</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for repair in repairs %}
-                    <tr>
-                        <td>{{ repair.repair_id }}</td>
-                        <td>{{ repair.invoice_number }}</td>
-                        <td>{{ repair.date }}</td>
-                        <td>{{ repair.workshop }}</td>
-                        <td class="amount-cell">{{ repair.amount }}</td>
-                        <td class="amount-cell">{{ repair.amount_paid }}</td>
-                        <td class="amount-cell">{{ repair.balance }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% if repairs %}
-                    <tr class="total-row">
-                        <td colspan="4"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$900.00</strong></td>
-                        <td class="amount-cell"><strong>$750.00</strong></td>
-                        <td class="amount-cell"><strong>$150.00</strong></td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
-
-            {% if repairs %}
-            <p style="margin: 15px 0 5px; font-weight: bold;">Installment Details:</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Installment ID</th>
-                        <th>Due Date</th>
-                        <th class="amount-cell">Amount Due</th>
-                        <th class="amount-cell">Amount Payable</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>DLN-2025-040-02</td>
-                        <td>10.28.2025</td>
-                        <td class="amount-cell">$200.00</td>
-                        <td class="amount-cell">$150.00</td>
-                        <td class="amount-cell">$150.00</td>
-                        <td class="amount-cell">$0.00</td>
-                    </tr>
-                    <tr>
-                        <td>DLN-2025-040-03</td>
-                        <td>10.05.2025</td>
-                        <td class="amount-cell">$200.00</td>
-                        <td class="amount-cell">$200.00</td>
-                        <td class="amount-cell">$150.00</td>
-                        <td class="amount-cell">$50.00</td>
-                    </tr>
-                    <tr class="total-row">
-                        <td colspan="2"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$400.00</strong></td>
-                        <td class="amount-cell"><strong>$350.00</strong></td>
-                        <td class="amount-cell"><strong>$300.00</strong></td>
-                        <td class="amount-cell"><strong>$50.00</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-            {% endif %}
-        </div>
-
-        <!-- Driver Loans -->
-        <div class="section">
-            <h2 class="section-title">Driver Loans</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Loan ID</th>
-                        <th>Loan Date</th>
-                        <th class="amount-cell">Loan Amount</th>
-                        <th class="amount-cell">Interest rate</th>
-                        <th class="amount-cell">Total Due</th>
-                        <th class="amount-cell">Amount Paid</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for loan in loans %}
-                    <tr>
-                        <td>{{ loan.loan_id }}</td>
-                        <td>{{ loan.loan_date }}</td>
-                        <td class="amount-cell">{{ loan.loan_amount }}</td>
-                        <td class="amount-cell">{{ loan.interest_rate }}</td>
-                        <td class="amount-cell">{{ loan.total_due }}</td>
-                        <td class="amount-cell">{{ loan.amount_paid }}</td>
-                        <td class="amount-cell">{{ loan.balance }}</td>
-                    </tr>
-                    {% endfor %}
-                    {% if loans %}
-                    <tr class="total-row">
-                        <td colspan="2"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$ 600.00</strong></td>
-                        <td></td>
-                        <td class="amount-cell"><strong>$660.00</strong></td>
-                        <td class="amount-cell"><strong>$553.00</strong></td>
-                        <td class="amount-cell"><strong>$107.00</strong></td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
-
-            {% if loans %}
-            <p style="margin: 15px 0 5px; font-weight: bold;">Installment Details:</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Installment ID</th>
-                        <th>Due Date</th>
-                        <th class="amount-cell">Principal</th>
-                        <th class="amount-cell">Interest</th>
-                        <th class="amount-cell">Total Due</th>
-                        <th class="amount-cell">Total Payable</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>DLN-2025-040-02</td>
-                        <td>10.28.2025</td>
-                        <td class="amount-cell">$250.00</td>
-                        <td class="amount-cell">$1.32</td>
-                        <td class="amount-cell">$251.32</td>
-                        <td class="amount-cell">$151.32</td>
-                        <td class="amount-cell">$151.32</td>
-                        <td class="amount-cell">$0.00</td>
-                    </tr>
-                    <tr>
-                        <td>DLN-2025-040-03</td>
-                        <td>10.05.2025</td>
-                        <td class="amount-cell">$250.00</td>
-                        <td class="amount-cell">$1.32</td>
-                        <td class="amount-cell">$251.32</td>
-                        <td class="amount-cell">$251.32</td>
-                        <td class="amount-cell">$200.00</td>
-                        <td class="amount-cell">$51.32</td>
-                    </tr>
-                    <tr class="total-row">
-                        <td colspan="4"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$502.64</strong></td>
-                        <td class="amount-cell"><strong>$302.64</strong></td>
-                        <td class="amount-cell"><strong>$351.32</strong></td>
-                        <td class="amount-cell"><strong>$51.32</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-            {% endif %}
-        </div>
-
-        <!-- Miscellaneous Charges -->
-        <div class="section">
-            <h2 class="section-title">Miscellaneous Charges and Adjustments</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Charge Type</th>
-                        <th>Invoice No</th>
-                        <th class="amount-cell">Amount</th>
-                        <th class="amount-cell">Prior Balance</th>
-                        <th class="amount-cell">Payment</th>
-                        <th class="amount-cell">Balance</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Car Wash</td>
-                        <td>INV-2457</td>
-                        <td class="amount-cell">$67.88</td>
-                        <td class="amount-cell">–</td>
-                        <td class="amount-cell">–</td>
-                        <td class="amount-cell">–</td>
-                    </tr>
-                    <tr class="total-row">
-                        <td colspan="2"><strong>Total</strong></td>
-                        <td class="amount-cell"><strong>$136.00</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                        <td class="amount-cell"><strong>–</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        <h2 class="section-title">Payment Summary</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Payment Type</th>
+                    <th>Batch no.</th>
+                    <th>Account no.</th>
+                    <th class="amount-cell">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ payment_type }}</td>
+                    <td>{{ batch_number }}</td>
+                    <td>{{ account_number }}</td>
+                    <td class="amount-cell">{{ payment_amount }}</td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 </div>
 

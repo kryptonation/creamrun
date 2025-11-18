@@ -31,6 +31,7 @@ from app.ledger.models import PostingCategory
 from app.ledger.services import LedgerService
 from app.utils.logger import get_logger
 from app.vehicles.models import VehicleRegistration
+from app.utils.general import parse_custom_time
 
 logger = get_logger(__name__)
 
@@ -80,25 +81,28 @@ class PVBService:
                     if len(row) < 29:
                         raise ValueError(f"Expected at least 29 columns, but got {len(row)}")
                     
-                    issue_date_str = row[7]
-                    issue_time_str = row[8]
-                    issue_date = datetime.strptime(issue_date_str, "%m/%d/%Y").date()
-                    issue_time = datetime.strptime(issue_time_str, "%I%M%p").time() if issue_time_str else None
+                    issue_date_str = row[6].strip() if row[6] else None
+                    issue_time_str = row[7].strip() if row[7] else None
 
+                    issue_time_str = parse_custom_time(issue_time_str)
+
+                    issue_date = datetime.strptime(issue_date_str, "%m/%d/%Y").date()
+                    issue_time = issue_time_str if issue_time_str else None
+            
                     violation_data = {
                         "import_id": import_record.id,
                         "source": PVBSource.CSV_IMPORT,
                         "plate": row[0],
-                        "state": row[2],
-                        "type": row[3],
-                        "summons": row[5],
+                        "state": row[1],
+                        "type": row[2],
+                        "summons": row[4],
                         "issue_date": issue_date,
                         "issue_time": issue_time,
-                        "fine": Decimal(row[15] or "0"),
-                        "penalty": Decimal(row[16] or "0"),
-                        "interest": Decimal(row[17] or "0"),
-                        "reduction": Decimal(row[18] or "0"),
-                        "amount_due": Decimal(row[21] or "0"),
+                        "fine": Decimal(row[14] or "0"),
+                        "penalty": Decimal(row[15] or "0"),
+                        "interest": Decimal(row[16] or "0"),
+                        "reduction": Decimal(row[17] or "0"),
+                        "amount_due": Decimal(row[20] or "0"),
                         "created_by": user_id,
                         "status": PVBViolationStatus.IMPORTED,
                     }
@@ -117,7 +121,7 @@ class PVBService:
             self.db.commit()
 
             logger.info(f"Imported {len(violations_to_insert)} records from {file_name}. Triggering association task.")
-            associate_pvb_violations_task.delay()
+            self.associate_violations()
 
             return {
                 "message": "File uploaded and import process initiated.",

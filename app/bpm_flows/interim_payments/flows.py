@@ -357,6 +357,8 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
             f"Returning {len(formatted_balances)} balances totaling ${total_outstanding:.2f} "
             f"for lease {lease.lease_id} (driver {driver.driver_id})"
         )
+
+        
         
         return {
             "driver": driver_details,

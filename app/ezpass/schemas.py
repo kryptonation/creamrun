@@ -1,6 +1,6 @@
 ### app/ezpass/schemas.py
 
-from datetime import datetime
+from datetime import datetime , time
 from decimal import Decimal
 from typing import List, Optional
 
@@ -14,13 +14,19 @@ class EZPassTransactionResponse(BaseModel):
     Response schema for a single EZPass transaction, designed to match the UI grid.
     """
     id: int
+    transaction_id: Optional[str] = None
+    entry_plaza: Optional[str] = None
+    exit_plaza: Optional[str] = None
     transaction_date: datetime = Field(..., alias="transaction_datetime")
+    transaction_time: time = None
     medallion_no: Optional[str] = None
     driver_id: Optional[str] = None
     plate_number: str = Field(..., alias="tag_or_plate")
     posting_date: Optional[datetime] = None
-    status: EZPassTransactionStatus
+    status: str = None
     total_amount: Decimal = Field(..., alias="amount")
+    vin: str = None
+    ezpass_class: Optional[str] = None
     
     # Extra fields for detailed view or potential future columns
     failure_reason: Optional[str] = None
@@ -40,3 +46,6 @@ class PaginatedEZPassTransactionResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+    status_list: List[EZPassTransactionStatus] = Field(
+        default_factory=lambda: list(EZPassTransactionStatus)
+    )

@@ -1,8 +1,8 @@
-"""models recreation
+"""migrations recreation
 
-Revision ID: 5027ff760272
+Revision ID: 55331e789407
 Revises: 
-Create Date: 2025-11-13 23:47:01.331978
+Create Date: 2025-11-18 17:12:11.703475
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '5027ff760272'
+revision: str = '55331e789407'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -291,6 +291,7 @@ def upgrade() -> None:
     sa.Column('completed_by', sa.String(length=255), nullable=True),
     sa.Column('completed_date', sa.Date(), nullable=True),
     sa.Column('status', sa.String(length=255), nullable=True),
+    sa.Column('amount', sa.Float(), nullable=True),
     sa.Column('note', sa.Text(), nullable=True),
     sa.Column('is_task_done', sa.Boolean(), nullable=True),
     sa.Column('is_required', sa.Boolean(), nullable=True),
@@ -1142,10 +1143,15 @@ def upgrade() -> None:
     sa.Column('category', sa.String(length=255), nullable=True),
     sa.Column('sub_type', sa.String(length=255), nullable=True),
     sa.Column('invoice_number', sa.String(length=255), nullable=True),
+    sa.Column('base_price', sa.Float(), nullable=True),
+    sa.Column('sales_tax', sa.Float(), nullable=True),
     sa.Column('amount', sa.Float(), nullable=True),
     sa.Column('vendor_name', sa.String(length=255), nullable=True),
     sa.Column('issue_date', sa.Date(), nullable=True),
     sa.Column('expiry_date', sa.Date(), nullable=True),
+    sa.Column('meter_serial_no', sa.String(length=255), nullable=True),
+    sa.Column('mile_run_due_date', sa.Date(), nullable=True),
+    sa.Column('specific_info', sa.Text(), nullable=True),
     sa.Column('note', sa.Text(), nullable=True),
     sa.Column('document_id', sa.Integer(), nullable=True),
     sa.Column('deleted_at', sa.DateTime(), nullable=True),
@@ -1206,6 +1212,7 @@ def upgrade() -> None:
     op.create_table('vehicle_inspections',
     sa.Column('id', sa.Integer(), nullable=False, comment='Primary Key for Vehicle Inspections'),
     sa.Column('vehicle_id', sa.Integer(), nullable=False, comment='Foreign Key to Vehicle table'),
+    sa.Column('inspection_type', sa.String(length=255), nullable=True, comment='Type of inspection conducted'),
     sa.Column('mile_run', sa.Boolean(), nullable=True, comment='Indicates if a mile run was completed'),
     sa.Column('inspection_date', sa.Date(), nullable=True, comment='Date of inspection'),
     sa.Column('inspection_time', sa.String(length=255), nullable=True, comment='Time of inspection'),
@@ -1588,7 +1595,7 @@ def upgrade() -> None:
     sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
     sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['driver_id'], ['drivers.driver_id'], ),
+    sa.ForeignKeyConstraint(['driver_id'], ['drivers.driver_id'], onupdate='CASCADE'),
     sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
     sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')

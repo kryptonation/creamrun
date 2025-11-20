@@ -2,6 +2,7 @@
 
 # Standard library imports
 from typing import List, Optional, Union
+from datetime import date
 
 # Third party imports
 from sqlalchemy import asc, desc, func , or_ , String, cast
@@ -354,7 +355,9 @@ class VehicleService:
         db: Session,
         inspection_id: Optional[int] = None,
         vehicle_id: Optional[int] = None,
+        inspection_type: Optional[str] = None,
         inspection_status: Optional[RegistrationStatus] = None,
+        inspection_date : Optional[date] = None,
         multiple: bool = False,
         sort_order: Optional[str] = "desc",
     ) -> Union[VehicleInspection, List[VehicleInspection], None]:
@@ -365,9 +368,16 @@ class VehicleService:
                 query = query.filter(VehicleInspection.id == inspection_id)
             if vehicle_id:
                 query = query.filter(VehicleInspection.vehicle_id == vehicle_id)
+            if inspection_type:
+                query = query.filter(VehicleInspection.inspection_type == inspection_type)
             if inspection_status:
                 query = query.filter(
                     VehicleInspection.status == RegistrationStatus(inspection_status)
+                )
+            
+            if inspection_date:
+                query = query.filter(
+                    VehicleInspection.inspection_date == inspection_date
                 )
 
             if sort_order:
@@ -613,6 +623,8 @@ class VehicleService:
                              db: Session, 
                              lookup_id: Optional[int] = None,
                              vehicle_id: Optional[int] = None,
+                             category: Optional[str] = None,
+                             sub_type: Optional[str] = None,
                              sort_order: Optional[str] = None,
                              sort_by: Optional[str] = None,
                              multiple: bool = False,
@@ -626,6 +638,13 @@ class VehicleService:
 
             if vehicle_id:
                 query = query.filter(VehicleExpensesAndCompliance.vehicle_id == vehicle_id)
+
+            if category:
+                query = query.filter(VehicleExpensesAndCompliance.category == category)
+
+            if sub_type:
+                query = query.filter(VehicleExpensesAndCompliance.sub_type == sub_type)
+
 
             if sort_by and hasattr(VehicleExpensesAndCompliance, sort_by):
                 column = getattr(VehicleExpensesAndCompliance, sort_by)

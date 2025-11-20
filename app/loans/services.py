@@ -281,7 +281,7 @@ class LoanService:
                     reference_id=installment.installment_id,
                     driver_id=installment.loan.driver_id,
                     lease_id=installment.loan.lease_id,
-                    vehicle_id=installment.loan.vehicle_id,
+                    # vehicle_id=installment.loan.vehicle_id,
                     medallion_id=installment.loan.medallion_id,
                 )
 

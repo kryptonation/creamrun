@@ -1,10 +1,11 @@
 ### app/ezpass/repository.py
 
-from datetime import date, datetime
+from datetime import date, datetime , time
 from typing import List, Optional, Tuple
 
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.sql import func , or_
 
 from app.drivers.models import Driver
 from app.ezpass.models import (
@@ -105,7 +106,20 @@ class EZPassRepository:
         per_page: int,
         sort_by: str,
         sort_order: str,
-        transaction_date: Optional[date] = None,
+        from_transaction_date: Optional[date] = None,
+        to_transaction_date: Optional[date] = None,
+        from_transaction_time: Optional[time] = None,
+        to_transaction_time: Optional[time] = None,
+        from_posting_date: Optional[date] = None,
+        to_posting_date: Optional[date] = None,
+        from_amount: Optional[float] = None,
+        to_amount: Optional[float] = None,
+        transaction_id: Optional[str] = None,
+        entry_plaza: Optional[str] = None,
+        exit_plaza: Optional[str] = None,
+        ezpass_class: Optional[str] = None,
+        agency: Optional[str] = None,
+        vin: Optional[str] = None,
         medallion_no: Optional[str] = None,
         driver_id: Optional[str] = None,
         plate_number: Optional[str] = None,
@@ -127,23 +141,79 @@ class EZPassRepository:
         )
 
         # Apply filters
-        if transaction_date:
-            start_of_day = datetime.combine(transaction_date, datetime.min.time())
-            end_of_day = datetime.combine(transaction_date, datetime.max.time())
-            query = query.filter(EZPassTransaction.transaction_datetime.between(start_of_day, end_of_day))
+        # if transaction_date:
+        #     start_of_day = datetime.combine(transaction_date, datetime.min.time())
+        #     end_of_day = datetime.combine(transaction_date, datetime.max.time())
+        #     query = query.filter(EZPassTransaction.transaction_datetime.between(start_of_day, end_of_day))
+
+        if from_transaction_date:
+            from_transaction_date = datetime.combine(from_transaction_date, datetime.min.time())
+            query = query.filter(EZPassTransaction.transaction_datetime >= from_transaction_date)
+
+        if to_transaction_date:
+            to_transaction_date = datetime.combine(to_transaction_date, datetime.max.time())
+            query = query.filter(EZPassTransaction.transaction_datetime <= to_transaction_date)
+
+        if from_transaction_time:
+            query = query.filter(
+                func.time(EZPassTransaction.transaction_datetime) >= from_transaction_time
+            )
+        if to_transaction_time:
+            query = query.filter(
+                func.time(EZPassTransaction.transaction_datetime) <= to_transaction_time
+            )
+
         if medallion_no:
-            query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+            numbers = [num.strip() for num in medallion_no.split(',') if num.strip()]            
+            query = query.filter(or_(*[Medallion.medallion_number.ilike(f"%{n}%") for n in numbers]))
+
         if driver_id:
-            query = query.filter(Driver.driver_id.ilike(f"%{driver_id}%"))
+            ids = [id.strip() for id in driver_id.split(',') if id.strip()]
+            query = query.filter(or_(*[Driver.driver_id.ilike(f"%{i}%") for i in ids]))
+
         if plate_number:
-            # tag_or_plate can have state prefix, so use 'like'
-            query = query.filter(EZPassTransaction.tag_or_plate.ilike(f"%{plate_number}%"))
+            plates = [plate.strip() for plate in plate_number.split(',') if plate.strip()]
+            query = query.filter(or_(*[EZPassTransaction.tag_or_plate.ilike(f"%{p}%") for p in plates]))
+
+        if from_posting_date:
+            from_posting_date = datetime.combine(from_posting_date, datetime.min.time())
+            query = query.filter(EZPassTransaction.posting_date >= from_posting_date)
+
+        if to_posting_date:
+            to_posting_date = datetime.combine(to_posting_date, datetime.max.time())
+            query = query.filter(EZPassTransaction.posting_date <= to_posting_date)
+
+        if from_amount:
+            query = query.filter(EZPassTransaction.amount >= from_amount)
+
+        if to_amount:
+            query = query.filter(EZPassTransaction.amount <= to_amount)
+
+        if agency:
+            agencies = [agency.strip().upper() for agency in agency.split(',') if agency.strip()]
+            query = query.filter(or_(*[EZPassTransaction.agency.ilike(f"%{a}%") for a in agencies]))
+
+        if vin:
+            vins = [vin.strip() for vin in vin.split(',') if vin.strip()]
+            query = query.filter(or_(*[Vehicle.vin.ilike(f"%{v}%") for v in vins]))
+
+        if ezpass_class:
+            classes = [cls.strip() for cls in ezpass_class.split(',') if cls.strip()]
+            query = query.filter(EZPassTransaction.ezpass_class.in_(classes))
+        if transaction_id:
+            tr_ids = [id.strip() for id in transaction_id.split(',') if id.strip()]
+            query = query.filter(or_(*[EZPassTransaction.transaction_id.ilike(f"%{i}%") for i in tr_ids]))
+        if entry_plaza:
+            entry_plazas = [plaza.strip().upper() for plaza in entry_plaza.split(',') if plaza.strip()]
+            query = query.filter(or_(*[EZPassTransaction.entry_plaza.ilike(f"%{p}%") for p in entry_plazas]))
+
+        if exit_plaza:
+            exit_plazas = [plaza.strip().upper() for plaza in exit_plaza.split(',') if plaza.strip()]
+            query = query.filter(or_(*[EZPassTransaction.exit_plaza.ilike(f"%{p}%") for p in exit_plazas]))
+
+
         if status:
-            try:
-                status_enum = EZPassTransactionStatus[status.upper()]
-                query = query.filter(EZPassTransaction.status == status_enum)
-            except KeyError:
-                logger.warning(f"Invalid status filter value received: {status}")
+            query = query.filter(EZPassTransaction.status == status)
 
         total_items = query.with_entities(func.count(EZPassTransaction.id)).scalar()
 
@@ -151,6 +221,13 @@ class EZPassRepository:
             "transaction_date": EZPassTransaction.transaction_datetime,
             "medallion_no": Medallion.medallion_number,
             "driver_id": Driver.driver_id,
+            "vin": Vehicle.vin,
+            "ezpass_class": EZPassTransaction.ezpass_class,
+            "transaction_id": EZPassTransaction.transaction_id,
+            "entry_plaza": EZPassTransaction.entry_plaza,
+            "exit_plaza": EZPassTransaction.exit_plaza,
+            "amount": EZPassTransaction.amount,
+            "agency": EZPassTransaction.agency,
             "plate_number": EZPassTransaction.tag_or_plate,
             "posting_date": EZPassTransaction.posting_date,
             "status": EZPassTransaction.status,

@@ -16,6 +16,7 @@ from app.vehicles.schemas import VehicleStatus
 from app.uploads.services import upload_service
 from app.bpm_flows.allocate_medallion_vehicle.utils import format_vehicle_details
 from app.core.config import settings
+from app.vehicles.schemas import ExpensesAndComplianceCategory , ExpensesAndComplianceSubType
 
 logger = get_logger(__name__)
 entity_mapper = {
@@ -136,11 +137,34 @@ def process_vehicle_details(db, case_no, step_data):
         step_data["vehicle_true_cost"] = true_cost
         step_data["vehicle_lifetime_cap"] = life_cap
         step_data["vehicle_hack_up_cost"] = vehicle_hack_up_cost
-        
+
         vehicle_data = vehicle_service.upsert_vehicle(db=db , vehicle_data={
             "id": vehicle.id,
             **step_data
         })
+
+
+        vehicle_invoice = upload_service.get_documents(db=db , object_type="vehicle",
+                                            object_id=vehicle.id,document_type="vehicle_invoice")
+        
+        vehicle_expense = vehicle_service.get_vehicle_expenses(
+            db=db , vehicle_id=vehicle.id , category=ExpensesAndComplianceCategory.VEHICLE_PURCHASE,
+            sub_type=ExpensesAndComplianceSubType.INVOICE
+        )
+
+        vehicle_service.upsert_vehicle_expenses(
+            db=db , vehicle_expenses={
+                "id": vehicle_expense.id if vehicle_expense else None,
+                "vehicle_id": vehicle.id ,
+                "category": ExpensesAndComplianceCategory.VEHICLE_PURCHASE,
+                "sub_type": ExpensesAndComplianceSubType.INVOICE,
+                "amount": total_price,
+                "issue_date": step_data.get("invoice_date" , None),
+                "invoice_number": step_data.get("invoice_number" , None),
+                "vendor_name": vehicle.dealer.dealer_name if vehicle.dealer else None,
+                "document_id": vehicle_invoice.get("document_id" , None)
+            }
+        )
 
         if not vehicle_data:
             raise ValueError("Error updating vehicle")

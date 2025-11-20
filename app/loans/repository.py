@@ -253,11 +253,11 @@ class LoanRepository:
         
         if status:
             try:
-                status_enum = LoanInstallmentStatus[status.upper()]
-                query = query.filter(LoanInstallment.status == status_enum)
+                status_enums = [LoanInstallmentStatus[s.upper()] for s in status.split(',')]
+                query = query.filter(LoanInstallment.status.in_(status_enums))
             except KeyError:
                 logger.warning(f"Invalid status filter for installments: {status}")
-
+        
         total_items = query.with_entities(func.count(LoanInstallment.id)).scalar()
 
         # Apply sorting

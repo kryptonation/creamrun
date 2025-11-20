@@ -99,6 +99,7 @@ class EZPassService:
                         "agency": row[2],
                         "entry_plaza": row[3],
                         "exit_plaza": row[4],
+                        "ezpass_class": row[5],
                         "transaction_datetime": transaction_datetime,
                         "amount": Decimal(amount_str),
                         "med_from_csv": row[9] if len(row) > 9 else None,

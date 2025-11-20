@@ -38,6 +38,9 @@ def fill_if_missing(target: dict, key: str, source: dict, source_key: str):
                     target[key] = value
 
 def parse_custom_time(t: str) -> datetime.time:
+    if not t:
+        return None
+    
     meridiem = t[-1]
     if meridiem not in ['A', 'P']:
         raise ValueError("Invalid time format")

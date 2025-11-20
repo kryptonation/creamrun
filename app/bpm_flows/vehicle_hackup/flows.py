@@ -13,7 +13,7 @@ from app.medallions.schemas import MedallionStatus
 from app.medallions.services import medallion_service
 from app.medallions.utils import format_medallion_response
 from app.uploads.services import upload_service
-from app.vehicles.schemas import HackupStatus, RegistrationStatus, VehicleStatus , ProcessStatusEnum
+from app.vehicles.schemas import HackupStatus, RegistrationStatus, VehicleStatus , ProcessStatusEnum , ExpensesAndComplianceCategory
 from app.vehicles.services import vehicle_service
 from app.bpm_flows.allocate_medallion_vehicle.utils import format_vehicle_details
 
@@ -144,6 +144,9 @@ def process_vehicle_hackup_details(db, case_no, step_data):
             "status": HackupStatus.ACTIVE
         }
 
+
+        expenses = ["paint" , "camera" , "partition" , "meter" , "rooftop"]
+
         tasks =  step_data.get("tasks" , {})
         for key , value in tasks.items():
             if value:
@@ -158,6 +161,22 @@ def process_vehicle_hackup_details(db, case_no, step_data):
                         }
                 )
                 hackup_data[f"{key}_task_id"] = task.id if task else None
+                if key in expenses and task.is_task_done and task.completed_date:
+                    vehicle_expen = vehicle_service.get_vehicle_expenses(
+                        db=db , vehicle_id=vehicle.id , category=ExpensesAndComplianceCategory.VEHICLE_HACKUP , sub_type=key
+                    )
+                    vehicle_service.upsert_vehicle_expenses(
+                        db=db,
+                        vehicle_expenses = {
+                            "id": vehicle_expen.id if vehicle_expen else None,
+                            "vehicle_id": vehicle.id,
+                            "category": ExpensesAndComplianceCategory.VEHICLE_HACKUP,
+                            "sub_type": key,
+                            "vendor_name": task.drop_location if task else None,
+                            "issue_date" : task.completed_date if task else None,
+                            "note": task.note if task else None
+                        }
+                    )
 
         vehicle_hackup = vehicle_service.upsert_vehicle_hackup(db=db, vehicle_hackup_data=hackup_data)
 

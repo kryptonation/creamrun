@@ -135,28 +135,97 @@ class DeliveryData(BaseModel):
     vehicle_status: VehicleStatus = VehicleStatus.AVAILABLE
 
 class ExpensesAndComplianceCategory(str, PyEnum):
-    VEHICLE_EXPENSES = "vehicle expenses"
-    VEHICLE_COMPLIANCE = "vehicle compliance"
-    VEHICLE_DOCUMENTS = "vehicle documents"
+    VEHICLE_PURCHASE = "vehicle_purchase"
+    VEHICLE_HACKUP = "vehicle_hackup"
+    REPAIRS_AND_MAINTENANCE = "repairs_and_maintenance"
+    INSPECTIONS_AND_COMPLIANCE = "inspections_and_compliance"
+    OTHER_VHICLE_DOCUMENTS = "other_vehicle_documents"
+
 class ExpensesAndComplianceSubType(str, PyEnum):
-    VEHICLE_PURCHASE = "vehicle purchase"
-    HACKUP = "Hackup"
-    TLC_PREPARATION = "tlc preparation"
-    REPAIRS_MAINTENANCE = "repairs & maintenance"
     OTHERS = "others"
-    TLC_INSPECTION = "tlc inspection"
-    MILE_RUN_INSPECTION = "mile run inspection"
-    DMV_INSPECTION = "dmv inspection"
-    STATE_INSPECTION = "state inspection"
+    PAINT = "paint"
+    METER = "meter"
+    ROOFTOP = "rooftop"
+    CAMERA = "camera"
+    PARTITION = "partition"
+    INVOICE = "invoice"
+    SERVICE_AND_MAINTENANCE = "service_and_maintenance"
+    REPAIRS = "repairs"
+    TLC_INSPECTION = "tlc_inspection"
+    MILE_RUN_INSPECTION = "mile_run_inspection"
+    DMV_INSPECTION = "dmv_inspection"
     INSURANCE = "insurance"
-    OWNERSHIP_REPORT = "ownership report"
-    PLATE_RECEIPT = "plate receipt"
-    WARRANTY = "warranty"
-    LONE_AGGREMENT = "lone agreement"
-    ACCIDENT_REPORT = "accident report"
+    WARRANTY_DOCUMENT = "warranty_document"
+    LOAN_FINANCE_DOCUMENT = "loan/finance_agreement"
+    ACCIDENT_INCIDENT_REPORT = "accident/incident_report"
+    VEHICLE_PHOTO_DAMAGE_DOCUMENTION = "vehicle_photo/damage_documentation"
+    INSURANCE_RIDER_ENDORSEMENT = "insurance_rider/endorsement"
+    Liability_Insurance = "liability_insurance"
+    Worker_Compensation_Insurance = "worker_compensation_insurance"
 
+class VehiclePurchaseExpenseSchema(BaseModel):
+    id: Optional[int] = None
+    vehicle_id: int
+    category: Optional[ExpensesAndComplianceCategory] = None
+    sub_type: Optional[ExpensesAndComplianceSubType] = None
+    invoice_number: Optional[str] = None
+    amount: Optional[float] = 0.0
+    base_price: Optional[float] = 0.0
+    sales_tax: Optional[float] = 0.0
+    vendor_name: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    note : Optional[str] = None
+    document_id: Optional[int] = None
+    @model_validator(mode="after")
+    def validate_category_and_subtype(self):
+        allowed = {}
+        if self.category == ExpensesAndComplianceCategory.VEHICLE_PURCHASE:
+            allowed = {
+                ExpensesAndComplianceSubType.INVOICE,
+            }
+        if self.sub_type not in allowed:
+            raise ValueError(f"Invalid combination of category and sub_type for category '{self.category}'")
+        
+        return self  
+    class Config:
+        from_attributes = True
 
-class VehicleExpensesAndComplianceSchema(BaseModel):
+class VehicleHackupExpenseSchema(BaseModel):
+    id: Optional[int] = None
+    vehicle_id: int
+    category: Optional[ExpensesAndComplianceCategory] = None
+    sub_type: Optional[ExpensesAndComplianceSubType] = None
+    invoice_number: Optional[str] = None
+    amount: Optional[float] = 0.0
+    meter_serial_no: Optional[str] = None
+    vendor_name: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    note : Optional[str] = None
+    document_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def validate_category_and_subtype(self):
+        allowed = {}
+        if self.category == ExpensesAndComplianceCategory.VEHICLE_HACKUP:
+            allowed = {
+                ExpensesAndComplianceSubType.PAINT,
+                ExpensesAndComplianceSubType.METER,
+                ExpensesAndComplianceSubType.ROOFTOP,
+                ExpensesAndComplianceSubType.CAMERA,
+                ExpensesAndComplianceSubType.PARTITION,
+                ExpensesAndComplianceSubType.OTHERS,
+            }
+        if self.sub_type not in allowed:
+            raise ValueError(f"Invalid combination of category and sub_type for category '{self.category}'")
+        
+        return self  
+
+    class Config:
+        from_attributes = True
+
+class VehicleRepairsMaintenanceExpenseSchema(BaseModel):
     id: Optional[int] = None
     vehicle_id: int
     category: Optional[ExpensesAndComplianceCategory] = None
@@ -166,46 +235,65 @@ class VehicleExpensesAndComplianceSchema(BaseModel):
     vendor_name: Optional[str] = None
     issue_date: Optional[date] = None
     expiry_date: Optional[date] = None
-    note: Optional[str] = None
+    note : Optional[str] = None
     document_id: Optional[int] = None
 
     @model_validator(mode="after")
     def validate_category_and_subtype(self):
         allowed = {}
-        if self.category == ExpensesAndComplianceCategory.VEHICLE_EXPENSES:
+        if self.category == ExpensesAndComplianceCategory.REPAIRS_AND_MAINTENANCE:
             allowed = {
-                ExpensesAndComplianceSubType.VEHICLE_PURCHASE,
-                ExpensesAndComplianceSubType.HACKUP,
-                ExpensesAndComplianceSubType.TLC_PREPARATION,
-                ExpensesAndComplianceSubType.REPAIRS_MAINTENANCE,
-                ExpensesAndComplianceSubType.OTHERS
+                ExpensesAndComplianceSubType.SERVICE_AND_MAINTENANCE,
+                ExpensesAndComplianceSubType.REPAIRS,
             }
-        elif  self.category == ExpensesAndComplianceCategory.VEHICLE_COMPLIANCE:
+        if self.sub_type not in allowed:
+            raise ValueError(f"Invalid combination of category and sub_type for category '{self.category}'")
+        
+        return self  
+
+    class Config:
+        from_attributes = True
+
+class VehicleInspectionsComplianceExpenseSchema(BaseModel):
+    id: Optional[int] = None
+    vehicle_id: int
+    category: Optional[ExpensesAndComplianceCategory] = None
+    sub_type: Optional[ExpensesAndComplianceSubType] = None
+    invoice_number: Optional[str] = None
+    specific_info : Optional[str] = None
+    amount: Optional[float] = 0.0
+    vendor_name: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    note : Optional[str] = None
+    document_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def validate_category_and_subtype(self):
+        allowed = {}
+        if self.category == ExpensesAndComplianceCategory.INSPECTIONS_AND_COMPLIANCE:
             allowed = {
                 ExpensesAndComplianceSubType.TLC_INSPECTION,
                 ExpensesAndComplianceSubType.MILE_RUN_INSPECTION,
                 ExpensesAndComplianceSubType.DMV_INSPECTION,
-                ExpensesAndComplianceSubType.STATE_INSPECTION,
-                ExpensesAndComplianceSubType.INSURANCE,
-                ExpensesAndComplianceSubType.OTHERS
+                ExpensesAndComplianceSubType.Worker_Compensation_Insurance,
+                ExpensesAndComplianceSubType.Liability_Insurance,
+                ExpensesAndComplianceSubType.OTHERS,
             }
-        elif self.category == ExpensesAndComplianceCategory.VEHICLE_DOCUMENTS:
-            allowed = {
-                ExpensesAndComplianceSubType.OWNERSHIP_REPORT,
-                ExpensesAndComplianceSubType.PLATE_RECEIPT,
-                ExpensesAndComplianceSubType.WARRANTY,
-                ExpensesAndComplianceSubType.LONE_AGGREMENT,
-                ExpensesAndComplianceSubType.ACCIDENT_REPORT,
-                ExpensesAndComplianceSubType.OTHERS
-            }
-        
-
         if self.sub_type not in allowed:
             raise ValueError(f"Invalid combination of category and sub_type for category '{self.category}'")
+        
+        return self  
 
-        
-        return self
-        
     class Config:
         """Pydantic configuration"""
         from_attributes = True
+
+class VehicleOtherDocumentsExpenseSchema(BaseModel):
+    id: Optional[int] = None
+    vehicle_id: int
+    category: Optional[ExpensesAndComplianceCategory] = None
+    sub_type: Optional[ExpensesAndComplianceSubType] = None
+    issue_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    note : Optional[str] = None

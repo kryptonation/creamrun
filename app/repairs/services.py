@@ -1,6 +1,6 @@
 ### app/repairs/services.py
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta , date
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -201,3 +201,61 @@ class RepairService:
             raise
         finally:
             db.close()
+
+    def get_repair_invoice(self,
+                           lookup_id: int = None,
+                           repair_id: int = None,
+                           vehicle_id: int = None,
+                           lease_id: int = None,
+                           driver_id: int = None,
+                           medallion_id: int = None,
+                           invoice_number: str = None,
+                           invoice_date: date = None,
+                           sort_by: str = None,
+                           sort_order: str = None,
+                           multiple: bool = False               
+                           ) -> RepairInvoice:
+        
+        """
+        Retrieves a Repair Invoice based on various identifiers.
+        """
+
+        try:
+            query = self.db.query(RepairInvoice)
+
+            if lookup_id:
+                query = query.filter(RepairInvoice.id == lookup_id)
+            if repair_id:
+                query = query.filter(RepairInvoice.repair_id == repair_id)
+            if vehicle_id:
+                query = query.filter(RepairInvoice.vehicle_id == vehicle_id)
+            if lease_id:
+                query = query.filter(RepairInvoice.lease_id == lease_id)
+            if driver_id:
+                query = query.filter(RepairInvoice.driver_id == driver_id)
+            if medallion_id:
+                query = query.filter(RepairInvoice.medallion_id == medallion_id)
+            if invoice_number:
+                query = query.filter(RepairInvoice.invoice_number == invoice_number)
+            if invoice_date:
+                query = query.filter(RepairInvoice.invoice_date == invoice_date)
+
+            if sort_by:
+                sort_column = getattr(RepairInvoice, sort_by, None)
+                if sort_column is not None:
+                    if sort_order and sort_order.lower() == "desc":
+                        query = query.order_by(sort_column.desc())
+                    else:
+                        query = query.order_by(sort_column.asc())
+            else:
+                query = query.order_by(RepairInvoice.created_on.desc())
+            
+            if multiple:
+                invoices = query.all()
+                return invoices
+            
+            invoice = query.first()
+            return invoice
+        except Exception as e:
+            logger.error(f"Error retrieving repair invoice: {e}", exc_info=True)
+            raise InvalidRepairOperationError(f"Could not retrieve repair invoice: {e}") from e

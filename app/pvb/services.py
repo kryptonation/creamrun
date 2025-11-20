@@ -86,7 +86,11 @@ class PVBService:
 
                     issue_time_str = parse_custom_time(issue_time_str)
 
-                    issue_date = datetime.strptime(issue_date_str, "%m/%d/%Y").date()
+                    try:
+                        issue_date = datetime.strptime(issue_date_str, "%m/%d/%Y").date()
+                    except ValueError:
+                        issue_date = datetime.strptime(issue_date_str, "%m/%d/%y").date()
+                        
                     issue_time = issue_time_str if issue_time_str else None
             
                     violation_data = {

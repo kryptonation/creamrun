@@ -1,11 +1,12 @@
 ### app/ezpass/router.py
 
 import math
-from datetime import date
+from datetime import date , time
 from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import status as fast_status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/trips/ezpass", tags=["EZPass"])
 def get_ezpass_service(db: Session = Depends(get_db)) -> EZPassService:
     return EZPassService(db)
 
-@router.post("/upload-csv", summary="Upload and Process EZPass CSV", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/upload-csv", summary="Upload and Process EZPass CSV", status_code=fast_status.HTTP_202_ACCEPTED)
 async def upload_ezpass_csv(
     file: UploadFile = File(...),
     ezpass_service: EZPassService = Depends(get_ezpass_service),
@@ -48,10 +49,10 @@ async def upload_ezpass_csv(
         result = ezpass_service.process_uploaded_csv(
             file_stream, file.filename, current_user.id
         )
-        return JSONResponse(content=result, status_code=status.HTTP_202_ACCEPTED)
+        return JSONResponse(content=result, status_code=fast_status.HTTP_202_ACCEPTED)
     except EZPassError as e:
         logger.warning("Business logic error during EZPass CSV upload: %s", e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=fast_status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error("Error processing EZPass CSV: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during file processing.")
@@ -63,7 +64,20 @@ def list_ezpass_transactions(
     per_page: int = Query(10, ge=1, le=100, description="Items per page."),
     sort_by: Optional[str] = Query("transaction_date", description="Field to sort by."),
     sort_order: str = Query("desc", enum=["asc", "desc"]),
-    transaction_date: Optional[date] = Query(None, description="Filter by a specific transaction date."),
+    from_transaction_date: Optional[date] = Query(None, description="Filter by a specific from transaction date."),
+    to_transaction_date: Optional[date] = Query(None , description="Filter by a specific to transaction date."),
+    from_transaction_time: Optional[time] = Query(None, description="Filter by a specific from transaction time."),
+    to_transaction_time: Optional[time] = Query(None, description="Filter by a specific to transaction time."),
+    from_posting_date: Optional[date] = Query(None, description="Filter by a specific from posting date."),
+    to_posting_date: Optional[date] = Query(None, description="Filter by a specific to posting date."),
+    from_amount: Optional[float] = Query(None, description="Filter by a specific from amount."),
+    to_amount:Optional[float] = Query(None, description="Filter by a specific to amount."),
+    transaction_id: Optional[str] = Query(None, description="Filter by transaction ID."),
+    entry_plaza: Optional[str] = Query(None, description="Filter by entry plaza."),
+    exit_plaza: Optional[str] = Query(None, description="Filter by exit plaza."),
+    ezpass_class: Optional[str] = Query(None, description="Filter by EZPass Class."),
+    vin: Optional[str] = Query(None, description="Filter by VIN."),
+    agency: Optional[str] = Query(None, description="Filter by Agency."),
     medallion_no: Optional[str] = Query(None, description="Filter by Medallion Number."),
     driver_id: Optional[str] = Query(None, description="Filter by Driver ID."),
     plate_number: Optional[str] = Query(None, description="Filter by Plate Number."),
@@ -84,7 +98,19 @@ def list_ezpass_transactions(
             per_page=per_page,
             sort_by=sort_by,
             sort_order=sort_order,
-            transaction_date=transaction_date,
+            from_transaction_date=from_transaction_date,
+            to_transaction_date=to_transaction_date,
+            from_transaction_time=from_transaction_time,
+            to_transaction_time=to_transaction_time,
+            from_posting_date=from_posting_date,
+            to_posting_date=to_posting_date,
+            from_amount=from_amount,
+            to_amount=to_amount,
+            transaction_id=transaction_id,
+            entry_plaza=entry_plaza,
+            exit_plaza=exit_plaza,
+            agency=agency,
+            vin=vin,
             medallion_no=medallion_no,
             driver_id=driver_id,
             plate_number=plate_number,
@@ -94,8 +120,14 @@ def list_ezpass_transactions(
         response_items = [
             EZPassTransactionResponse(
                 id=t.id,
-                transaction_datetime=t.transaction_datetime,
+                transaction_id=t.transaction_id,
+                transaction_date= t.transaction_datetime,
+                transaction_time=t.transaction_datetime.time(),
+                entry_plaza=t.entry_plaza,
+                exit_plaza=t.exit_plaza,
+                ezpass_class=t.ezpass_class,
                 medallion_no=t.medallion.medallion_number if t.medallion else None,
+                vin=t.vehicle.vin if t.vehicle else None,
                 driver_id=t.driver.driver_id if t.driver else None,
                 tag_or_plate=t.tag_or_plate,
                 posting_date=t.posting_date,
@@ -126,13 +158,26 @@ def list_ezpass_transactions(
 def export_ezpass_transactions(
     format: str = Query("excel", enum=["excel", "pdf"]),
     # Pass through all filters from the list endpoint
-    sort_by: Optional[str] = Query("transaction_date"),
-    sort_order: str = Query("desc"),
-    transaction_date: Optional[date] = Query(None),
-    medallion_no: Optional[str] = Query(None),
-    driver_id: Optional[str] = Query(None),
-    plate_number: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query("transaction_date", description="Field to sort by."),
+    sort_order: str = Query("desc", enum=["asc", "desc"]),
+    from_transaction_date: Optional[date] = Query(None, description="Filter by a specific from transaction date."),
+    to_transaction_date: Optional[date] = Query(None , description="Filter by a specific to transaction date."),
+    from_transaction_time: Optional[time] = Query(None, description="Filter by a specific from transaction time."),
+    to_transaction_time: Optional[time] = Query(None, description="Filter by a specific to transaction time."),
+    from_posting_date: Optional[date] = Query(None, description="Filter by a specific from posting date."),
+    to_posting_date: Optional[date] = Query(None, description="Filter by a specific to posting date."),
+    from_amount: Optional[float] = Query(None, description="Filter by a specific from amount."),
+    to_amount:Optional[float] = Query(None, description="Filter by a specific to amount."),
+    transaction_id: Optional[str] = Query(None, description="Filter by transaction ID."),
+    entry_plaza: Optional[str] = Query(None, description="Filter by entry plaza."),
+    exit_plaza: Optional[str] = Query(None, description="Filter by exit plaza."),
+    ezpass_class: Optional[str] = Query(None, description="Filter by EZPass Class."),
+    vin: Optional[str] = Query(None, description="Filter by VIN."),
+    agency: Optional[str] = Query(None, description="Filter by Agency."),
+    medallion_no: Optional[str] = Query(None, description="Filter by Medallion Number."),
+    driver_id: Optional[str] = Query(None, description="Filter by Driver ID."),
+    plate_number: Optional[str] = Query(None, description="Filter by Plate Number."),
+    satus: Optional[str] = Query(None, description="Filter by transaction status."),
     ezpass_service: EZPassService = Depends(get_ezpass_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -145,16 +190,29 @@ def export_ezpass_transactions(
             per_page=10000,  # A large number to fetch all records for export
             sort_by=sort_by,
             sort_order=sort_order,
-            transaction_date=transaction_date,
+            from_transaction_date=from_transaction_date,
+            to_transaction_date=to_transaction_date,
+            from_transaction_time=from_transaction_time,
+            to_transaction_time=to_transaction_time,
+            from_posting_date=from_posting_date,
+            to_posting_date=to_posting_date,
+            from_amount=from_amount,
+            to_amount=to_amount,
+            transaction_id=transaction_id,
+            ezpass_class=ezpass_class,
+            entry_plaza=entry_plaza,
+            exit_plaza=exit_plaza,
+            agency=agency,
+            vin=vin,
             medallion_no=medallion_no,
             driver_id=driver_id,
             plate_number=plate_number,
-            status=status,
+            status=satus,
         )
 
         if not transactions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=fast_status.HTTP_404_NOT_FOUND,
                 detail="No EZPass data available for export with the given filters.",
             )
 
@@ -162,7 +220,13 @@ def export_ezpass_transactions(
         export_data = [
             EZPassTransactionResponse(
                 id=t.id,
-                transaction_datetime=t.transaction_datetime,
+                transaction_id=t.transaction_id,
+                transaction_date=t.transaction_datetime,
+                transaction_time=t.transaction_datetime.time(),
+                entry_plaza=t.entry_plaza,
+                exit_plaza=t.exit_plaza,
+                ezpass_class=t.ezpass_class,
+                vin=t.vehicle.vin if t.vehicle else None,
                 medallion_no=t.medallion.medallion_number if t.medallion else None,
                 driver_id=t.driver.driver_id if t.driver else None,
                 tag_or_plate=t.tag_or_plate,
@@ -195,6 +259,6 @@ def export_ezpass_transactions(
     except Exception as e:
         logger.error("Error exporting EZPass data: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=fast_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during the export process.",
         )

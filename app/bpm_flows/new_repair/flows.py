@@ -97,7 +97,8 @@ def _generate_payment_schedule_preview(
     return schedule
 
 
-@step(step_id="307", name="Fetch - Search Driver & Enter Invoice Details", operation="fetch")
+# @step(step_id="307", name="Fetch - Search Driver & Enter Invoice Details", operation="fetch")
+@step(step_id="129", name="Fetch - Search Driver & Enter Invoice Details", operation="fetch")
 def search_driver_and_invoice_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
     """
     Fetches driver and lease information based on TLC License search.
@@ -198,7 +199,8 @@ def search_driver_and_invoice_fetch(db: Session, case_no: str, case_params: Dict
         raise HTTPException(status_code=500, detail="An error occurred while fetching driver details") from e
 
 
-@step(step_id="307", name="Process - Create Repair Invoice", operation="process")
+# @step(step_id="307", name="Process - Create Repair Invoice", operation="process")
+@step(step_id="129", name="Process - Create Repair Invoice", operation="process")
 def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str, Any]):
     """
     Creates a repair invoice with automatic payment schedule generation.

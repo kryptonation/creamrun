@@ -98,6 +98,7 @@ class EZPassTransaction(Base, AuditMixin):
     transaction_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, comment="The precise date and time of the toll transaction.")
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), comment="The cost of the toll.")
     med_from_csv: Mapped[Optional[str]] = mapped_column(String(50), comment="The 'MED' column from the CSV, stored for reference.")
+    ezpass_class: Mapped[Optional[str]] = mapped_column(String(50), comment="The 'CLASS' column from the CSV, stored for reference.")
 
     # --- Processing and Association Fields ---
     status: Mapped[EZPassTransactionStatus] = mapped_column(

@@ -31,10 +31,15 @@ class VehicleExpensesAndCompliance(Base , AuditMixin):
     category = Column(String(255), nullable=True)
     sub_type = Column(String(255), nullable=True)
     invoice_number = Column(String(255), nullable=True)
+    base_price = Column(Float, nullable=True , default=0.0)
+    sales_tax = Column(Float, nullable=True , default=0.0)
     amount = Column(Float, nullable=True , default=0.0)
     vendor_name = Column(String(255), nullable=True)
     issue_date = Column(Date, nullable=True)
     expiry_date = Column(Date, nullable=True)
+    meter_serial_no = Column(String(255), nullable=True)
+    mile_run_due_date = Column(Date, nullable=True)
+    specific_info = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
     document_id = Column(Integer, ForeignKey("document.id"), nullable=True)
     deleted_at = Column(DateTime, nullable=True)
@@ -111,6 +116,10 @@ class VehicleInspection(Base, AuditMixin):
         comment="Foreign Key to Vehicle table",
     )
 
+    inspection_type = Column(
+        String(255), nullable=True, comment="Type of inspection conducted"
+    )
+
     mile_run = Column(
         Boolean, nullable=True, comment="Indicates if a mile run was completed"
     )
@@ -153,6 +162,7 @@ class VehicleInspection(Base, AuditMixin):
         return {
             "id": self.id,
             "vehicle_id": self.vehicle_id,
+            "inspection_type": self.inspection_type,
             "mile_run": self.mile_run,
             "inspection_date": self.inspection_date,
             "inspection_time": self.inspection_time,
@@ -410,6 +420,7 @@ class HackUpTasks(Base, AuditMixin):
     completed_by = Column(String(255), nullable=True)
     completed_date = Column(Date, nullable=True)
     status = Column(String(255), nullable=True)
+    amount = Column(Float, nullable=True , default=0.0)
     note = Column(Text, nullable=True)
     is_task_done = Column(Boolean, nullable=True)
     is_required = Column(Boolean, nullable=True)
@@ -471,6 +482,7 @@ class HackUpTasks(Base, AuditMixin):
             "completed_by": self.completed_by,
             "completed_date": self.completed_date,
             "status": self.status,
+            "amount": self.amount,
             "note": self.note,
             "is_task_done": self.is_task_done,
             "is_required": self.is_required,

@@ -221,8 +221,90 @@ def format_vehicle_expense(vehicle_expense):
         "vendor_name" : vehicle_expense.vendor_name,
         "issue_date" : vehicle_expense.issue_date,
         "expiry_date" : vehicle_expense.expiry_date,
+        "meter_serial_no" : vehicle_expense.meter_serial_no,
+        "mile_run_due_date" : vehicle_expense.mile_run_due_date,
+        "specific_info" : vehicle_expense.specific_info,
         "note" : vehicle_expense.note,
         "document_id" : vehicle_expense.document_id,
         "deleted_at" : vehicle_expense.deleted_at,
         "deleted_by" : vehicle_expense.deleted_by
+    }
+
+def format_vehicle_purchase_expense(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "invoice_number" : vehicle_expense.invoice_number,
+        "vendor_name" : vehicle_expense.vendor_name,
+        "issue_date" : vehicle_expense.issue_date,
+        "expiry_date" : vehicle_expense.expiry_date,
+        "base_price" : vehicle_expense.base_price,
+        "sales_tax" : vehicle_expense.sales_tax,
+        "amount" : vehicle_expense.amount,
+        "note" : vehicle_expense.note,
+        "document_id" : vehicle_expense.document_id,
+        "deleted_at" : vehicle_expense.deleted_at,
+        "deleted_by" : vehicle_expense.deleted_by
+    }
+
+def format_hackup_expense_expense(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "invoice_number" : vehicle_expense.invoice_number,
+        "issue_date" : vehicle_expense.issue_date,
+        "meter_serial_no" : vehicle_expense.meter_serial_no,
+        "vendor_name" : vehicle_expense.vendor_name,
+        "amount" : vehicle_expense.amount,
+        "note" : vehicle_expense.note,
+        "document_id" : vehicle_expense.document_id,
+        "deleted_at" : vehicle_expense.deleted_at,
+        "deleted_by" : vehicle_expense.deleted_by
+    }
+
+def format_inspection_expense(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "invoice_number" : vehicle_expense.invoice_number,
+        "issue_date" : vehicle_expense.issue_date,
+        "expiry_date" : vehicle_expense.expiry_date,
+        "specific_info" : vehicle_expense.specific_info,
+        "amount" : vehicle_expense.amount,
+        "note" : vehicle_expense.note,
+        "document_id" : vehicle_expense.document_id,
+        "deleted_at" : vehicle_expense.deleted_at,
+        "deleted_by" : vehicle_expense.deleted_by
+    }
+
+def format_maintenance_expense(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "invoice_number" : vehicle_expense.invoice_number,
+        "issue_date" : vehicle_expense.issue_date,
+        "amount" : vehicle_expense.amount,
+        "note" : vehicle_expense.note,
+        "document_id" : vehicle_expense.document_id,
+        "deleted_at" : vehicle_expense.deleted_at,
+        "deleted_by" : vehicle_expense.deleted_by
+    }
+
+def format_vehicle_other_document(vehicle_expense):
+    return {
+        "id": vehicle_expense.id,
+        "vehicle_id": vehicle_expense.vehicle_id,
+        "category" : vehicle_expense.category,
+        "sub_type" : vehicle_expense.sub_type,
+        "issue_date" : vehicle_expense.issue_date,
+        "expiry_date" : vehicle_expense.expiry_date,
+        "note" : vehicle_expense.note,
     }

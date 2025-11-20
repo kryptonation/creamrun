@@ -1616,20 +1616,19 @@ def finalize_vehicle_hackup(
             detail="An internal server error occurred while finalizing the hack-up.",
         )
     
-@router.get("/vehicle_expeneses" , summary = "List Vehicle Expenses")
+@router.get("/vehicle_expeneses/{vehicel_id}" , summary = "List Vehicle Expenses")
 def list_vehicle_expenses(
-    db: Session = Depends(get_db_with_current_user),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    vin: str = None,
+    vehicel_id: int,
     category: str = None,
     sub_type: str = None,
     invoice_number : str = None,
+    specific_info : str = None,
     from_amount : str = None,
     to_amount : str = None,
     vendor_name : str = None,
     sort_by: str = None,
     sort_order: str =  None,
+    db: Session = Depends(get_db_with_current_user),
     logged_in_user: User = Depends(get_current_user),
 ):
     """
@@ -1638,13 +1637,12 @@ def list_vehicle_expenses(
     try:
 
         return get_vehicle_expenses(
+            vehicle_id=vehicel_id,
             db=db,
-            page=page,
-            per_page=per_page,
-            vin=vin,
             category=category,
             sub_type=sub_type,
             invoice_number=invoice_number,
+            specific_info=specific_info,
             amount_from=from_amount,
             amount_to=to_amount,
             vendor_name=vendor_name,

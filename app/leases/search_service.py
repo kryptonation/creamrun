@@ -376,9 +376,6 @@ def format_lease_export(db: Session, lease):
     }
 
     for lease_driver in lease.lease_driver:
-        if not lease_driver.is_active:
-            continue
-
         documents_count = len(lease_driver.documents)
         if documents_count > 0:
             lease_details["has_documents"] = True
@@ -407,14 +404,6 @@ def format_lease_export(db: Session, lease):
                 "is_additional_driver": lease_driver.is_additional_driver
             }
         )
-        lease_details["dmv_license_no"] = (
-            driver.dmv_license.dmv_license_number if driver.dmv_license else None
-        )
-        lease_details["ssn"] = driver.ssn
-        lease_details["phone_number"] = format_us_phone_number(driver.phone_number_1)
-        lease_details["driver_name"] = f"{driver.first_name} {driver.last_name}"
-        lease_details["is_driver_manager"] = bool(lease_driver.documents)
-        break
 
     # --- FIX: Convert unhashable types (list/dict) to hashable strings (JSON) ---
     

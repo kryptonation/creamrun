@@ -534,7 +534,7 @@ def post_loan_installments_to_ledger(
 
 @router.get(
     "/installments/postable",
-    response_model=PaginatedDriverLoanResponse,
+    response_model=PaginatedLoanInstallmentResponse,
     summary="Get Postable Loan Installments"
 )
 def get_postable_installments(

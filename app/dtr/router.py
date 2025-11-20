@@ -2,8 +2,12 @@
 
 from typing import List, Optional
 from datetime import date
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter, Depends, HTTPException, Query, status,
+    Response
+)
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -16,6 +20,8 @@ from app.dtr.schemas import (
 )
 from app.dtr.models import DTRStatus
 from app.dtr.exceptions import DTRValidationError, DTRGenerationError, DTRNotFoundError
+from app.dtr.pdf_generator import DTRPDFGenerator
+from app.dtr.exceptions import DTRExportError
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/dtrs", tags=["DTRs"])
@@ -430,4 +436,276 @@ async def delete_dtr(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete DTR"
+        ) from e
+    
+
+@router.get("/{dtr_id}/pdf", response_class=Response)
+async def download_dtr_pdf(
+    dtr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate and download DTR as PDF.
+    
+    This endpoint generates a production-grade PDF that exactly matches
+    the Figma screens including:
+    - Main DTR page with all financial details
+    - DTR Details pages (1/2 and 2/2)
+    - Alerts page
+    - Additional Driver Details pages (if applicable)
+    
+    The PDF includes:
+    - Header with company logo and information
+    - DTR identification block
+    - Gross earnings snapshot
+    - Account balance breakdown
+    - All charge categories with detailed tables
+    - Payment summary
+    - Trip logs
+    - Repairs and loans with installments
+    - Vehicle and driver alerts
+    - Separate sections for each additional driver
+    
+    Returns:
+        PDF file as downloadable attachment
+        
+    Raises:
+        404: DTR not found
+        500: PDF generation failed
+    """
+    try:
+        logger.info(f"Generating PDF for DTR ID: {dtr_id}")
+        
+        # Get DTR with all relationships loaded
+        service = DTRService(db)
+        dtr = service.repository.get_by_id(dtr_id)
+        
+        if not dtr:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"DTR with ID {dtr_id} not found"
+            )
+        
+        # Ensure all relationships are loaded
+        # This prevents lazy loading issues during PDF generation
+        if dtr.lease:
+            _ = dtr.lease.lease_id
+        if dtr.driver:
+            _ = dtr.driver.first_name
+            if dtr.driver.tlc_license:
+                _ = dtr.driver.tlc_license.tlc_license_number
+        if dtr.vehicle:
+            _ = dtr.vehicle.get_active_plate_number()
+        if dtr.medallion:
+            _ = dtr.medallion.medallion_number
+        
+        # Initialize PDF generator
+        pdf_generator = DTRPDFGenerator()
+        
+        # Generate PDF
+        pdf_bytes = pdf_generator.generate_pdf(dtr)
+        
+        # Create filename
+        filename = f"DTR_{dtr.dtr_number}_{dtr.receipt_number}.pdf"
+        
+        logger.info(f"Successfully generated PDF: {filename} ({len(pdf_bytes)} bytes)")
+        
+        # Return PDF as downloadable file
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(pdf_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except DTRExportError as e:
+        logger.error(f"PDF export error for DTR {dtr_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate PDF: {str(e)}"
+        ) from e
+    except Exception as e:
+        logger.error(f"Unexpected error generating PDF for DTR {dtr_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while generating the PDF"
+        ) from e
+
+
+@router.get("/{dtr_id}/pdf/preview", response_class=Response)
+async def preview_dtr_pdf(
+    dtr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Preview DTR PDF in browser (inline display).
+    
+    Same as download endpoint but displays PDF inline in browser
+    instead of forcing download.
+    
+    Returns:
+        PDF file for inline display
+    """
+    try:
+        logger.info(f"Generating PDF preview for DTR ID: {dtr_id}")
+        
+        # Get DTR with all relationships
+        service = DTRService(db)
+        dtr = service.repository.get_by_id(dtr_id)
+        
+        if not dtr:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"DTR with ID {dtr_id} not found"
+            )
+        
+        # Load relationships
+        if dtr.lease:
+            _ = dtr.lease.lease_id
+        if dtr.driver:
+            _ = dtr.driver.first_name
+            if dtr.driver.tlc_license:
+                _ = dtr.driver.tlc_license.tlc_license_number
+        if dtr.vehicle:
+            _ = dtr.vehicle.get_active_plate_number()
+        if dtr.medallion:
+            _ = dtr.medallion.medallion_number
+        
+        # Generate PDF
+        pdf_generator = DTRPDFGenerator()
+        pdf_bytes = pdf_generator.generate_pdf(dtr)
+        
+        filename = f"DTR_{dtr.dtr_number}_{dtr.receipt_number}.pdf"
+        
+        logger.info(f"Successfully generated PDF preview: {filename}")
+        
+        # Return PDF for inline display
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Content-Length": str(len(pdf_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating PDF preview for DTR {dtr_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate PDF preview"
+        ) from e
+
+
+@router.post("/batch-pdf", response_class=Response)
+async def generate_batch_pdf(
+    dtr_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate combined PDF for multiple DTRs.
+    
+    Useful for generating PDFs for all DTRs in a specific period
+    or for a specific batch.
+    
+    Request body:
+    ```json
+    {
+        "dtr_ids": [1, 2, 3, 4, 5]
+    }
+    ```
+    
+    Returns:
+        Combined PDF file with all DTRs
+    """
+    try:
+        logger.info(f"Generating batch PDF for {len(dtr_ids)} DTRs")
+        
+        if not dtr_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No DTR IDs provided"
+            )
+        
+        if len(dtr_ids) > 100:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Maximum 100 DTRs per batch"
+            )
+        
+        service = DTRService(db)
+        pdf_generator = DTRPDFGenerator()
+        
+        # Combine all PDFs
+        # For simplicity, concatenate HTML before generating PDF
+        combined_html_parts = []
+        
+        for dtr_id in dtr_ids:
+            dtr = service.repository.get_by_id(dtr_id)
+            
+            if not dtr:
+                logger.warning(f"DTR {dtr_id} not found, skipping")
+                continue
+            
+            # Load relationships
+            if dtr.lease:
+                _ = dtr.lease.lease_id
+            if dtr.driver:
+                _ = dtr.driver.first_name
+            if dtr.vehicle:
+                _ = dtr.vehicle.get_active_plate_number()
+            if dtr.medallion:
+                _ = dtr.medallion.medallion_number
+            
+            # Get template data
+            template_data = pdf_generator._prepare_template_data(dtr)
+            template = pdf_generator.env.get_template("dtr_template.html")
+            html = template.render(**template_data)
+            
+            combined_html_parts.append(html)
+        
+        if not combined_html_parts:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No valid DTRs found"
+            )
+        
+        # Combine HTML with page breaks
+        combined_html = "\n<!-- PAGE BREAK -->\n".join(combined_html_parts)
+        
+        # Generate combined PDF
+        from weasyprint import HTML
+        pdf_file = BytesIO()
+        HTML(string=combined_html).write_pdf(pdf_file)
+        pdf_bytes = pdf_file.getvalue()
+        
+        filename = f"DTR_Batch_{len(dtr_ids)}_records.pdf"
+        
+        logger.info(f"Successfully generated batch PDF: {filename} ({len(pdf_bytes)} bytes)")
+        
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(pdf_bytes))
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating batch PDF: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate batch PDF"
         ) from e

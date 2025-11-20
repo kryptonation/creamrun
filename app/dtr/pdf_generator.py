@@ -1,815 +1,143 @@
-# app/dtr/pdf_generator.py
+# app/dtr/pdf_generator.py - PRODUCTION GRADE
 
-from io import BytesIO
+"""
+Production-Grade DTR PDF Generator using WeasyPrint
+Exact match to Figma screens with all details
+"""
+
 from decimal import Decimal
-from typing import List
-import logging
-import math
-from datetime import datetime, timedelta
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from datetime import date, datetime
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, 
-    Spacer, PageBreak
-)
-from reportlab.lib.enums import TA_CENTER
-from sqlalchemy.orm import Session
+from app.utils.logger import get_logger
 
-from app.dtr.models import DTR
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+try:
+    from weasyprint import HTML, CSS
+except ImportError as e:
+    raise ImportError(
+        "WeasyPrint is required but not installed. "
+        "Install it with: pip install weasyprint"
+    ) from e
+
 from app.dtr.exceptions import DTRExportError
-from app.curb.models import CurbTrip, PaymentType
-from app.core.db import get_db
+from app.dtr.models import DTR
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DTRPDFGenerator:
     """
-    Production-grade DTR PDF generator with accurate data mapping
-    and layout matching business requirements.
+    Production-Grade DTR PDF Generator
+    
+    Generates PDFs that exactly match Figma screens with:
+    - Main DTR page with all primary driver information
+    - DTR Details pages (1/2 and 2/2)
+    - Alerts page
+    - Additional Driver Details pages (if applicable)
     """
     
-    def __init__(self):
-        """Initialize PDF generator with styles and colors"""
-        self.styles = getSampleStyleSheet()
+    def __init__(self, template_dir: Optional[Path] = None):
+        """
+        Initialize PDF generator
         
-        # Color scheme matching BAT branding
-        self.yellow_bg = colors.HexColor('#FFD700')  # Yellow header background
-        self.gray_bg = colors.HexColor('#E8E8E8')    # Gray for table headers
-        self.red_text = colors.HexColor('#FF0000')   # Red for section headers
+        Args:
+            template_dir: Path to templates directory. If None, uses default.
+        """
+        if template_dir is None:
+            self.template_dir = Path(__file__).parent / "templates"
+        else:
+            self.template_dir = Path(template_dir)
         
-        self._setup_custom_styles()
-
-    # --- Formatting Helpers ---
-    def _format_currency(self, amount: Decimal) -> str:
-        if amount is None: return "$0.00"
-        return f"${amount:,.2f}"
-
-    def _format_negative_currency(self, amount: Decimal) -> str:
-        if amount is None or amount == 0: return "-"
-        return f"(${abs(amount):,.2f})" if amount < 0 else f"${amount:,.2f}"
-
-    def _format_date(self, date_obj) -> str:
-        if not date_obj: return ""
-        return date_obj.strftime('%m/%d/%Y')
-
-    def _format_datetime(self, datetime_obj) -> str:
-        if not datetime_obj: return ""
-        return datetime_obj.strftime('%m/%d/%Y')
-
-    def _format_date_range(self, start_date, end_date) -> str:
-        if not start_date or not end_date: return ""
-        return f"{self._format_date(start_date)} to {self._format_date(end_date)}"
+        # Ensure templates directory exists
+        if not self.template_dir.exists():
+            self.template_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created templates directory: {self.template_dir}")
         
-    def _setup_custom_styles(self):
-        """Setup custom paragraph styles"""
-        # Section header style (Red, Bold)
-        self.styles.add(ParagraphStyle(
-            name='SectionHeader',
-            parent=self.styles['Heading2'],
-            fontSize=11,
-            textColor=self.red_text,
-            spaceAfter=6,
-            fontName='Helvetica-Bold'
-        ))
+        # Setup Jinja2 environment
+        self.env = Environment(
+            loader=FileSystemLoader(str(self.template_dir)),
+            autoescape=select_autoescape(["html", "xml"]),
+            trim_blocks=True,
+            lstrip_blocks=True
+        )
         
-        # Company info style (for yellow header)
-        self.styles.add(ParagraphStyle(
-            name='CompanyInfo',
-            parent=self.styles['Normal'],
-            fontSize=9,
-            alignment=TA_CENTER,
-            fontName='Helvetica'
-        ))
+        # Add custom filters
+        self.env.filters["currency"] = self._format_currency
+        self.env.filters["date_format"] = self._format_date
+        self.env.filters["datetime_format"] = self._format_datetime
+        self.env.filters["date_long"] = self._format_date_long
         
-        # Normal DTR text
-        self.styles.add(ParagraphStyle(
-            name='DTRNormal',
-            parent=self.styles['Normal'],
-            fontSize=9,
-            fontName='Helvetica'
-        ))
-        
-        # Right-aligned text (for currency amounts)
-        self.styles.add(ParagraphStyle(
-            name='RightAlign',
-            parent=self.styles['Normal'],
-            fontSize=9,
-            alignment=2,  # 2 = TA_RIGHT in reportlab
-            fontName='Helvetica'
-        ))
+        logger.info(f"DTRPDFGenerator initialized with template dir: {self.template_dir}")
     
-    def _format_currency(self, amount: Decimal) -> str:
+    def _format_currency(self, amount) -> str:
         """Format currency with $ sign and 2 decimal places"""
-        if amount is None:
+        if amount is None or amount == "":
             return "$0.00"
-        return f"${amount:,.2f}"
-    
-    def _format_negative_currency(self, amount: Decimal) -> str:
-        """Format negative amounts with parentheses as per business rules"""
-        if amount is None or amount == 0:
-            return "-"
-        if amount < 0:
-            return f"(${abs(amount):,.2f})"
-        return f"${amount:,.2f}"
+        
+        try:
+            if isinstance(amount, str):
+                amount = amount.replace("$", "").replace(",", "").strip()
+                if not amount or amount == "-":
+                    return "$0.00"
+            
+            amount_decimal = Decimal(str(amount))
+            return f"${amount_decimal:,.2f}"
+        except (ValueError, TypeError, Exception) as e:
+            logger.warning(f"Failed to format currency: {amount}, error: {e}")
+            return "$0.00"
     
     def _format_date(self, date_obj) -> str:
         """Format date as MM/DD/YYYY"""
         if not date_obj:
             return ""
-        return date_obj.strftime('%m/%d/%Y')
+        
+        if isinstance(date_obj, str):
+            try:
+                date_obj = datetime.fromisoformat(date_obj).date()
+            except:
+                return date_obj
+        
+        if isinstance(date_obj, datetime):
+            date_obj = date_obj.date()
+        
+        return date_obj.strftime("%m/%d/%Y")
     
-    def _format_date_range(self, start_date, end_date) -> str:
-        """Format date range for receipt period"""
-        if not start_date or not end_date:
+    def _format_datetime(self, datetime_obj) -> str:
+        """Format datetime as MM/DD/YYYY HH:MM AM/PM"""
+        if not datetime_obj:
             return ""
-        return f"{self._format_date(start_date)} to {self._format_date(end_date)}"
+        
+        if isinstance(datetime_obj, str):
+            try:
+                datetime_obj = datetime.fromisoformat(datetime_obj)
+            except:
+                return datetime_obj
+        
+        return datetime_obj.strftime("%m/%d/%Y %I:%M %p")
     
-    def _create_header(self, dtr: DTR) -> List:
-        """
-        Create DTR header with company info and identification block.
-        Matches business specification exactly.
-        """
-        elements = []
-        
-        # Company name and address in yellow background
-        company_info = """
-        <b>Big Apple Taxi Management LLC</b><br/>
-        90-24 Queens Boulevard, Woodside, NY 11377-4642<br/>
-        718 779 5090 | bigappletaxiinc.com
-        """
-        address_para = Paragraph(company_info, self.styles['CompanyInfo'])
-        address_table = Table(
-            [[address_para]], 
-            colWidths=[6*inch]
-        )
-        address_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), self.yellow_bg),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 10),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-        ]))
-        elements.append(address_table)
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # DTR Identification Block - Extract accurate data from relationships
-        medallion = ""
-        driver_name = ""
-        tlc_license = ""
-        
-        # Get medallion number
-        if dtr.medallion:
-            medallion = str(dtr.medallion.medallion_number)
-        
-        # Get driver name - properly construct full name
-        if dtr.driver:
-            first_name = dtr.driver.first_name or ""
-            middle_name = dtr.driver.middle_name or ""
-            last_name = dtr.driver.last_name or ""
-            
-            # Construct full name with proper spacing
-            name_parts = [first_name, middle_name, last_name]
-            driver_name = " ".join(part for part in name_parts if part).strip()
-        
-        # Get TLC license number
-        if dtr.driver and dtr.driver.tlc_license:
-            tlc_license = str(dtr.driver.tlc_license.tlc_license_number)
-        
-        # Build identification table
-        receipt_data = [
-            ['Medallion:', medallion, 'Receipt number:', dtr.receipt_number or ""],
-            ['Driver / Leaseholder:', driver_name, 'Receipt Date:', self._format_date(dtr.generation_date)],
-            ['TLC License:', tlc_license or "", 'Receipt Period:', self._format_date_range(dtr.period_start_date, dtr.period_end_date)]
-        ]
-        
-        receipt_table = Table(receipt_data, colWidths=[1.2*inch, 1.8*inch, 1.2*inch, 1.8*inch])
-        receipt_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        elements.append(receipt_table)
-        elements.append(Spacer(1, 0.2*inch))
-        
-        return elements
-    
-    def _create_earnings_section(self, dtr: DTR) -> List:
-        """
-        Create Gross Earnings Snapshot section.
-        As per spec: Shows pre-deduction earnings from CURB.
-        """
-        elements = []
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>Gross Earnings Snapshot for Receipt Period</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Earnings table - matches business specification
-        earnings_data = [
-            ['Earnings Type', 'Amount'],
-            ['CURB', ''],
-            ['Credit Card Transactions', self._format_currency(dtr.gross_cc_earnings or Decimal('0.00'))],
-            ['Total', self._format_currency(dtr.total_gross_earnings or Decimal('0.00'))]
-        ]
-        
-        earnings_table = Table(earnings_data, colWidths=[4*inch, 2*inch])
-        earnings_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(earnings_table)
-        
-        return elements
-    
-    def _create_account_balance_section(self, dtr: DTR) -> List:
-        """
-        Create Account Balance for Receipt Period section.
-        Shows earnings vs deductions following payment hierarchy.
-        """
-        elements = []
-        
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>Account Balance for Receipt Period</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Credit card earnings (bold row)
-        cc_data = [
-            ['Credit Card Earnings', self._format_currency(dtr.gross_cc_earnings or Decimal('0.00'))]
-        ]
-        cc_table = Table(cc_data, colWidths=[4*inch, 2*inch])
-        cc_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(cc_table)
-        
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Charges table following payment hierarchy
-        # TAXES → EZPASS → LEASE → PVB → TLC → REPAIRS → LOANS → MISC
-        charges_data = [
-            ['Charge Type', 'Current Week', 'Prior Balance', 'Total'],
-            ['Taxes (MTA, TIF, Congestion, CRBT, Airport)', 
-             self._format_currency(dtr.mta_tif_fees or Decimal('0.00')), '-', 
-             self._format_currency(dtr.mta_tif_fees or Decimal('0.00'))],
-            ['EZPass', 
-             self._format_currency(dtr.ezpass_tolls or Decimal('0.00')), '-', 
-             self._format_currency(dtr.ezpass_tolls or Decimal('0.00'))],
-            ['Lease', 
-             self._format_currency(dtr.lease_amount or Decimal('0.00')), '-', 
-             self._format_currency(dtr.lease_amount or Decimal('0.00'))],
-            ['PVB Violations', 
-             self._format_currency(dtr.violation_tickets or Decimal('0.00')), '-', 
-             self._format_currency(dtr.violation_tickets or Decimal('0.00'))],
-            ['TLC Tickets', 
-             self._format_currency(dtr.tlc_tickets or Decimal('0.00')), '-', 
-             self._format_currency(dtr.tlc_tickets or Decimal('0.00'))],
-            ['Repairs', 
-             self._format_currency(dtr.repairs or Decimal('0.00')), '-', 
-             self._format_currency(dtr.repairs or Decimal('0.00'))],
-            ['Driver Loans', 
-             self._format_currency(dtr.driver_loans or Decimal('0.00')), '-', 
-             self._format_currency(dtr.driver_loans or Decimal('0.00'))],
-            ['Misc Charges', 
-             self._format_currency(dtr.misc_charges or Decimal('0.00')), '-', 
-             self._format_currency(dtr.misc_charges or Decimal('0.00'))],
-        ]
-        
-        charges_table = Table(charges_data, colWidths=[2.5*inch, 1.2*inch, 1.2*inch, 1.1*inch])
-        charges_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(charges_table)
-        
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Final calculations table
-        final_data = [
-            ['', 'Current Week', 'Prior Balance', 'Total'],
-            ['Subtotal', 
-             self._format_currency(dtr.subtotal_charges or Decimal('0.00')),
-             self._format_currency(dtr.prior_balance or Decimal('0.00')),
-             self._format_currency((dtr.subtotal_charges or Decimal('0.00')) + (dtr.prior_balance or Decimal('0.00')))],
-        ]
-        
-        # Add Net Earnings and Total Due rows
-        final_data.append(['Net Earnings', '', '', self._format_currency(dtr.net_earnings or Decimal('0.00'))])
-        final_data.append(['Total Due to Driver', '', '', self._format_currency(dtr.total_due_to_driver or Decimal('0.00'))])
-        
-        final_table = Table(final_data, colWidths=[2.5*inch, 1.2*inch, 1.2*inch, 1.1*inch])
-        final_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BACKGROUND', (0, 0), (0, 0), self.gray_bg),
-            ('BACKGROUND', (0, 1), (-1, 1), self.gray_bg),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(final_table)
-        
-        # Footnotes as per business specification
-        elements.append(Spacer(1, 0.1*inch))
-        footnote1 = Paragraph(
-            '<font size="7"><i>Note: Includes transactions where the driver is "unknown" - mapped by BATM</i></font>',
-            self.styles['DTRNormal']
-        )
-        footnote2 = Paragraph(
-            '<font size="7"><i>Note: Negative Charges (displayed in parentheses) indicate credits or adjustments (e.g., payments received) that reduce the driver\'s outstanding charges</i></font>',
-            self.styles['DTRNormal']
-        )
-        elements.append(footnote1)
-        elements.append(footnote2)
-        
-        return elements
-    
-    def _create_payment_summary(self, dtr: DTR) -> List:
-        """
-        Create Payment Summary section - PRODUCTION GRADE WITH NO PLACEHOLDERS.
-        All values are dynamically fetched from database relationships.
-        
-        Business Rules:
-        1. Payment Type: From driver preference (ACH or Check)
-        2. Batch Number: ACH [###] or CHK [###], or "-" if unpaid/zero amount
-        3. Account Number: Last 4 digits masked, or "-" if not applicable
-        4. Amount: Total Due to Driver, or $0.00 if zero/negative
-        """
-        elements = []
-        
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>Payment Summary</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # ===== PAYMENT TYPE =====
-        # Source: driver.pay_to_mode or dtr.payment_method
-        if dtr.payment_method:
-            payment_type = dtr.payment_method.value
-        elif dtr.driver and dtr.driver.pay_to_mode:
-            payment_type = dtr.driver.pay_to_mode
-        else:
-            payment_type = "ACH"  # Default as per business rules
-        
-        # ===== BATCH NUMBER =====
-        # Business Rule: If Total Due to Driver = 0, display "-"
-        # Otherwise show ACH [###] or CHK [###] if paid, or "-" if unpaid
-        if dtr.total_due_to_driver == 0:
-            batch_no = "-"
-        elif dtr.ach_batch_number:
-            # Payment processed via ACH batch
-            batch_no = f"ACH {dtr.ach_batch_number}"
-        elif dtr.check_number:
-            # Payment processed via Check
-            batch_no = f"CHK {dtr.check_number}"
-        else:
-            # Unpaid DTR - no batch assigned yet
-            batch_no = "-"
-        
-        # ===== ACCOUNT NUMBER =====
-        # Business Rule: Display only last 4 digits for compliance and privacy
-        # Source: dtr.account_number_masked (already masked) or driver.driver_bank_account
-        account_no = "-"
-        
-        if dtr.account_number_masked:
-            # DTR has masked account already stored
-            account_no = dtr.account_number_masked
-        elif dtr.driver and dtr.driver.driver_bank_account:
-            # Get bank account from driver relationship
-            bank_account = dtr.driver.driver_bank_account
-            if bank_account.bank_account_number:
-                # Mask account number on the fly - show only last 4 digits
-                account_num_str = str(bank_account.bank_account_number)
-                if len(account_num_str) >= 4:
-                    account_no = "x" * (len(account_num_str) - 4) + account_num_str[-4:]
-                else:
-                    # Account number too short, mask everything
-                    account_no = "x" * len(account_num_str)
-        
-        # For Check payments, account number is not applicable
-        if payment_type == "Check" or payment_type == "CHECK":
-            account_no = "-"
-        
-        # ===== AMOUNT =====
-        # Business Rule: Total Due to Driver if positive, $0.00 if zero/negative
-        if dtr.total_due_to_driver and dtr.total_due_to_driver > 0:
-            amount = self._format_currency(dtr.total_due_to_driver)
-        else:
-            amount = "$0.00"
-        
-        # Build payment summary table
-        payment_data = [
-            ['Payment Type', 'Batch no.', 'Account no.', 'Amount'],
-            [payment_type, batch_no, account_no, amount]
-        ]
-        
-        payment_table = Table(payment_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
-        payment_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
-            ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(payment_table)
-        
-        return elements
-    
-    def _create_alerts_section(self, dtr: DTR) -> List:
-        """
-        Create Alerts section for vehicle and driver license expiry dates.
-        """
-        elements = []
-        
-        if not dtr.alerts:
-            return elements
-        
-        elements.append(PageBreak())
-        
-        # Create header for page 2
-        header_elements = self._create_header(dtr)
-        elements.extend(header_elements)
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>Alerts</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Vehicle alerts
-        vehicle_alerts = dtr.alerts.get('vehicle', [])
-        if vehicle_alerts:
-            vehicle_data = [['Vehicle', '']]
-            for alert in vehicle_alerts:
-                vehicle_data.append([
-                    alert.get('type', ''), 
-                    alert.get('expiry_date', '')
-                ])
-            
-            vehicle_table = Table(vehicle_data, colWidths=[3*inch, 3*inch])
-            vehicle_table.setStyle(TableStyle([
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]))
-            elements.append(vehicle_table)
-            elements.append(Spacer(1, 0.2*inch))
-        
-        # Driver alerts
-        driver_alerts = dtr.alerts.get('driver', [])
-        if driver_alerts:
-            driver_data = [['Driver', '(TLC License 1)', '(TLC License 2)']]
-            
-            # Extract license types
-            tlc1 = ""
-            tlc2 = ""
-            dmv = ""
-            
-            for alert in driver_alerts:
-                license_type = alert.get('license_type', '')
-                if 'TLC License 1' in license_type:
-                    tlc1 = alert.get('expiry_date', '')
-                elif 'TLC License 2' in license_type:
-                    tlc2 = alert.get('expiry_date', '')
-                elif 'DMV License' in license_type:
-                    dmv = alert.get('expiry_date', '')
-            
-            driver_data.append(['TLC License Expiry', tlc1, tlc2])
-            driver_data.append(['DMV License Expiry', dmv or "-", ''])
-            
-            driver_table = Table(driver_data, colWidths=[2*inch, 2*inch, 2*inch])
-            driver_table.setStyle(TableStyle([
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]))
-            elements.append(driver_table)
-        
-        return elements
-    
-    def _create_taxes_section(self, dtr: DTR) -> List:
-        """
-        Create Taxes and Charges detail section.
-        Shows breakdown by charge type with trip counts.
-        """
-        elements = []
-        
-        if not dtr.tax_breakdown:
-            return elements
-        
-        elements.append(PageBreak())
-        
-        # Create header
-        header_elements = self._create_header(dtr)
-        elements.extend(header_elements)
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>Taxes and Charges</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # Tax breakdown table
-        tax_data = [['Charge Type', 'Amount', 'Total Trips', 'Cash Trips', 'CC Trips']]
-        
-        charges = dtr.tax_breakdown.get('charges', [])
-        for charge in charges:
-            tax_data.append([
-                charge.get('charge_type', ''),
-                self._format_currency(Decimal(str(charge.get('amount', 0)))),
-                str(charge.get('total_trips', 0)),
-                str(charge.get('cash_trips', 0)),
-                str(charge.get('cc_trips', 0))
-            ])
-        
-        # Add total row
-        tax_data.append([
-            'Total',
-            self._format_currency(Decimal(str(dtr.tax_breakdown.get('total', 0)))),
-            str(dtr.tax_breakdown.get('total_all_trips', 0)),
-            str(dtr.tax_breakdown.get('total_cash_trips', 0)),
-            str(dtr.tax_breakdown.get('total_cc_trips', 0))
-        ])
-        
-        tax_table = Table(tax_data, colWidths=[2.5*inch, 1*inch, 0.8*inch, 0.8*inch, 0.9*inch])
-        tax_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(tax_table)
-        
-        return elements
-    
-    def _create_ezpass_section(self, dtr: DTR) -> List:
-        """
-        Create EZPass Tolls detail section.
-        Shows transaction-level toll details.
-        """
-        elements = []
-        
-        if not dtr.ezpass_detail:
-            return elements
-        
-        elements.append(PageBreak())
-        
-        # Create header
-        header_elements = self._create_header(dtr)
-        elements.extend(header_elements)
-        
-        # Section header
-        header = Paragraph(
-            '<font color="red"><b>EZPass Tolls</b></font>',
-            self.styles['SectionHeader']
-        )
-        elements.append(header)
-        elements.append(Spacer(1, 0.1*inch))
-        
-        # EZPass transaction table
-        ezpass_data = [[
-            'Date', 'TLC Lic', 'Plate', 'Agency', 'Entry', 
-            'Exit', 'Toll', 'Prior Bal', 'Payment', 'Balance'
-        ]]
-        
-        total_toll = Decimal('0.00')
-        ezpass_items = dtr.ezpass_detail if isinstance(dtr.ezpass_detail, list) else []
-        
-        for item in ezpass_items:
-            toll_amount = Decimal(str(item.get('toll', 0)))
-            total_toll += toll_amount
-            
-            ezpass_data.append([
-                item.get('transaction_date', '-'),
-                item.get('tlc_license', '-'),
-                item.get('plate_number', '-'),
-                item.get('agency', '-'),
-                item.get('entry_lane', '-'),
-                item.get('exit_lane', '-'),
-                self._format_currency(toll_amount),
-                self._format_negative_currency(Decimal(str(item.get('prior_balance', 0)))),
-                self._format_currency(Decimal(str(item.get('payment', 0)))),
-                self._format_negative_currency(Decimal(str(item.get('balance', 0))))
-            ])
-        
-        # Add total row
-        ezpass_data.append([
-            'Total', '-', '-', '-', '-', '-',
-            self._format_currency(total_toll),
-            '-', '-', '-'
-        ])
-        
-        ezpass_table = Table(ezpass_data, colWidths=[0.8*inch]*10)
-        ezpass_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 3),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        elements.append(ezpass_table)
-        
-        return elements
-    
-    def _build_trip_sub_table(self, trips: List[CurbTrip]) -> Table:
-        """Helper to build and style one of the three trip log columns."""
-        if not trips:
-            # Return an empty paragraph to maintain layout spacing
-            return Paragraph("", self.styles['Normal'])
-
-        data = [['Date', 'TLC', 'Trip #', 'Amount']]
-        for trip in trips:
-            # Safely get TLC from related driver or fall back to curb_driver_id
-            tlc_license = "N/A"
-            if trip.driver and trip.driver.tlc_license:
-                tlc_license = trip.driver.tlc_license.tlc_license_number
-            elif trip.curb_driver_id:
-                tlc_license = trip.curb_driver_id
-
-            # Extract just the numeric part of the trip ID for display
-            trip_number = trip.curb_trip_id.split('-')[-1]
-
-            data.append([
-                self._format_datetime(trip.start_time),
-                tlc_license,
-                trip_number,
-                Paragraph(self._format_currency(trip.total_amount), self.styles['RightAlign']),
-            ])
-        
-        table = Table(data, colWidths=[0.8*inch, 0.8*inch, 0.5*inch, 0.7*inch])
-        table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('BACKGROUND', (0, 0), (-1, 0), self.gray_bg),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 2),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ]))
-        return table
-    
-    def _create_trip_log_section(self, dtr: DTR) -> List:
-        """
-        Creates the Trip Log section with a three-column layout.
-        Fetches the relevant credit card trips from the CurbTrip table.
-        """
-        db = next(get_db())
-        elements = []
-        
-        # Query for all credit card trips associated with this DTR's context
-        credit_card_trips = (
-            db.query(CurbTrip)
-            .filter(
-                CurbTrip.driver_id == dtr.driver_id,
-                CurbTrip.lease_id == dtr.lease_id,
-                CurbTrip.payment_type == PaymentType.CREDIT_CARD,
-                CurbTrip.start_time >= dtr.period_start_date,
-                CurbTrip.end_time <= (dtr.period_end_date + timedelta(days=1))
-            )
-            .order_by(CurbTrip.start_time.asc())
-            .all()
-        )
-
-        if not credit_card_trips:
-            return elements # Return empty if no trips to show
-
-        elements.append(PageBreak())
-        elements.extend(self._create_header(dtr))
-        elements.append(Paragraph("DTR Details - Trip Log (Credit Card Trips Only)", self.styles['SectionHeader']))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        # --- Logic to split trips into three columns ---
-        total_trips = len(credit_card_trips)
-        rows_per_column = math.ceil(total_trips / 3.0)
-
-        col1_trips = credit_card_trips[0:rows_per_column]
-        col2_trips = credit_card_trips[rows_per_column : 2 * rows_per_column]
-        col3_trips = credit_card_trips[2 * rows_per_column :]
-
-        # --- Build the three nested tables ---
-        table1 = self._build_trip_sub_table(col1_trips)
-        table2 = self._build_trip_sub_table(col2_trips)
-        table3 = self._build_trip_sub_table(col3_trips)
-
-        # --- Assemble the main three-column table ---
-        main_table = Table([[table1, table2, table3]], colWidths=[2.5*inch, 2.5*inch, 2.5*inch])
-        main_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 0),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5), # Add some space between columns
-        ]))
-
-        elements.append(main_table)
-        
-        # Add the required footnote
-        elements.append(Spacer(1, 0.1*inch))
-        footnote = Paragraph(
-            '<font size="7"><i>Note: This table lists only credit card transactions during the Receipt Period. Cash transactions are not captured in the above table.</i></font>',
-            self.styles['DTRNormal']
-        )
-        elements.append(footnote)
-
-        return elements
+    def _format_date_long(self, date_obj) -> str:
+        """Format date as August-10-2025"""
+        if not date_obj:
+            return ""
+        
+        if isinstance(date_obj, str):
+            try:
+                date_obj = datetime.fromisoformat(date_obj).date()
+            except:
+                return date_obj
+        
+        if isinstance(date_obj, datetime):
+            date_obj = date_obj.date()
+        
+        return date_obj.strftime("%B-%d-%Y")
     
     def generate_pdf(self, dtr: DTR) -> bytes:
         """
-        Generate complete PDF for DTR.
-        Returns PDF as bytes for download or storage.
+        Generate PDF for a DTR
         
         Args:
             dtr: DTR model instance with all relationships loaded
@@ -823,48 +151,454 @@ class DTRPDFGenerator:
         try:
             logger.info(f"Generating PDF for DTR: {dtr.dtr_number}")
             
-            # Create PDF in memory
-            buffer = BytesIO()
-            doc = SimpleDocTemplate(
-                buffer,
-                pagesize=letter,
-                rightMargin=0.5*inch,
-                leftMargin=0.5*inch,
-                topMargin=0.5*inch,
-                bottomMargin=0.5*inch
+            # Prepare template data
+            template_data = self._prepare_template_data(dtr)
+            
+            # Load and render template
+            template = self.env.get_template("dtr_template.html")
+            html_content = template.render(**template_data)
+            
+            # Convert HTML to PDF using WeasyPrint
+            pdf_file = BytesIO()
+            HTML(string=html_content).write_pdf(
+                pdf_file,
+                stylesheets=[CSS(string=self._get_print_css())]
+            )
+            pdf_bytes = pdf_file.getvalue()
+            
+            logger.info(
+                f"Successfully generated PDF for DTR: {dtr.dtr_number} "
+                f"({len(pdf_bytes)} bytes)"
             )
             
-            # Build PDF content in order
-            story = []
-            
-            # Page 1: Header, Earnings, Account Balance, Payment Summary
-            story.extend(self._create_header(dtr))
-            story.extend(self._create_earnings_section(dtr))
-            story.extend(self._create_account_balance_section(dtr))
-            story.extend(self._create_payment_summary(dtr))
-
-            # Trip Log Section (if applicable)
-            story.extend(self._create_trip_log_section(dtr))
-            
-            # Page 2+: Alerts, Taxes, EZPass details
-            story.extend(self._create_alerts_section(dtr))
-            story.extend(self._create_taxes_section(dtr))
-            story.extend(self._create_ezpass_section(dtr))
-            
-            # Build PDF
-            doc.build(story)
-            
-            # Get PDF bytes
-            pdf_bytes = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"Successfully generated PDF for DTR: {dtr.dtr_number} ({len(pdf_bytes)} bytes)")
             return pdf_bytes
             
         except Exception as e:
-            logger.error(f"Error generating PDF for DTR {dtr.dtr_number}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error generating PDF for DTR {dtr.dtr_number}: {str(e)}",
+                exc_info=True
+            )
             raise DTRExportError(f"Failed to generate PDF: {str(e)}") from e
+    
+    def _get_print_css(self) -> str:
+        """Get additional CSS for print optimization"""
+        return """
+        @page {
+            size: Letter;
+            margin: 0.5in;
+        }
+        
+        body {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        """
+    
+    def _prepare_template_data(self, dtr: DTR) -> Dict[str, Any]:
+        """
+        Prepare comprehensive data dictionary for template
+        
+        Args:
+            dtr: DTR model instance
+            
+        Returns:
+            Dictionary with all template variables
+        """
+        try:
+            # Basic DTR Information
+            data = {
+                "dtr_number": dtr.dtr_number,
+                "receipt_number": dtr.receipt_number,
+                "receipt_date": self._format_date(dtr.generation_date),
+                "period_start": self._format_date(dtr.period_start_date),
+                "period_end": self._format_date(dtr.period_end_date),
+            }
+            
+            # Lease and Entity Information
+            data["lease_id"] = dtr.lease.lease_id if dtr.lease else "N/A"
+            data["medallion_number"] = (
+                dtr.medallion.medallion_number if dtr.medallion else "N/A"
+            )
+            data["driver_name"] = self._get_driver_name(dtr.driver)
+            data["tlc_license"] = (
+                dtr.driver.tlc_license.tlc_license_number 
+                if dtr.driver and dtr.driver.tlc_license 
+                else "N/A"
+            )
+            
+            # Financial Summary (use formatted values)
+            data["gross_cc_earnings"] = self._format_currency(dtr.gross_cc_earnings)
+            data["gross_cash_earnings"] = self._format_currency(dtr.gross_cash_earnings)
+            data["total_gross_earnings"] = self._format_currency(dtr.total_gross_earnings)
+            
+            # Deductions
+            data["lease_amount"] = self._format_currency(dtr.lease_amount)
+            data["mta_tif_fees"] = self._format_currency(dtr.mta_tif_fees)
+            data["ezpass_tolls"] = self._format_currency(dtr.ezpass_tolls)
+            data["violation_tickets"] = self._format_currency(dtr.violation_tickets)
+            data["tlc_tickets"] = self._format_currency(dtr.tlc_tickets)
+            data["repairs"] = self._format_currency(dtr.repairs)
+            data["driver_loans"] = self._format_currency(dtr.driver_loans)
+            data["misc_charges"] = self._format_currency(dtr.misc_charges)
+            
+            # Calculated Totals
+            data["subtotal_deductions"] = self._format_currency(dtr.subtotal_deductions)
+            data["prior_balance"] = self._format_currency(dtr.prior_balance)
+            data["net_earnings"] = self._format_currency(dtr.net_earnings)
+            data["total_due_to_driver"] = self._format_currency(dtr.total_due_to_driver)
+            
+            # Payment Information
+            data["payment_method"] = self._get_payment_method_display(dtr.payment_method)
+            data["ach_batch_number"] = dtr.ach_batch_number or "–"
+            data["account_number_masked"] = dtr.account_number_masked or "–"
+            
+            # Detailed Breakdowns
+            data["tax_breakdown"] = self._format_tax_breakdown(dtr.tax_breakdown)
+            data["ezpass_detail"] = self._format_ezpass_detail(dtr.ezpass_detail)
+            data["pvb_detail"] = self._format_pvb_detail(dtr.pvb_detail)
+            data["tlc_detail"] = self._format_tlc_detail(dtr.tlc_detail)
+            data["repair_detail"] = self._format_repair_detail(dtr.repair_detail)
+            data["loan_detail"] = self._format_loan_detail(dtr.loan_detail)
+            data["trip_log"] = self._format_trip_log(dtr.trip_log)
+            data["misc_detail"] = self._format_misc_detail(dtr)
+            
+            # Alerts
+            data["alerts"] = self._format_alerts(dtr.alerts)
+            
+            # Additional Drivers Detail
+            data["additional_drivers_detail"] = self._format_additional_drivers(
+                dtr.additional_drivers_detail
+            )
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"Error preparing template data: {str(e)}", exc_info=True)
+            raise DTRExportError(f"Failed to prepare template data: {str(e)}") from e
+    
+    def _get_driver_name(self, driver) -> str:
+        """Get formatted driver name"""
+        if not driver:
+            return "N/A"
+        
+        name_parts = []
+        if driver.first_name:
+            name_parts.append(driver.first_name)
+        if driver.last_name:
+            name_parts.append(driver.last_name)
+        
+        return " ".join(name_parts).upper() if name_parts else "N/A"
+    
+    def _get_payment_method_display(self, payment_method) -> str:
+        """Get display name for payment method"""
+        if not payment_method:
+            return "Direct Deposit"
+        
+        method_map = {
+            "ACH": "Direct Deposit",
+            "DIRECT_DEPOSIT": "Direct Deposit",
+            "CHECK": "Check",
+            "CASH": "Cash"
+        }
+        
+        return method_map.get(str(payment_method).upper(), "Direct Deposit")
+    
+    def _format_tax_breakdown(self, tax_breakdown: Optional[Dict]) -> List[Dict]:
+        """Format tax breakdown for template"""
+        if not tax_breakdown:
+            return []
+        
+        # Handle both dict and list formats
+        if isinstance(tax_breakdown, list):
+            return [
+                {
+                    "charge_type": tax.get("charge_type", ""),
+                    "amount": self._format_currency(tax.get("amount", 0)),
+                    "total_trips": tax.get("total_trips", 0),
+                    "cash_trips": tax.get("cash_trips", 0),
+                    "cc_trips": tax.get("cc_trips", 0)
+                }
+                for tax in tax_breakdown
+            ]
+        
+        return []
+    
+    def _format_ezpass_detail(self, ezpass_detail: Optional[Dict]) -> List[Dict]:
+        """Format EZPass detail for template"""
+        if not ezpass_detail:
+            return []
+        
+        transactions = []
+        if isinstance(ezpass_detail, dict) and "transactions" in ezpass_detail:
+            transactions = ezpass_detail["transactions"]
+        elif isinstance(ezpass_detail, list):
+            transactions = ezpass_detail
+        
+        return [
+            {
+                "transaction_date": self._format_datetime(t.get("transaction_date", "")),
+                "tlc_license": t.get("tlc_license", ""),
+                "plate_no": t.get("plate_no", ""),
+                "agency": t.get("agency", ""),
+                "entry": t.get("entry", "–"),
+                "exit_lane": t.get("exit_lane", ""),
+                "toll": self._format_currency(t.get("toll", 0))
+            }
+            for t in transactions
+        ]
+    
+    def _format_pvb_detail(self, pvb_detail: Optional[Dict]) -> List[Dict]:
+        """Format PVB detail for template"""
+        if not pvb_detail:
+            return []
+        
+        violations = []
+        if isinstance(pvb_detail, dict) and "violations" in pvb_detail:
+            violations = pvb_detail["violations"]
+        elif isinstance(pvb_detail, list):
+            violations = pvb_detail
+        
+        return [
+            {
+                "date_time": self._format_datetime(v.get("date_time", "")),
+                "ticket_no": v.get("ticket_no", ""),
+                "tlc_license": v.get("tlc_license", ""),
+                "note": v.get("note", ""),
+                "fine": self._format_currency(v.get("fine", 0)),
+                "charge": self._format_currency(v.get("charge", 0)),
+                "total": self._format_currency(v.get("total", 0))
+            }
+            for v in violations
+        ]
+    
+    def _format_tlc_detail(self, tlc_detail: Optional[Dict]) -> List[Dict]:
+        """Format TLC detail for template"""
+        if not tlc_detail:
+            return []
+        
+        tickets = []
+        if isinstance(tlc_detail, dict) and "tickets" in tlc_detail:
+            tickets = tlc_detail["tickets"]
+        elif isinstance(tlc_detail, list):
+            tickets = tlc_detail
+        
+        return [
+            {
+                "date_time": self._format_datetime(t.get("date_time", "")),
+                "ticket_no": t.get("ticket_no", ""),
+                "tlc_license": t.get("tlc_license", ""),
+                "medallion": t.get("medallion", ""),
+                "note": t.get("note", ""),
+                "fine": self._format_currency(t.get("fine", 0)),
+                "payment": self._format_currency(t.get("payment", 0))
+            }
+            for t in tickets
+        ]
+    
+    def _format_repair_detail(self, repair_detail: Optional[Dict]) -> Dict:
+        """Format repair detail for template"""
+        if not repair_detail:
+            return {"invoices": [], "installments": []}
+        
+        invoices = repair_detail.get("invoices", [])
+        installments = repair_detail.get("installments", [])
+        
+        return {
+            "invoices": [
+                {
+                    "repair_id": inv.get("repair_id", ""),
+                    "invoice_no": inv.get("invoice_no", ""),
+                    "invoice_date": self._format_date(inv.get("invoice_date", "")),
+                    "workshop": inv.get("workshop", ""),
+                    "invoice_amount": self._format_currency(inv.get("invoice_amount", 0)),
+                    "amount_paid": self._format_currency(inv.get("amount_paid", 0)),
+                    "balance": self._format_currency(inv.get("balance", 0))
+                }
+                for inv in invoices
+            ],
+            "installments": [
+                {
+                    "installment_id": inst.get("installment_id", ""),
+                    "due_date": self._format_date(inst.get("due_date", "")),
+                    "amount_due": self._format_currency(inst.get("amount_due", 0)),
+                    "amount_payable": self._format_currency(inst.get("amount_payable", 0)),
+                    "payment": self._format_currency(inst.get("payment", 0)),
+                    "balance": self._format_currency(inst.get("balance", 0))
+                }
+                for inst in installments
+            ]
+        }
+    
+    def _format_loan_detail(self, loan_detail: Optional[Dict]) -> Dict:
+        """Format loan detail for template"""
+        if not loan_detail:
+            return {"loans": [], "installments": []}
+        
+        loans = loan_detail.get("loans", [])
+        installments = loan_detail.get("installments", [])
+        
+        return {
+            "loans": [
+                {
+                    "loan_id": loan.get("loan_id", ""),
+                    "loan_date": self._format_date(loan.get("loan_date", "")),
+                    "loan_amount": self._format_currency(loan.get("loan_amount", 0)),
+                    "interest_rate": f"{loan.get('interest_rate', 0):.2f}",
+                    "total_due": self._format_currency(loan.get("total_due", 0)),
+                    "amount_paid": self._format_currency(loan.get("amount_paid", 0)),
+                    "balance": self._format_currency(loan.get("balance", 0))
+                }
+                for loan in loans
+            ],
+            "installments": [
+                {
+                    "installment_id": inst.get("installment_id", ""),
+                    "due_date": self._format_date(inst.get("due_date", "")),
+                    "principal": self._format_currency(inst.get("principal", 0)),
+                    "interest": self._format_currency(inst.get("interest", 0)),
+                    "total_due": self._format_currency(inst.get("total_due", 0)),
+                    "total_payable": self._format_currency(inst.get("total_payable", 0)),
+                    "payment": self._format_currency(inst.get("payment", 0)),
+                    "balance": self._format_currency(inst.get("balance", 0))
+                }
+                for inst in installments
+            ]
+        }
+    
+    def _format_trip_log(self, trip_log: Optional[Dict]) -> Dict:
+        """Format trip log for template"""
+        if not trip_log:
+            return {"total_trips": 0, "trips": []}
+        
+        trips = trip_log.get("trips", [])
+        
+        return {
+            "total_trips": len(trips),
+            "trips": [
+                {
+                    "trip_date": self._format_date(trip.get("trip_date", "")),
+                    "tlc_license": trip.get("tlc_license", ""),
+                    "trip_number": trip.get("trip_number", ""),
+                    "amount": self._format_currency(trip.get("amount", 0))
+                }
+                for trip in trips
+            ]
+        }
+    
+    def _format_misc_detail(self, dtr: DTR) -> List[Dict]:
+        """Format miscellaneous charges for template"""
+        # This would come from a dedicated misc_charges field or table
+        # For now, return empty list if no charges
+        return []
+    
+    def _format_alerts(self, alerts: Optional[Dict]) -> Dict:
+        """Format alerts for template"""
+        if not alerts:
+            return {"vehicle": [], "drivers": []}
+        
+        vehicle_alerts = alerts.get("vehicle", [])
+        driver_alerts = alerts.get("drivers", [])
+        
+        return {
+            "vehicle": [
+                {
+                    "type": alert.get("type", ""),
+                    "expiry_date": self._format_date_long(alert.get("expiry_date", ""))
+                }
+                for alert in vehicle_alerts
+            ],
+            "drivers": [
+                {
+                    "driver_role": driver.get("driver_role", "Driver"),
+                    "tlc_expiry": self._format_date_long(
+                        next(
+                            (a.get("expiry_date") for a in driver.get("alerts", []) 
+                             if a.get("type") == "TLC License"),
+                            ""
+                        )
+                    ),
+                    "dmv_expiry": self._format_date_long(
+                        next(
+                            (a.get("expiry_date") for a in driver.get("alerts", []) 
+                             if a.get("type") == "DMV License"),
+                            ""
+                        )
+                    ),
+                    "has_second_tlc": False,
+                    "tlc2_expiry": ""
+                }
+                for driver in driver_alerts
+            ]
+        }
+    
+    def _format_additional_drivers(
+        self, additional_drivers_detail: Optional[List[Dict]]
+    ) -> List[Dict]:
+        """Format additional drivers detail for template"""
+        if not additional_drivers_detail:
+            return []
+        
+        formatted_drivers = []
+        
+        for driver in additional_drivers_detail:
+            formatted_driver = {
+                "driver_id": driver.get("driver_id", ""),
+                "driver_name": driver.get("driver_name", ""),
+                "tlc_license": driver.get("tlc_license", ""),
+                "cc_earnings": self._format_currency(driver.get("cc_earnings", 0)),
+                "charges": {
+                    "mta_tif_fees": self._format_currency(
+                        driver.get("charges", {}).get("mta_tif_fees", 0)
+                    ),
+                    "ezpass_tolls": self._format_currency(
+                        driver.get("charges", {}).get("ezpass_tolls", 0)
+                    ),
+                    "violation_tickets": self._format_currency(
+                        driver.get("charges", {}).get("violation_tickets", 0)
+                    )
+                },
+                "subtotal": self._format_currency(driver.get("subtotal", 0)),
+                "net_earnings": self._format_currency(driver.get("net_earnings", 0)),
+                "tax_breakdown": self._format_tax_breakdown(driver.get("tax_breakdown")),
+                "ezpass_detail": self._format_ezpass_detail(driver.get("ezpass_detail")),
+                "pvb_detail": self._format_pvb_detail(driver.get("pvb_detail")),
+                "trip_log": driver.get("trip_log", []),
+                "alerts": [
+                    {
+                        "type": alert.get("type", ""),
+                        "expiry_date": self._format_date_long(alert.get("expiry_date", ""))
+                    }
+                    for alert in driver.get("alerts", [])
+                ]
+            }
+            
+            formatted_drivers.append(formatted_driver)
+        
+        return formatted_drivers
+    
+    def save_pdf_to_file(self, dtr: DTR, output_path: str) -> None:
+        """
+        Generate PDF and save to file
+        
+        Args:
+            dtr: DTR model instance
+            output_path: Path where PDF should be saved
+        """
+        try:
+            pdf_bytes = self.generate_pdf(dtr)
+            
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(output_file, 'wb') as f:
+                f.write(pdf_bytes)
+            
+            logger.info(f"PDF saved to: {output_path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving PDF to file: {str(e)}", exc_info=True)
+            raise DTRExportError(f"Failed to save PDF: {str(e)}") from e
 
 
 # Export the generator class
-__all__ = ['DTRPDFGenerator']
+__all__ = ["DTRPDFGenerator"]

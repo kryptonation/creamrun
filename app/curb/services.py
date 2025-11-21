@@ -203,6 +203,9 @@ class CurbService:
                     # Try to get combined datetime first, then fall back to date+time combination
                     start_datetime_str = get_value(trip_node, "START_DATE")
                     end_datetime_str = get_value(trip_node, "END_DATE")
+
+                    # Try to get the transaction date if available
+                    transaction_date_str = get_value(trip_node, "DATETIME") or None
                     
                     # If no combined datetime, construct from separate date and time fields
                     if not start_datetime_str and trip_date and trip_time_start:
@@ -242,6 +245,11 @@ class CurbService:
 
                     start_time = parse_flexible_datetime(start_datetime_str)
                     end_time = parse_flexible_datetime(end_datetime_str)
+                    if transaction_date_str:
+                        logger.info("Parsing transaction date **** ", transaction_date_str=transaction_date_str)
+                        transaction_date = parse_flexible_datetime(transaction_date_str)
+                    else:
+                        transaction_date = end_time
 
                     # Extract CABNUMBER with flexible parsing (attributes or nested elements)
                     cab_number = get_value(trip_node, "CABNUMBER")
@@ -282,6 +290,7 @@ class CurbService:
                         "end_lat": Decimal(get_value(trip_node, "GPS_END_LA") or get_value(trip_node, "ToLa") or None),
                         "num_service": int(get_value(trip_node, "NUM_SERVICE") or None),
                         "payment_type": payment_type,
+                        "transaction_date": transaction_date,
                     }
                     logger.info("Parsed trip data: %s", trip_data)
                     trips.append(trip_data)

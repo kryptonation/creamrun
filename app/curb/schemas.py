@@ -45,9 +45,14 @@ class CurbTripResponse(BaseModel):
     end_time: Optional[datetime] = None
     status: Optional[str] = None
 
+    transaction_date: Optional[datetime] = None
+
     # GPS fields
-    start_location_gps: Optional[str] = None  # Will be constructed in the router
-    end_location_gps: Optional[str] = None  # Will be constructed in the router
+    start_long: Optional[Decimal] = None
+    start_lat: Optional[Decimal] = None
+    end_long: Optional[Decimal] = None
+    end_lat: Optional[Decimal] = None
+    num_service: Optional[int] = None
 
     @field_serializer("start_datetime", when_used="json")
     def serialize_start_datetime(self, value: Optional[datetime]) -> Optional[str]:
@@ -100,6 +105,7 @@ class CurbTripResponse(BaseModel):
         return None
 
     class Config:
+        """Pydantic configuration for aliasing and population by name."""
         from_attributes = True
         populate_by_name = True
 

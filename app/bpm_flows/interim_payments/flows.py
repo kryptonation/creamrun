@@ -43,18 +43,16 @@ def fetch_driver_and_lease_details(db: Session, case_no: str, case_params: Optio
     """
     try:
         logger.info("Fetching driver and lease details", case_no=case_no)
-
         # Check if case entity exists
         case_entity = bpm_service.get_case_entity(db, case_no=case_no)
         selected_interim_payment_id = None
         if case_entity:
-            selected_interim_payment_id = str(case_entity.get("identifier_value"))
+            selected_interim_payment_id = str(case_entity.identifier_value)
             logger.info(
                 "Found existing case entity",
                 case_no=case_no,
                 interim_payment_id=selected_interim_payment_id
             )
-
         # If no case params provided return emtpy response
         if not case_params or 'tlc_license_no' not in case_params:
             return {
@@ -133,6 +131,7 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
     """
     try:
         logger.info("Creating interim payment entry for case", case_no=case_no)
+        # import pdb; pdb.set_trace()
         case_entity = bpm_service.get_case_entity(db, case_no=case_no)
 
         # Validate required fields

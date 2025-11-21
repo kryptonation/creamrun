@@ -16,8 +16,7 @@ from app.curb.services import CurbService
 from app.curb.stubs import create_stub_curb_trip_response
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter.excel_exporter import ExcelExporter
-from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.exporter_utils import ExporterFactory
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -263,17 +262,17 @@ def export_trips(
         export_data = [CurbTripResponse.model_validate(trip).model_dump() for trip in trips]
         
         filename = f"trips_export_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
-        file_content: BytesIO
-        media_type: str
-
-        if export_format == "excel":
-            exporter = ExcelExporter(export_data)
-            file_content = exporter.export()
-            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        else: # PDF
-            exporter = PDFExporter(export_data)
-            file_content = exporter.export()
-            media_type = "application/pdf"
+        
+        # Use ExporterFactory to get the appropriate exporter
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
+        
+        # Set media type based on export format
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
         
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)

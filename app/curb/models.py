@@ -162,6 +162,10 @@ class CurbTrip(Base, AuditMixin):
         nullable=True
     )
 
+    transaction_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, comment="Date of the transaction."
+    )
+
     # --- Relationships ---
     driver: Mapped[Optional["Driver"]] = relationship()
     lease: Mapped[Optional["Lease"]] = relationship()

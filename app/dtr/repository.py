@@ -4,7 +4,7 @@ from datetime import date
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_, func
 
 from app.dtr.models import DTR, DTRStatus
 
@@ -229,6 +229,14 @@ class DTRRepository:
         period_start_to: Optional[date] = None,
         dtr_number: Optional[str] = None,
         receipt_number: Optional[str] = None,
+        driver_name: Optional[str] = None,
+        tlc_license: Optional[str] = None,
+        medallion_no: Optional[str] = None,
+        plate_number: Optional[str] = None,
+        ach_batch_number: Optional[str] = None,
+        check_number: Optional[str] = None,
+        sort_by: str = "period_start_date",
+        sort_order: str = "desc",
         page: int = 1,
         page_size: int = 50
     ) -> tuple[List[DTR], int]:
@@ -237,6 +245,10 @@ class DTRRepository:
         
         Returns: (list of DTRs, total count)
         """
+        from app.drivers.models import Driver, TLCLicense
+        from app.vehicles.models import Vehicle, VehicleRegistration
+        from app.medallions.models import Medallion
+        
         query = self.db.query(DTR)
         
         if lease_id:
@@ -266,12 +278,53 @@ class DTRRepository:
         if receipt_number:
             query = query.filter(DTR.receipt_number.ilike(f"%{receipt_number}%"))
         
+        # Driver name filter
+        if driver_name:
+            query = query.join(Driver, DTR.driver_id == Driver.id).filter(
+                or_(
+                    Driver.first_name.ilike(f"%{driver_name}%"),
+                    Driver.last_name.ilike(f"%{driver_name}%"),
+                    func.concat(Driver.first_name, ' ', Driver.last_name).ilike(f"%{driver_name}%")
+                )
+            )
+        
+        # TLC license filter
+        if tlc_license:
+            query = query.join(Driver, DTR.driver_id == Driver.id)\
+                         .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)\
+                         .filter(TLCLicense.tlc_license_number.ilike(f"%{tlc_license}%"))
+        
+        # Medallion number filter
+        if medallion_no:
+            query = query.join(Medallion, DTR.medallion_id == Medallion.id)\
+                         .filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+        
+        # Plate number filter
+        if plate_number:
+            query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
+                         .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)\
+                         .filter(VehicleRegistration.plate_number.ilike(f"%{plate_number}%"))
+        
+        # ACH batch number filter
+        if ach_batch_number:
+            query = query.filter(DTR.ach_batch_number.ilike(f"%{ach_batch_number}%"))
+        
+        # Check number filter
+        if check_number:
+            query = query.filter(DTR.check_number.ilike(f"%{check_number}%"))
+        
         # Get total count
         total = query.count()
         
+        # Apply sorting
+        sort_column = getattr(DTR, sort_by, DTR.period_start_date)
+        if sort_order.lower() == "asc":
+            query = query.order_by(sort_column.asc())
+        else:
+            query = query.order_by(sort_column.desc())
+        
         # Apply pagination
-        dtrs = query.order_by(DTR.period_start_date.desc())\
-                   .offset((page - 1) * page_size)\
+        dtrs = query.offset((page - 1) * page_size)\
                    .limit(page_size)\
                    .all()
         

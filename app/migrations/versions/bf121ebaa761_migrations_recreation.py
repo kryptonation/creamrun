@@ -1,8 +1,8 @@
 """migrations recreation
 
-Revision ID: 55331e789407
+Revision ID: bf121ebaa761
 Revises: 
-Create Date: 2025-11-18 17:12:11.703475
+Create Date: 2025-11-21 10:30:12.854439
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '55331e789407'
+revision: str = 'bf121ebaa761'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -1307,6 +1307,7 @@ def upgrade() -> None:
     sa.Column('end_long', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending longitude of the trip.'),
     sa.Column('end_lat', sa.Numeric(precision=10, scale=7), nullable=True, comment='Ending latitude of the trip.'),
     sa.Column('num_service', sa.Integer(), nullable=True, comment='Number of services during the trip.'),
+    sa.Column('transaction_date', sa.DateTime(), nullable=True, comment='Date of the transaction.'),
     sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
     sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
     sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
@@ -1362,64 +1363,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_driver_loans_loan_id'), 'driver_loans', ['loan_id'], unique=True)
     op.create_index(op.f('ix_driver_loans_medallion_id'), 'driver_loans', ['medallion_id'], unique=False)
     op.create_index(op.f('ix_driver_loans_status'), 'driver_loans', ['status'], unique=False)
-    op.create_table('driver_transaction_receipts',
-    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('receipt_number', sa.String(length=20), nullable=False, comment='Unique receipt identifier (format: RCPT-XXXXX)'),
-    sa.Column('week_start_date', sa.Date(), nullable=False, comment='Sunday 00:00 AM - start of payment period'),
-    sa.Column('week_end_date', sa.Date(), nullable=False, comment='Saturday 11:59:59 PM - end of payment period'),
-    sa.Column('generation_date', sa.DateTime(timezone=True), nullable=False, comment='When this DTR was generated'),
-    sa.Column('driver_id', sa.Integer(), nullable=False),
-    sa.Column('lease_id', sa.Integer(), nullable=False),
-    sa.Column('vehicle_id', sa.Integer(), nullable=True),
-    sa.Column('medallion_id', sa.Integer(), nullable=True),
-    sa.Column('credit_card_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total CURB credit card earnings for the week'),
-    sa.Column('lease_amount', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_fees_total', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all MTA-related fees'),
-    sa.Column('mta_fee_mta', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_fee_tif', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_fee_congestion', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_fee_crbt', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_fee_airport', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('ezpass_tolls', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('pvb_violations', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('tlc_tickets', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('repairs', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('driver_loans', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('misc_charges', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('subtotal_deductions', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all deductions'),
-    sa.Column('net_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='credit_card_earnings - subtotal_deductions'),
-    sa.Column('total_due_to_driver', sa.Numeric(precision=10, scale=2), nullable=False, comment='Final amount owed to driver'),
-    sa.Column('status', sa.Enum('DRAFT', 'GENERATED', 'PAID', 'VOID', name='dtrstatus'), nullable=False),
-    sa.Column('ach_batch_id', sa.Integer(), nullable=True),
-    sa.Column('check_number', sa.String(length=50), nullable=True, comment='Manual check number if paid by check'),
-    sa.Column('payment_date', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
-    sa.Column('is_active', sa.Boolean(), nullable=True, comment='Flag to keep track of record is active or not'),
-    sa.Column('created_by', sa.Integer(), nullable=True, comment='User who created this record'),
-    sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
-    sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
-    sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
-    sa.ForeignKeyConstraint(['ach_batch_id'], ['ach_batches.id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ondelete='SET NULL'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('driver_id', 'lease_id', 'week_start_date', name='uq_dtr_driver_lease_week')
-    )
-    op.create_index('idx_dtr_driver_lease', 'driver_transaction_receipts', ['driver_id', 'lease_id'], unique=False)
-    op.create_index('idx_dtr_status_payment', 'driver_transaction_receipts', ['status', 'ach_batch_id', 'check_number'], unique=False)
-    op.create_index('idx_dtr_week', 'driver_transaction_receipts', ['week_start_date', 'week_end_date'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_ach_batch_id'), 'driver_transaction_receipts', ['ach_batch_id'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_check_number'), 'driver_transaction_receipts', ['check_number'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_driver_id'), 'driver_transaction_receipts', ['driver_id'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_lease_id'), 'driver_transaction_receipts', ['lease_id'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_receipt_number'), 'driver_transaction_receipts', ['receipt_number'], unique=True)
-    op.create_index(op.f('ix_driver_transaction_receipts_status'), 'driver_transaction_receipts', ['status'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_week_end_date'), 'driver_transaction_receipts', ['week_end_date'], unique=False)
-    op.create_index(op.f('ix_driver_transaction_receipts_week_start_date'), 'driver_transaction_receipts', ['week_start_date'], unique=False)
     op.create_table('dtrs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('dtr_number', sa.String(length=50), nullable=False, comment='Unique DTR number (BAT system generated)'),
@@ -1427,41 +1370,41 @@ def upgrade() -> None:
     sa.Column('period_start_date', sa.Date(), nullable=False, comment='Payment period start (Sunday 00:00)'),
     sa.Column('period_end_date', sa.Date(), nullable=False, comment='Payment period end (Saturday 23:59)'),
     sa.Column('generation_date', sa.DateTime(), nullable=False, comment='Date and time DTR was generated'),
-    sa.Column('lease_id', sa.Integer(), nullable=False),
-    sa.Column('driver_id', sa.Integer(), nullable=False),
+    sa.Column('lease_id', sa.Integer(), nullable=False, comment='Foreign key to lease (ONE DTR PER LEASE)'),
+    sa.Column('driver_id', sa.Integer(), nullable=False, comment='Primary driver (leaseholder) - for reference only'),
     sa.Column('vehicle_id', sa.Integer(), nullable=True),
     sa.Column('medallion_id', sa.Integer(), nullable=True),
     sa.Column('status', sa.Enum('DRAFT', 'PENDING', 'FINALIZED', 'PAID', 'VOIDED', name='dtrstatus'), nullable=False),
-    sa.Column('gross_cc_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total credit card earnings from CURB'),
+    sa.Column('gross_cc_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total credit card earnings from CURB (ALL drivers consolidated)'),
     sa.Column('gross_cash_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total cash earnings (if tracked)'),
-    sa.Column('total_gross_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total gross earnings'),
-    sa.Column('lease_amount', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('mta_tif_fees', sa.Numeric(precision=10, scale=2), nullable=False, comment='MTA, TIF, Congestion, CRBT, Airport fees'),
-    sa.Column('ezpass_tolls', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('violation_tickets', sa.Numeric(precision=10, scale=2), nullable=False, comment='PVB violations'),
-    sa.Column('tlc_tickets', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('repairs', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('driver_loans', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('misc_charges', sa.Numeric(precision=10, scale=2), nullable=False),
-    sa.Column('subtotal_charges', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all charges'),
-    sa.Column('prior_balance', sa.Numeric(precision=10, scale=2), nullable=False, comment='Outstanding balance from previous periods'),
-    sa.Column('net_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Gross earnings - subtotal - prior balance'),
-    sa.Column('total_due_to_driver', sa.Numeric(precision=10, scale=2), nullable=False, comment='Final amount payable to driver (can be negative)'),
+    sa.Column('total_gross_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Total gross earnings (CC + Cash)'),
+    sa.Column('lease_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Weekly lease charge (primary driver only)'),
+    sa.Column('mta_tif_fees', sa.Numeric(precision=10, scale=2), nullable=False, comment='MTA, TIF, Congestion, CBDT, Airport fees (ALL drivers)'),
+    sa.Column('ezpass_tolls', sa.Numeric(precision=10, scale=2), nullable=False, comment='EZPass tolls (ALL drivers, outstanding as of period end)'),
+    sa.Column('violation_tickets', sa.Numeric(precision=10, scale=2), nullable=False, comment='PVB violations (ALL drivers, outstanding as of period end)'),
+    sa.Column('tlc_tickets', sa.Numeric(precision=10, scale=2), nullable=False, comment='TLC tickets (lease/medallion level only)'),
+    sa.Column('repairs', sa.Numeric(precision=10, scale=2), nullable=False, comment='Repair charges for this period (primary driver only)'),
+    sa.Column('driver_loans', sa.Numeric(precision=10, scale=2), nullable=False, comment='Loan installments due (primary driver only)'),
+    sa.Column('misc_charges', sa.Numeric(precision=10, scale=2), nullable=False, comment='Miscellaneous charges (primary driver only)'),
+    sa.Column('subtotal_deductions', sa.Numeric(precision=10, scale=2), nullable=False, comment='Sum of all deductions'),
+    sa.Column('prior_balance', sa.Numeric(precision=10, scale=2), nullable=False, comment='Balance carried forward from previous period'),
+    sa.Column('net_earnings', sa.Numeric(precision=10, scale=2), nullable=False, comment='Gross earnings - subtotal deductions - prior balance'),
+    sa.Column('total_due_to_driver', sa.Numeric(precision=10, scale=2), nullable=False, comment='Final amount due to driver (max of 0 and net_earnings)'),
     sa.Column('payment_method', sa.Enum('ACH', 'CHECK', 'CASH', 'DIRECT_DEPOSIT', name='paymentmethod'), nullable=True),
-    sa.Column('payment_date', sa.DateTime(), nullable=True, comment='Date payment was processed'),
-    sa.Column('ach_batch_number', sa.String(length=50), nullable=True, comment='ACH batch number if paid via ACH'),
-    sa.Column('check_number', sa.String(length=50), nullable=True, comment='Check number if paid by check'),
+    sa.Column('payment_date', sa.DateTime(), nullable=True),
+    sa.Column('ach_batch_id', sa.Integer(), nullable=True),
+    sa.Column('ach_batch_number', sa.String(length=20), nullable=True),
+    sa.Column('check_number', sa.String(length=50), nullable=True),
     sa.Column('account_number_masked', sa.String(length=20), nullable=True, comment='Last 4 digits of bank account (for security)'),
-    sa.Column('is_additional_driver_dtr', sa.Boolean(), nullable=False, comment='True if this is an additional driver DTR'),
-    sa.Column('parent_dtr_id', sa.Integer(), nullable=True, comment='Reference to primary DTR if this is additional driver'),
-    sa.Column('tax_breakdown', sa.JSON(), nullable=True, comment='Detailed tax breakdown (Airport, CBDT, Congestion, MTA, TIF)'),
-    sa.Column('ezpass_detail', sa.JSON(), nullable=True, comment='EZPass transaction details'),
-    sa.Column('pvb_detail', sa.JSON(), nullable=True, comment='PVB violation details'),
-    sa.Column('tlc_detail', sa.JSON(), nullable=True, comment='TLC ticket details'),
-    sa.Column('repair_detail', sa.JSON(), nullable=True, comment='Repair invoice details'),
-    sa.Column('loan_detail', sa.JSON(), nullable=True, comment='Loan installment details'),
-    sa.Column('trip_log', sa.JSON(), nullable=True, comment='Credit card trip log from CURB'),
-    sa.Column('alerts', sa.JSON(), nullable=True, comment='Vehicle and driver alerts (expiry dates, etc.)'),
+    sa.Column('additional_drivers_detail', sa.JSON(), nullable=True, comment='Array of additional driver detail sections. Each entry contains:\n        {\n            "driver_id": int,\n            "driver_name": str,\n            "tlc_license": str,\n            "cc_earnings": decimal,\n            "taxes_charges": {...},\n            "ezpass_tolls": [...],\n            "pvb_violations": [...],\n            "trip_log": [...],\n            "alerts": {...}\n        }\n        '),
+    sa.Column('tax_breakdown', sa.JSON(), nullable=True, comment='Detailed tax breakdown (Airport, CBDT, Congestion, MTA, TIF) - consolidated all drivers'),
+    sa.Column('ezpass_detail', sa.JSON(), nullable=True, comment='EZPass transaction details - consolidated all drivers'),
+    sa.Column('pvb_detail', sa.JSON(), nullable=True, comment='PVB violation details - consolidated all drivers'),
+    sa.Column('tlc_detail', sa.JSON(), nullable=True, comment='TLC ticket details - lease level only'),
+    sa.Column('repair_detail', sa.JSON(), nullable=True, comment='Repair invoice details - primary driver only'),
+    sa.Column('loan_detail', sa.JSON(), nullable=True, comment='Loan installment details - primary driver only'),
+    sa.Column('trip_log', sa.JSON(), nullable=True, comment='Credit card trip log from CURB - ALL drivers with TLC license identification'),
+    sa.Column('alerts', sa.JSON(), nullable=True, comment='Vehicle and driver alerts (expiry dates, etc.) - includes all drivers'),
     sa.Column('notes', sa.Text(), nullable=True, comment='Additional notes or comments'),
     sa.Column('voided_reason', sa.Text(), nullable=True, comment='Reason if DTR was voided'),
     sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
@@ -1470,15 +1413,18 @@ def upgrade() -> None:
     sa.Column('modified_by', sa.Integer(), nullable=True, comment='User who last modified this record'),
     sa.Column('created_on', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True, comment='Timestamp when this record was created'),
     sa.Column('updated_on', sa.DateTime(timezone=True), nullable=True, comment='Timestamp when this record was last updated'),
+    sa.ForeignKeyConstraint(['ach_batch_id'], ['ach_batches.id'], ),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
     sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
     sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
     sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
-    sa.ForeignKeyConstraint(['parent_dtr_id'], ['dtrs.id'], ),
     sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('lease_id', 'period_start_date', name='uq_dtr_lease_period'),
+    comment='Driver Transaction Receipts - ONE DTR PER LEASE PER PERIOD'
     )
+    op.create_index(op.f('ix_dtrs_ach_batch_id'), 'dtrs', ['ach_batch_id'], unique=False)
     op.create_index(op.f('ix_dtrs_ach_batch_number'), 'dtrs', ['ach_batch_number'], unique=False)
     op.create_index(op.f('ix_dtrs_driver_id'), 'dtrs', ['driver_id'], unique=False)
     op.create_index(op.f('ix_dtrs_dtr_number'), 'dtrs', ['dtr_number'], unique=True)
@@ -1501,6 +1447,7 @@ def upgrade() -> None:
     sa.Column('transaction_datetime', sa.DateTime(timezone=True), nullable=False, comment='The precise date and time of the toll transaction.'),
     sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The cost of the toll.'),
     sa.Column('med_from_csv', sa.String(length=50), nullable=True, comment="The 'MED' column from the CSV, stored for reference."),
+    sa.Column('ezpass_class', sa.String(length=50), nullable=True, comment="The 'CLASS' column from the CSV, stored for reference."),
     sa.Column('status', sa.Enum('IMPORTED', 'ASSOCIATION_PENDING', 'ASSOCIATION_FAILED', 'ASSOCIATED', 'POSTING_PENDING', 'POSTING_FAILED', 'POSTED_TO_LEDGER', name='ezpasstransactionstatus'), nullable=False),
     sa.Column('failure_reason', sa.Text(), nullable=True, comment='Stores the reason for an association or posting failure.'),
     sa.Column('posting_date', sa.DateTime(timezone=True), nullable=True, comment='The date the transaction was posted to the ledger.'),
@@ -2066,19 +2013,8 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_dtrs_dtr_number'), table_name='dtrs')
     op.drop_index(op.f('ix_dtrs_driver_id'), table_name='dtrs')
     op.drop_index(op.f('ix_dtrs_ach_batch_number'), table_name='dtrs')
+    op.drop_index(op.f('ix_dtrs_ach_batch_id'), table_name='dtrs')
     op.drop_table('dtrs')
-    op.drop_index(op.f('ix_driver_transaction_receipts_week_start_date'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_week_end_date'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_status'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_receipt_number'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_lease_id'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_driver_id'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_check_number'), table_name='driver_transaction_receipts')
-    op.drop_index(op.f('ix_driver_transaction_receipts_ach_batch_id'), table_name='driver_transaction_receipts')
-    op.drop_index('idx_dtr_week', table_name='driver_transaction_receipts')
-    op.drop_index('idx_dtr_status_payment', table_name='driver_transaction_receipts')
-    op.drop_index('idx_dtr_driver_lease', table_name='driver_transaction_receipts')
-    op.drop_table('driver_transaction_receipts')
     op.drop_index(op.f('ix_driver_loans_status'), table_name='driver_loans')
     op.drop_index(op.f('ix_driver_loans_medallion_id'), table_name='driver_loans')
     op.drop_index(op.f('ix_driver_loans_loan_id'), table_name='driver_loans')

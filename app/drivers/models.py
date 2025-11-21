@@ -290,7 +290,7 @@ class Driver(Base, AuditMixin):
     driver_notes = relationship("DriverNote", back_populates="driver")
     
     transaction_receipts = relationship(
-        "DriverTransactionReceipt", 
+        "DTR", 
         back_populates="driver",
         viewonly=True
     )

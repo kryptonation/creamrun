@@ -415,7 +415,7 @@ class Lease(Base, AuditMixin):
             "LeaseNote", back_populates="lease"
         )
     
-    transaction_receipts: Mapped[list["DriverTransactionReceipt"]] = relationship(
+    transaction_receipts: Mapped[list["DTR"]] = relationship(
         back_populates="lease",
         viewonly=True
     )

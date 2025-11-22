@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Dict, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func
 
 from app.dtr.models import DTR, DTRStatus
@@ -791,50 +791,408 @@ class DTRService:
         return alerts
     
     def _get_tax_breakdown(self, lease: Lease, period_start: date, period_end: date) -> Dict:
-        """Get detailed tax breakdown for all drivers"""
-        # Implementation depends on your CURB data structure
-        # Return consolidated tax breakdown
-        return {}
-    
+        """Get detailed tax breakdown consolidated for all drivers on lease"""
+        from app.curb.models import CurbTrip
+        
+        driver_ids = [ld.driver_id for ld in lease.lease_driver if ld.is_active]
+        if not driver_ids:
+            return {"mta": 0.00, "tif": 0.00, "congestion": 0.00, "cbdt": 0.00, "airport": 0.00, "total": 0.00}
+        
+        result = self.db.query(
+            func.sum(func.coalesce(CurbTrip.surcharge, 0)).label('mta'),
+            func.sum(func.coalesce(CurbTrip.improvement_surcharge, 0)).label('tif'),
+            func.sum(func.coalesce(CurbTrip.congestion_fee, 0)).label('congestion'),
+            func.sum(func.coalesce(CurbTrip.cbdt_fee, 0)).label('cbdt'),
+            func.sum(func.coalesce(CurbTrip.airport_fee, 0)).label('airport')
+        ).filter(
+            and_(CurbTrip.driver_id.in_(driver_ids), CurbTrip.start_time >= period_start, CurbTrip.start_time <= period_end)
+        ).first()
+        
+        if not result:
+            return {"mta": 0.00, "tif": 0.00, "congestion": 0.00, "cbdt": 0.00, "airport": 0.00, "total": 0.00}
+        
+        mta = float(result.mta or 0)
+        tif = float(result.tif or 0)
+        congestion = float(result.congestion or 0)
+        cbdt = float(result.cbdt or 0)
+        airport = float(result.airport or 0)
+        
+        return {"mta": mta, "tif": tif, "congestion": congestion, "cbdt": cbdt, "airport": airport, "total": mta + tif + congestion + cbdt + airport}
+
+
     def _get_driver_tax_breakdown(self, driver_id: int, period_start: date, period_end: date) -> Dict:
         """Get tax breakdown for specific driver"""
-        # Implementation depends on your CURB data structure
-        return {}
-    
+        from app.curb.models import CurbTrip
+        
+        result = self.db.query(
+            func.sum(func.coalesce(CurbTrip.surcharge, 0)).label('mta'),
+            func.sum(func.coalesce(CurbTrip.improvement_surcharge, 0)).label('tif'),
+            func.sum(func.coalesce(CurbTrip.congestion_fee, 0)).label('congestion'),
+            func.sum(func.coalesce(CurbTrip.cbdt_fee, 0)).label('cbdt'),
+            func.sum(func.coalesce(CurbTrip.airport_fee, 0)).label('airport')
+        ).filter(
+            and_(CurbTrip.driver_id == driver_id, CurbTrip.start_time >= period_start, CurbTrip.start_time <= period_end)
+        ).first()
+        
+        if not result:
+            return {"mta": 0.00, "tif": 0.00, "congestion": 0.00, "cbdt": 0.00, "airport": 0.00, "total": 0.00}
+        
+        mta = float(result.mta or 0)
+        tif = float(result.tif or 0)
+        congestion = float(result.congestion or 0)
+        cbdt = float(result.cbdt or 0)
+        airport = float(result.airport or 0)
+        
+        return {"mta": mta, "tif": tif, "congestion": congestion, "cbdt": cbdt, "airport": airport, "total": mta + tif + congestion + cbdt + airport}
+
+
     def _get_ezpass_detail(self, lease: Lease, period_start: date, period_end: date) -> Dict:
-        """Get detailed EZPass transactions for all drivers"""
-        # Implementation depends on your EZPass data structure
-        return {}
-    
+        """Get detailed EZPass transactions consolidated for all drivers"""
+        from app.ezpass.models import EZPassTransaction
+        
+        transactions = self.db.query(EZPassTransaction).filter(
+            and_(
+                or_(EZPassTransaction.vehicle_id == lease.vehicle_id, EZPassTransaction.medallion_id == lease.medallion_id),
+                EZPassTransaction.transaction_datetime <= period_end,
+                EZPassTransaction.status.in_(['ASSOCIATED', 'POSTED_TO_LEDGER'])
+            )
+        ).order_by(EZPassTransaction.transaction_datetime).all()
+        
+        if not transactions:
+            return {"transactions": [], "total": 0.00}
+        
+        formatted_transactions = []
+        total = Decimal("0.00")
+        
+        for trans in transactions:
+            amount = Decimal(str(trans.toll_amount or 0))
+            total += amount
+            formatted_transactions.append({
+                "date_time": trans.transaction_datetime.isoformat() if trans.transaction_datetime else "",
+                "tag_plate": trans.tag_number or trans.plate_number or "",
+                "transaction_id": trans.transaction_id or "",
+                "plaza": trans.plaza or "",
+                "toll": float(amount),
+                "balance": float(amount)
+            })
+        
+        return {"transactions": formatted_transactions, "total": float(total)}
+
+
     def _get_driver_ezpass_detail(self, driver: Driver, period_start: date, period_end: date) -> Dict:
         """Get EZPass detail for specific driver"""
-        # Implementation depends on your EZPass data structure
-        return {}
-    
+        from app.ezpass.models import EZPassTransaction
+        
+        transactions = self.db.query(EZPassTransaction).filter(
+            and_(
+                EZPassTransaction.driver_id == driver.id,
+                EZPassTransaction.transaction_datetime >= period_start,
+                EZPassTransaction.transaction_datetime <= period_end,
+                EZPassTransaction.status.in_(['ASSOCIATED', 'POSTED_TO_LEDGER'])
+            )
+        ).order_by(EZPassTransaction.transaction_datetime).all()
+        
+        if not transactions:
+            return {"transactions": [], "total": 0.00}
+        
+        formatted_transactions = []
+        total = Decimal("0.00")
+        
+        for trans in transactions:
+            amount = Decimal(str(trans.toll_amount or 0))
+            total += amount
+            formatted_transactions.append({
+                "date_time": trans.transaction_datetime.isoformat() if trans.transaction_datetime else "",
+                "tag_plate": trans.tag_number or trans.plate_number or "",
+                "plaza": trans.plaza or "",
+                "toll": float(amount),
+                "balance": float(amount)
+            })
+        
+        return {"transactions": formatted_transactions, "total": float(total)}
+
+
     def _get_pvb_detail(self, lease: Lease, period_start: date, period_end: date) -> Dict:
-        """Get detailed PVB violations for all drivers"""
-        # Implementation depends on your PVB data structure
-        return {}
-    
+        """Get detailed PVB violations consolidated for all drivers"""
+        from app.pvb.models import PVBViolation
+        
+        violations = self.db.query(PVBViolation).filter(
+            and_(
+                or_(PVBViolation.vehicle_id == lease.vehicle_id, PVBViolation.lease_id == lease.id),
+                PVBViolation.issue_date <= period_end,
+                PVBViolation.status.in_(['ASSOCIATED', 'POSTED_TO_LEDGER'])
+            )
+        ).order_by(PVBViolation.issue_date).all()
+        
+        if not violations:
+            return {"tickets": [], "total": 0.00}
+        
+        formatted_violations = []
+        total = Decimal("0.00")
+        
+        for viol in violations:
+            fine = Decimal(str(viol.fine_amount or 0))
+            charge = Decimal(str(viol.penalty or 0))
+            violation_total = fine + charge
+            total += violation_total
+            
+            formatted_violations.append({
+                "summons": viol.summons_number or "",
+                "issue_date": viol.issue_date.isoformat() if viol.issue_date else "",
+                "violation": viol.violation_description or "",
+                "county": viol.county or "",
+                "license": viol.plate_number or "",
+                "fine": float(fine),
+                "charge": float(charge),
+                "total": float(violation_total),
+                "balance": float(violation_total)
+            })
+        
+        return {"tickets": formatted_violations, "total": float(total)}
+
+
     def _get_driver_pvb_detail(self, driver: Driver, period_start: date, period_end: date) -> Dict:
         """Get PVB detail for specific driver"""
-        # Implementation depends on your PVB data structure
-        return {}
-    
+        from app.pvb.models import PVBViolation
+        
+        violations = self.db.query(PVBViolation).filter(
+            and_(
+                PVBViolation.driver_id == driver.id,
+                PVBViolation.issue_date >= period_start,
+                PVBViolation.issue_date <= period_end,
+                PVBViolation.status.in_(['ASSOCIATED', 'POSTED_TO_LEDGER'])
+            )
+        ).order_by(PVBViolation.issue_date).all()
+        
+        if not violations:
+            return {"tickets": [], "total": 0.00}
+        
+        formatted_violations = []
+        total = Decimal("0.00")
+        
+        for viol in violations:
+            fine = Decimal(str(viol.fine_amount or 0))
+            charge = Decimal(str(viol.penalty or 0))
+            violation_total = fine + charge
+            total += violation_total
+            
+            formatted_violations.append({
+                "summons": viol.summons_number or "",
+                "issue_date": viol.issue_date.isoformat() if viol.issue_date else "",
+                "violation": viol.violation_description or "",
+                "fine": float(fine),
+                "charge": float(charge),
+                "total": float(violation_total),
+                "balance": float(violation_total)
+            })
+        
+        return {"tickets": formatted_violations, "total": float(total)}
+
+
     def _get_tlc_detail(self, lease: Lease, period_start: date, period_end: date) -> Dict:
-        """Get TLC ticket details (lease level)"""
-        # Implementation depends on your TLC data structure
-        return {}
-    
+        """Get TLC ticket details (lease level only)"""
+        from app.tlc.models import TLCViolation
+        
+        violations = self.db.query(TLCViolation).filter(
+            and_(
+                or_(TLCViolation.lease_id == lease.id, TLCViolation.medallion_id == lease.medallion_id),
+                TLCViolation.issue_date <= period_end,
+                TLCViolation.status.in_(['OPEN', 'PARTIAL'])
+            )
+        ).order_by(TLCViolation.issue_date).all()
+        
+        if not violations:
+            return {"tickets": [], "total": 0.00}
+        
+        formatted_tickets = []
+        total = Decimal("0.00")
+        
+        for ticket in violations:
+            fine = Decimal(str(ticket.fine_amount or 0))
+            payment = Decimal(str(ticket.amount_paid or 0))
+            balance = fine - payment
+            total += balance
+            
+            formatted_tickets.append({
+                "date_time": ticket.issue_date.isoformat() if ticket.issue_date else "",
+                "ticket_no": ticket.summons_number or "",
+                "tlc_license": ticket.tlc_license_number or "",
+                "medallion": ticket.medallion_number or "",
+                "note": ticket.violation_description or "",
+                "fine": float(fine),
+                "payment": float(payment)
+            })
+        
+        return {"tickets": formatted_tickets, "total": float(total)}
+
+
     def _get_repair_detail(self, lease: Lease, driver: Driver, period_start: date, period_end: date) -> Dict:
         """Get repair invoice details"""
-        # Implementation depends on your repairs data structure
-        return {}
-    
+        from app.repairs.models import RepairInvoice, RepairInstallment
+        
+        repairs = self.db.query(RepairInvoice).filter(
+            and_(RepairInvoice.vehicle_id == lease.vehicle_id, RepairInvoice.status.in_(['APPROVED', 'PARTIALLY_PAID', 'OPEN']))
+        ).order_by(RepairInvoice.invoice_date).all()
+        
+        if not repairs:
+            return {"invoices": [], "installments": [], "total": 0.00}
+        
+        formatted_invoices = []
+        formatted_installments = []
+        total_due = Decimal("0.00")
+        
+        for repair in repairs:
+            invoice_amount = Decimal(str(repair.total_amount or 0))
+            amount_paid = Decimal(str(repair.amount_paid or 0))
+            balance = invoice_amount - amount_paid
+            
+            formatted_invoices.append({
+                "repair_id": repair.id,
+                "invoice_no": repair.invoice_number or "",
+                "invoice_date": repair.invoice_date.isoformat() if repair.invoice_date else "",
+                "workshop": repair.vendor_name or "Big Apple Workshop",
+                "invoice_amount": float(invoice_amount),
+                "amount_paid": float(amount_paid),
+                "balance": float(balance)
+            })
+            
+            installments = self.db.query(RepairInstallment).filter(
+                and_(
+                    RepairInstallment.repair_id == repair.id,
+                    RepairInstallment.due_date >= period_start,
+                    RepairInstallment.due_date <= period_end,
+                    RepairInstallment.status == 'PENDING'
+                )
+            ).all()
+            
+            for inst in installments:
+                inst_amount = Decimal(str(inst.amount or 0))
+                total_due += inst_amount
+                formatted_installments.append({
+                    "installment_id": inst.id,
+                    "due_date": inst.due_date.isoformat() if inst.due_date else "",
+                    "amount_due": float(inst_amount),
+                    "amount_payable": float(inst_amount),
+                    "payment": 0.00,
+                    "balance": float(inst_amount)
+                })
+        
+        return {"invoices": formatted_invoices, "installments": formatted_installments, "total": float(total_due)}
+
+
     def _get_loan_detail(self, lease: Lease, driver: Driver, period_start: date, period_end: date) -> Dict:
         """Get loan installment details"""
-        # Implementation depends on your loans data structure
-        return {}
+        from app.loans.models import DriverLoan, LoanInstallment
+        
+        loans = self.db.query(DriverLoan).filter(
+            and_(DriverLoan.driver_id == driver.id, DriverLoan.status.in_(['ACTIVE', 'PARTIALLY_PAID']))
+        ).all()
+        
+        if not loans:
+            return {"loans": [], "installments": [], "total": 0.00}
+        
+        formatted_loans = []
+        formatted_installments = []
+        total_due = Decimal("0.00")
+        
+        for loan in loans:
+            loan_amount = Decimal(str(loan.loan_amount or 0))
+            amount_paid = Decimal(str(loan.amount_paid or 0))
+            balance = loan_amount - amount_paid
+            interest_rate = float(loan.interest_rate or 0)
+            
+            formatted_loans.append({
+                "loan_id": loan.id,
+                "loan_date": loan.loan_date.isoformat() if loan.loan_date else "",
+                "loan_amount": float(loan_amount),
+                "interest_rate": interest_rate,
+                "total_due": float(loan_amount),
+                "amount_paid": float(amount_paid),
+                "balance": float(balance)
+            })
+            
+            installments = self.db.query(LoanInstallment).filter(
+                and_(
+                    LoanInstallment.loan_id == loan.id,
+                    LoanInstallment.due_date >= period_start,
+                    LoanInstallment.due_date <= period_end,
+                    LoanInstallment.status == 'PENDING'
+                )
+            ).all()
+            
+            for inst in installments:
+                principal = Decimal(str(inst.principal_amount or 0))
+                interest = Decimal(str(inst.interest_amount or 0))
+                inst_total = principal + interest
+                total_due += inst_total
+                
+                formatted_installments.append({
+                    "installment_id": inst.id,
+                    "due_date": inst.due_date.isoformat() if inst.due_date else "",
+                    "principal": float(principal),
+                    "interest": float(interest),
+                    "total_due": float(inst_total),
+                    "total_payable": float(inst_total),
+                    "payment": 0.00,
+                    "balance": float(inst_total)
+                })
+        
+        return {"loans": formatted_loans, "installments": formatted_installments, "total": float(total_due)}
+
+
+    def _get_consolidated_trip_log(self, lease: Lease, period_start: date, period_end: date) -> Dict:
+        """Get consolidated trip log for ALL drivers"""
+        from app.curb.models import CurbTrip
+        
+        driver_ids = [ld.driver_id for ld in lease.lease_driver if ld.is_active]
+        if not driver_ids:
+            return {"trips": [], "total_trips": 0}
+        
+        trips = self.db.query(CurbTrip).filter(
+            and_(
+                CurbTrip.driver_id.in_(driver_ids),
+                CurbTrip.start_time >= period_start,
+                CurbTrip.start_time <= period_end,
+                CurbTrip.payment_type == 'CREDIT_CARD'
+            )
+        ).order_by(CurbTrip.start_time, CurbTrip.start_time).all()
+        
+        formatted_trips = []
+        for trip in trips:
+            driver = self.db.query(Driver).filter(Driver.id == trip.driver_id).first()
+            tlc_license = driver.tlc_license.tlc_license_number if driver and driver.tlc_license else "Unknown"
+            
+            formatted_trips.append({
+                "trip_date": trip.start_time.isoformat() if trip.start_time else "",
+                "tlc_license": tlc_license,
+                "trip_number": trip.curb_trip_id or "",
+                "amount": float(Decimal(str(trip.total_amount or 0)))
+            })
+        
+        return {"trips": formatted_trips, "total_trips": len(formatted_trips)}
+
+
+    def _get_driver_trip_log(self, driver: Driver, period_start: date, period_end: date) -> List[Dict]:
+        """Get trip log for specific driver"""
+        from app.curb.models import CurbTrip
+        
+        trips = self.db.query(CurbTrip).filter(
+            and_(
+                CurbTrip.driver_id == driver.id,
+                CurbTrip.start_time >= period_start,
+                CurbTrip.start_time <= period_end,
+                CurbTrip.payment_type == 'CREDIT_CARD'
+            )
+        ).order_by(CurbTrip.start_time, CurbTrip.start_time).all()
+        
+        tlc_license = driver.tlc_license.tlc_license_number if driver.tlc_license else "Unknown"
+        
+        return [{
+            "trip_date": trip.start_time.isoformat() if trip.start_time else "",
+            "tlc_license": tlc_license,
+            "trip_number": trip.curb_trip_id or "",
+            "amount": float(Decimal(str(trip.total_amount or 0)))
+        } for trip in trips]
     
     def _mask_account_number(self, driver: Driver) -> Optional[str]:
         """Mask bank account number"""

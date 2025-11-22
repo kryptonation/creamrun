@@ -14,7 +14,7 @@ from app.driver_payments.models import DTRStatus, ACHBatchStatus, PaymentType
 
 
 class DTRResponse(BaseModel):
-    """Response schema for a single DTR."""
+    """Response schema for a single DTR with complete vehicle and driver identification."""
     id: int
     receipt_number: str
     
@@ -23,16 +23,20 @@ class DTRResponse(BaseModel):
     week_end_date: date
     generation_date: datetime
     
-    # Entity Information
+    # Entity Information - ENHANCED with all identification fields
     driver_id: int
     driver_name: Optional[str] = None
-    tlc_license: Optional[str] = None
+    tlc_license: Optional[str] = None  # TLC License Number
+    
     lease_id: int
     lease_number: Optional[str] = None
+    
     vehicle_id: Optional[int] = None
-    plate_number: Optional[str] = None
+    plate_number: Optional[str] = None  # Vehicle Plate Number
+    vin: Optional[str] = None  # Vehicle Identification Number (VIN)
+    
     medallion_id: Optional[int] = None
-    medallion_number: Optional[str] = None
+    medallion_number: Optional[str] = None  # Medallion Number
     
     # Earnings
     credit_card_earnings: Decimal
@@ -65,6 +69,7 @@ class DTRResponse(BaseModel):
     payment_date: Optional[datetime] = None
     
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
 
 

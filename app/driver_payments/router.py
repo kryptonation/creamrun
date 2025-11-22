@@ -66,28 +66,55 @@ def get_ach_service(db: Session = Depends(get_db)) -> ACHBatchService:
 
 @router.get("", response_model=PaginatedDTRResponse, summary="List Driver Transaction Receipts")
 def list_dtrs(
-    page: int = Query(1, ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    sort_by: str = Query("period_end_date"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$"),
-    receipt_number: Optional[str] = Query(None),
-    driver_name: Optional[str] = Query(None),
-    tlc_license: Optional[str] = Query(None),
-    medallion_no: Optional[str] = Query(None),
-    plate_number: Optional[str] = Query(None),
-    period_start_date: Optional[date] = Query(None),
-    period_end_date: Optional[date] = Query(None),
-    payment_type: Optional[PaymentType] = Query(None),
-    dtr_status: Optional[DTRStatus] = Query(None),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+    sort_by: str = Query("period_end_date", description="Sort field"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
+    
+    # Search filters
+    receipt_number: Optional[str] = Query(None, description="Filter by receipt number"),
+    driver_name: Optional[str] = Query(None, description="Filter by driver name"),
+    
+    # ENHANCED: Comma-separated multi-value filters
+    tlc_license: Optional[str] = Query(
+        None, 
+        description="Filter by TLC License (comma-separated for multiple values, e.g., '5123456,5234567')"
+    ),
+    medallion_no: Optional[str] = Query(
+        None, 
+        description="Filter by Medallion Number (comma-separated for multiple values, e.g., '1Y23,2X45')"
+    ),
+    plate_number: Optional[str] = Query(
+        None, 
+        description="Filter by Plate Number (comma-separated for multiple values, e.g., 'ABC123,DEF456')"
+    ),
+    vin: Optional[str] = Query(
+        None, 
+        description="Filter by VIN (comma-separated for multiple values, e.g., '1HGBH41JXMN109186,2HGBH41JXMN109187')"
+    ),
+    
+    # Date filters
+    period_start_date: Optional[date] = Query(None, description="Filter by period start date (from)"),
+    period_end_date: Optional[date] = Query(None, description="Filter by period start date (to)"),
+    
+    # Status filters
+    payment_type: Optional[PaymentType] = Query(None, description="Filter by payment type"),
+    dtr_status: Optional[DTRStatus] = Query(None, description="Filter by DTR status"),
     is_paid: Optional[bool] = Query(None, description="Filter by payment status"),
-    ach_batch_number: Optional[str] = Query(None),
-    check_number: Optional[str] = Query(None),
+    
+    # Payment reference filters
+    ach_batch_number: Optional[str] = Query(None, description="Filter by ACH batch number"),
+    check_number: Optional[str] = Query(None, description="Filter by check number"),
+    
     dtr_service: DTRService = Depends(get_dtr_service),
     _current_user: User = Depends(get_current_user),
 ):
     """
     List all Driver Transaction Receipts with filtering and pagination.
-    Uses consolidated DTR model from app.dtr
+    
+    ENHANCED FILTERING:
+    Supports comma-separated values for medallion_no, tlc_license, plate_number, and vin.
+    Example: medallion_no=1Y23,2X45,3Z67 will return DTRs matching any of these medallions.
     """
     try:
         dtrs, total_items = dtr_service.repository.search_dtrs(
@@ -96,6 +123,7 @@ def list_dtrs(
             tlc_license=tlc_license,
             medallion_no=medallion_no,
             plate_number=plate_number,
+            vin=vin,  # NEW: VIN filtering
             period_start_from=period_start_date,
             period_start_to=period_end_date,
             status=dtr_status,

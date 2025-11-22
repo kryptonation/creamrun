@@ -1,9 +1,9 @@
 # app/dtr/repository.py
 
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func
 
 from app.dtr.models import DTR, DTRStatus
@@ -230,18 +230,25 @@ class DTRRepository:
         dtr_number: Optional[str] = None,
         receipt_number: Optional[str] = None,
         driver_name: Optional[str] = None,
-        tlc_license: Optional[str] = None,
-        medallion_no: Optional[str] = None,
-        plate_number: Optional[str] = None,
+        tlc_license: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
+        medallion_no: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
+        plate_number: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
+        vin: Optional[str] = None,  # NEW: SUPPORTS COMMA-SEPARATED
         ach_batch_number: Optional[str] = None,
         check_number: Optional[str] = None,
         sort_by: str = "period_start_date",
         sort_order: str = "desc",
         page: int = 1,
         page_size: int = 50
-    ) -> tuple[List[DTR], int]:
+    ) -> Tuple[List[DTR], int]:
         """
-        Search DTRs with multiple filters.
+        Search DTRs with multiple filters including comma-separated multi-value support.
+        
+        ENHANCED FILTERING:
+        - tlc_license: Comma-separated list (e.g., "5123456,5234567,5345678")
+        - medallion_no: Comma-separated list (e.g., "1Y23,2X45,3Z67")
+        - plate_number: Comma-separated list (e.g., "ABC123,DEF456,GHI789")
+        - vin: Comma-separated list (e.g., "1HGBH41JXMN109186,2HGBH41JXMN109187")
         
         Returns: (list of DTRs, total count)
         """
@@ -249,8 +256,15 @@ class DTRRepository:
         from app.vehicles.models import Vehicle, VehicleRegistration
         from app.medallions.models import Medallion
         
-        query = self.db.query(DTR)
+        # Build base query with eager loading for performance
+        query = self.db.query(DTR).options(
+            joinedload(DTR.driver).joinedload(Driver.tlc_license),
+            joinedload(DTR.vehicle).joinedload(Vehicle.registrations),
+            joinedload(DTR.medallion),
+            joinedload(DTR.lease)
+        )
         
+        # Simple ID filters
         if lease_id:
             query = query.filter(DTR.lease_id == lease_id)
         
@@ -266,19 +280,21 @@ class DTRRepository:
         if status:
             query = query.filter(DTR.status == status)
         
+        # Date range filters
         if period_start_from:
             query = query.filter(DTR.period_start_date >= period_start_from)
         
         if period_start_to:
             query = query.filter(DTR.period_start_date <= period_start_to)
         
+        # Number filters
         if dtr_number:
             query = query.filter(DTR.dtr_number.ilike(f"%{dtr_number}%"))
         
         if receipt_number:
             query = query.filter(DTR.receipt_number.ilike(f"%{receipt_number}%"))
         
-        # Driver name filter
+        # Driver name filter (searches first, last, and full name)
         if driver_name:
             query = query.join(Driver, DTR.driver_id == Driver.id).filter(
                 or_(
@@ -288,22 +304,63 @@ class DTRRepository:
                 )
             )
         
-        # TLC license filter
+        # TLC LICENSE - COMMA-SEPARATED SUPPORT
         if tlc_license:
-            query = query.join(Driver, DTR.driver_id == Driver.id)\
-                         .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)\
-                         .filter(TLCLicense.tlc_license_number.ilike(f"%{tlc_license}%"))
+            # Split by comma and strip whitespace
+            tlc_numbers = [num.strip() for num in tlc_license.split(',') if num.strip()]
+            
+            if tlc_numbers:
+                # Build OR conditions for each TLC license number
+                tlc_conditions = []
+                for tlc_num in tlc_numbers:
+                    tlc_conditions.append(TLCLicense.tlc_license_number.ilike(f"%{tlc_num}%"))
+                
+                query = query.join(Driver, DTR.driver_id == Driver.id)\
+                             .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)\
+                             .filter(or_(*tlc_conditions))
         
-        # Medallion number filter
+        # MEDALLION NUMBER - COMMA-SEPARATED SUPPORT
         if medallion_no:
-            query = query.join(Medallion, DTR.medallion_id == Medallion.id)\
-                         .filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+            # Split by comma and strip whitespace
+            medallion_numbers = [num.strip() for num in medallion_no.split(',') if num.strip()]
+            
+            if medallion_numbers:
+                # Build OR conditions for each medallion number
+                medallion_conditions = []
+                for med_num in medallion_numbers:
+                    medallion_conditions.append(Medallion.medallion_number.ilike(f"%{med_num}%"))
+                
+                query = query.join(Medallion, DTR.medallion_id == Medallion.id)\
+                             .filter(or_(*medallion_conditions))
         
-        # Plate number filter
+        # PLATE NUMBER - COMMA-SEPARATED SUPPORT
         if plate_number:
-            query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
-                         .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)\
-                         .filter(VehicleRegistration.plate_number.ilike(f"%{plate_number}%"))
+            # Split by comma and strip whitespace
+            plate_numbers = [num.strip() for num in plate_number.split(',') if num.strip()]
+            
+            if plate_numbers:
+                # Build OR conditions for each plate number
+                plate_conditions = []
+                for plate_num in plate_numbers:
+                    plate_conditions.append(VehicleRegistration.plate_number.ilike(f"%{plate_num}%"))
+                
+                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
+                             .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)\
+                             .filter(or_(*plate_conditions))
+        
+        # VIN - NEW: COMMA-SEPARATED SUPPORT
+        if vin:
+            # Split by comma and strip whitespace
+            vin_numbers = [v.strip() for v in vin.split(',') if v.strip()]
+            
+            if vin_numbers:
+                # Build OR conditions for each VIN
+                vin_conditions = []
+                for vin_num in vin_numbers:
+                    vin_conditions.append(Vehicle.vin.ilike(f"%{vin_num}%"))
+                
+                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
+                             .filter(or_(*vin_conditions))
         
         # ACH batch number filter
         if ach_batch_number:
@@ -313,15 +370,45 @@ class DTRRepository:
         if check_number:
             query = query.filter(DTR.check_number.ilike(f"%{check_number}%"))
         
-        # Get total count
+        # Get total count before pagination
         total = query.count()
         
         # Apply sorting
-        sort_column = getattr(DTR, sort_by, DTR.period_start_date)
-        if sort_order.lower() == "asc":
-            query = query.order_by(sort_column.asc())
+        sort_mapping = {
+            "period_start_date": DTR.period_start_date,
+            "period_end_date": DTR.period_end_date,
+            "receipt_number": DTR.receipt_number,
+            "driver_name": Driver.first_name,  # Requires driver join
+            "tlc_license": TLCLicense.tlc_license_number,  # Requires joins
+            "medallion_number": Medallion.medallion_number,  # Requires medallion join
+            "plate_number": VehicleRegistration.plate_number,  # Requires vehicle joins
+            "status": DTR.status,
+            "total_due_to_driver": DTR.total_due_to_driver,
+            "generation_date": DTR.generation_date
+        }
+        
+        if sort_by in sort_mapping:
+            sort_column = sort_mapping[sort_by]
+            
+            # Add necessary joins for sorting if not already joined
+            if sort_by == "driver_name" and driver_name is None:
+                query = query.join(Driver, DTR.driver_id == Driver.id)
+            elif sort_by == "tlc_license" and tlc_license is None:
+                query = query.join(Driver, DTR.driver_id == Driver.id)\
+                             .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)
+            elif sort_by == "medallion_number" and medallion_no is None:
+                query = query.join(Medallion, DTR.medallion_id == Medallion.id)
+            elif sort_by == "plate_number" and plate_number is None:
+                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
+                             .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)
+            
+            if sort_order.lower() == "asc":
+                query = query.order_by(sort_column.asc())
+            else:
+                query = query.order_by(sort_column.desc())
         else:
-            query = query.order_by(sort_column.desc())
+            # Default sorting
+            query = query.order_by(DTR.period_start_date.desc())
         
         # Apply pagination
         dtrs = query.offset((page - 1) * page_size)\

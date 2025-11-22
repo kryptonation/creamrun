@@ -17,7 +17,6 @@ from app.utils.logger import get_logger
 # Import DTR model from app.dtr
 from app.dtr.models import DTRStatus
 from app.dtr.services import DTRService
-from app.dtr.pdf_generator import DTRPDFGenerator
 from app.dtr.schemas import DTRResponse
 
 # Import ACH-specific models from driver_payments
@@ -173,42 +172,6 @@ def get_dtr(
     except Exception as e:
         logger.error("Error fetching DTR", error=e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching the DTR.") from e
-
-
-@router.get("/{dtr_id}/pdf", response_class=StreamingResponse)
-def download_dtr_pdf(
-    dtr_id: int,
-    dtr_service: DTRService = Depends(get_dtr_service),
-    _current_user: User = Depends(get_current_user),
-):
-    """Generate and download DTR as PDF"""
-    try:
-        dtr = dtr_service.repository.get_by_id(dtr_id)
-        
-        if not dtr:
-            raise HTTPException(status_code=404, detail=f"DTR with ID {dtr_id} not found")
-        
-        # Generate PDF
-        pdf_generator = DTRPDFGenerator()
-        pdf_bytes = pdf_generator.generate_pdf(dtr)
-        
-        # Wrap bytes in BytesIO for streaming
-        pdf_buffer = BytesIO(pdf_bytes)
-        
-        # Return as streaming response
-        return StreamingResponse(
-            pdf_buffer,
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f"attachment; filename=DTR_{dtr.receipt_number}.pdf"
-            }
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error generating DTR PDF", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to generate PDF") from e
 
 
 @router.post("/generate", status_code=status.HTTP_201_CREATED)

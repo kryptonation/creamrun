@@ -70,20 +70,16 @@ class CurbTripResponse(BaseModel):
 
     @field_serializer("trip_start_date", when_used="json")
     def serialize_trip_start_date(self, value: Optional[str]) -> Optional[str]:
-        """Format trip start date from start_datetime"""
-        if self.start_datetime:
-            if settings.common_date_format:
-                return self.start_datetime.strftime(settings.common_date_format)
-            return self.start_datetime.strftime("%Y-%m-%d")
+        """Format trip start date and time from start_datetime"""
+        if self.start_datetime and settings.common_date_format and settings.common_time_format:
+            return f"{self.start_datetime.strftime(settings.common_date_format)} {self.start_datetime.strftime(settings.common_time_format)}"
         return None
 
     @field_serializer("trip_end_date", when_used="json")
     def serialize_trip_end_date(self, value: Optional[str]) -> Optional[str]:
-        """Format trip end date from end_datetime"""
-        if self.end_datetime:
-            if settings.common_date_format:
-                return self.end_datetime.strftime(settings.common_date_format)
-            return self.end_datetime.strftime("%Y-%m-%d")
+        """Format trip end date and time from end_datetime"""
+        if self.end_datetime and settings.common_date_format and settings.common_time_format:
+            return f"{self.end_datetime.strftime(settings.common_date_format)} {self.end_datetime.strftime(settings.common_time_format)}"
         return None
 
     @field_serializer("start_time", when_used="json")
@@ -102,6 +98,13 @@ class CurbTripResponse(BaseModel):
             if settings.common_time_format:
                 return self.end_datetime.strftime(settings.common_time_format)
             return self.end_datetime.strftime("%H:%M:%S")
+        return None
+
+    @field_serializer("transaction_date", when_used="json")
+    def serialize_transaction_date(self, value: Optional[datetime]) -> Optional[str]:
+        """Format transaction date and time using common_date_format and common_time_format"""
+        if value and settings.common_date_format and settings.common_time_format:
+            return f"{value.strftime(settings.common_date_format)} {value.strftime(settings.common_time_format)}"
         return None
 
     class Config:

@@ -1,248 +1,219 @@
 # app/dtr/schemas.py
 
-from pydantic import BaseModel, Field, field_validator
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
+
+from pydantic import BaseModel, Field, field_validator
+
 from app.dtr.models import DTRStatus, PaymentMethod
 
 
-class DTRGenerationRequest(BaseModel):
-    """
-    CORRECTED: Request to generate a single DTR.
-    
-    No longer requires driver_id - DTR is per lease only.
-    """
-    lease_id: int = Field(..., description="Lease ID to generate DTR for")
-    period_start_date: date = Field(..., description="Payment period start (Sunday)")
-    period_end_date: date = Field(..., description="Payment period end (Saturday)")
-    auto_finalize: bool = Field(default=False, description="Auto-finalize after generation")
-    
-    @field_validator('period_start_date')
-    @classmethod
-    def validate_period_start(cls, v):
-        """Ensure period starts on Sunday"""
-        if v.weekday() != 6:  # 6 = Sunday
-            raise ValueError("Period must start on Sunday")
-        return v
-    
-    @field_validator('period_end_date')
-    @classmethod
-    def validate_period_end(cls, v):
-        """Ensure period ends on Saturday"""
-        if v.weekday() != 5:  # 5 = Saturday
-            raise ValueError("Period must end on Saturday")
-        return v
-
-
-class BatchDTRGenerationRequest(BaseModel):
-    """Request to generate DTRs for all active leases"""
-    period_start_date: date = Field(..., description="Payment period start (Sunday)")
-    period_end_date: date = Field(..., description="Payment period end (Saturday)")
-    auto_finalize: bool = Field(default=False, description="Auto-finalize all DTRs")
-    regenerate_existing: bool = Field(default=False, description="Regenerate existing DTRs")
-    lease_status_filter: Optional[str] = Field(None, description="Filter by lease status (e.g., ACTIVE)")
-
-
 class DTRResponse(BaseModel):
-    """Basic DTR response"""
+    """Complete DTR response with all fields"""
     id: int
     dtr_number: str
     receipt_number: str
-    period_start_date: date
-    period_end_date: date
-    generation_date: datetime
-    lease_id: int
-    driver_id: int
-    vehicle_id: Optional[int]
-    medallion_id: Optional[int]
-    status: str
     
-    # Financial summary
-    total_gross_earnings: Decimal
-    subtotal_deductions: Decimal
-    net_earnings: Decimal
-    total_due_to_driver: Decimal
-    
-    # Payment info
-    payment_method: Optional[str]
-    payment_date: Optional[datetime]
-    ach_batch_number: Optional[str]
-    check_number: Optional[str]
-    
-    # Timestamps
-    created_on: Optional[datetime]
-    updated_on: Optional[datetime]
-    
-    class Config:
-        from_attributes = True
-
-
-class DTRDetailResponse(BaseModel):
-    """Complete DTR response with all details"""
-    id: int
-    dtr_number: str
-    receipt_number: str
-    period_start_date: date
-    period_end_date: date
+    # Period
+    week_start_date: date
+    week_end_date: date
     generation_date: datetime
     
-    # References
+    # Entity Information
     lease_id: int
-    driver_id: int
-    vehicle_id: Optional[int]
-    medallion_id: Optional[int]
+    lease_number: Optional[str] = None
     
-    # Status
-    status: str
+    primary_driver_id: int
+    driver_name: Optional[str] = None
+    tlc_license: Optional[str] = None
     
-    # Consolidated Earnings (from ALL drivers)
-    gross_cc_earnings: Decimal
-    gross_cash_earnings: Decimal
-    total_gross_earnings: Decimal
+    vehicle_id: Optional[int] = None
+    plate_number: Optional[str] = None
+    vin: Optional[str] = None
     
-    # Deductions
-    lease_amount: Decimal
-    mta_tif_fees: Decimal
+    medallion_id: Optional[int] = None
+    medallion_number: Optional[str] = None
+    
+    # Additional drivers
+    additional_driver_ids: Optional[List[int]] = None
+    additional_driver_count: Optional[int] = 0
+    
+    # Earnings
+    credit_card_earnings: Decimal
+    
+    # Taxes
+    mta_fees_total: Decimal
+    mta_fee_mta: Decimal
+    mta_fee_tif: Decimal
+    mta_fee_congestion: Decimal
+    mta_fee_cbdt: Decimal
+    mta_fee_airport: Decimal
+    
+    # Charges
     ezpass_tolls: Decimal
-    violation_tickets: Decimal
+    lease_amount: Decimal
+    is_lease_prorated: bool
+    active_days: Optional[int] = None
+    pvb_violations: Decimal
     tlc_tickets: Decimal
     repairs: Decimal
     driver_loans: Decimal
     misc_charges: Decimal
     
-    # Calculated Totals
-    subtotal_deductions: Decimal
+    # Prior balance
     prior_balance: Decimal
+    
+    # Calculations
+    subtotal_deductions: Decimal
     net_earnings: Decimal
     total_due_to_driver: Decimal
     
-    # Payment Information
-    payment_method: Optional[str]
-    payment_date: Optional[datetime]
-    ach_batch_number: Optional[str]
-    check_number: Optional[str]
-    account_number_masked: Optional[str]
+    # Status
+    status: DTRStatus
+    has_pending_charges: bool
+    pending_charge_categories: Optional[List[str]] = None
     
-    # Additional Drivers Detail - NEW
-    additional_drivers_detail: Optional[List[Dict[str, Any]]] = Field(
-        None,
-        description="Array of additional driver detail sections"
-    )
+    # Payment
+    payment_method: Optional[PaymentMethod] = None
+    ach_batch_number: Optional[str] = None
+    check_number: Optional[str] = None
+    payment_date: Optional[datetime] = None
     
-    # Detailed Breakdowns
-    tax_breakdown: Optional[Dict[str, Any]]
-    ezpass_detail: Optional[Dict[str, Any]]
-    pvb_detail: Optional[Dict[str, Any]]
-    tlc_detail: Optional[Dict[str, Any]]
-    repair_detail: Optional[Dict[str, Any]]
-    loan_detail: Optional[Dict[str, Any]]
-    trip_log: Optional[Dict[str, Any]]
-    alerts: Optional[Dict[str, Any]]
+    # Termination
+    is_final_dtr: bool
+    termination_date: Optional[date] = None
+    cancellation_fee: Optional[Decimal] = None
     
-    # Metadata
-    notes: Optional[str]
-    voided_reason: Optional[str]
-    created_on: Optional[datetime]
-    updated_on: Optional[datetime]
+    # Audit
+    created_at: datetime
+    finalized_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
 
 
-class DTRGenerationSummary(BaseModel):
-    """Summary of batch DTR generation"""
-    total_leases_found: int = Field(..., description="Number of leases found")
-    dtrs_generated: int = Field(..., description="DTRs successfully generated")
-    dtrs_skipped: int = Field(..., description="DTRs skipped (already exist)")
-    dtrs_failed: int = Field(..., description="DTRs failed to generate")
-    period_start: date
-    period_end: date
+class DTRListItemResponse(BaseModel):
+    """Simplified DTR response for list views"""
+    id: int
+    receipt_number: str
+    dtr_number: str
+    week_start_date: date
+    week_end_date: date
     
-    # Detailed lists
-    generated_dtrs: List[Dict[str, Any]] = Field(default_factory=list)
-    skipped_dtrs: List[Dict[str, Any]] = Field(default_factory=list)
-    failed_dtrs: List[Dict[str, Any]] = Field(default_factory=list)
+    # Key identifiers for display
+    medallion_number: Optional[str] = None
+    tlc_license: Optional[str] = None
+    driver_name: Optional[str] = None
+    plate_number: Optional[str] = None
+    
+    # Financial summary
+    total_due_to_driver: Decimal
+    
+    # Status
+    status: DTRStatus
+    payment_method: Optional[PaymentMethod] = None
+    ach_batch_number: Optional[str] = None
+    check_number: Optional[str] = None
+    
+    class Config:
+        """Pydantic configuration"""
+        from_attributes = True
 
 
 class DTRListResponse(BaseModel):
     """Paginated list of DTRs"""
-    items: List[DTRResponse]
+    items: List[DTRListItemResponse]
     total: int
     page: int
-    page_size: int
+    per_page: int
     total_pages: int
 
 
-class AdditionalDriverDetail(BaseModel):
-    """
-    Detail section for an additional driver.
+class DTRGenerationRequest(BaseModel):
+    """Request to generate DTR for a lease"""
+    lease_id: int = Field(..., description="Lease ID")
+    week_start: date = Field(..., description="Sunday - start of week")
+    week_end: Optional[date] = Field(None, description="Saturday - end of week (auto-calculated if not provided)")
+    force_final: bool = Field(False, description="Force generation as final DTR")
     
-    Contains only the charges and earnings applicable to additional drivers:
-    - Their CC earnings
-    - Their applicable taxes (MTA/TIF/etc)
-    - Their EZPass tolls
-    - Their PVB violations
-    - Their trip log
-    - Their alerts
+    @field_validator('week_start')
+    @classmethod
+    def validate_sunday(cls, v):
+        if v.weekday() != 6:  # 6 = Sunday
+            raise ValueError("week_start must be a Sunday")
+        return v
     
-    Does NOT contain:
-    - Lease amount (primary driver only)
-    - TLC tickets (lease level)
-    - Repairs (primary driver only)
-    - Loans (primary driver only)
-    - Misc charges (primary driver only)
-    """
-    driver_id: int
-    driver_name: str
-    tlc_license: Optional[str]
-    
-    # Earnings
-    cc_earnings: Decimal
-    
-    # Applicable Charges
-    charges: Dict[str, Decimal] = Field(
-        ...,
-        description="Contains: mta_tif_fees, ezpass_tolls, violation_tickets"
-    )
-    
-    # Calculated
-    subtotal: Decimal
-    net_earnings: Decimal
-    
-    # Details
-    tax_breakdown: Optional[Dict[str, Any]]
-    ezpass_detail: Optional[List[Dict[str, Any]]]
-    pvb_detail: Optional[List[Dict[str, Any]]]
-    trip_log: Optional[List[Dict[str, Any]]]
-    alerts: Optional[List[Dict[str, Any]]]
+    @field_validator('week_end')
+    @classmethod
+    def validate_saturday(cls, v):
+        if v and v.weekday() != 5:  # 5 = Saturday
+            raise ValueError("week_end must be a Saturday")
+        return v
 
 
-class DTRStatistics(BaseModel):
-    """DTR statistics for reporting"""
-    total_dtrs: int
-    by_status: Dict[str, int]
-    total_gross_earnings: Decimal
-    total_deductions: Decimal
-    total_net_earnings: Decimal
-    total_due_to_drivers: Decimal
-    average_dtr_amount: Decimal
+class BatchDTRGenerationRequest(BaseModel):
+    """Request to generate DTRs for multiple leases"""
+    week_start: date = Field(..., description="Sunday - start of week")
+    lease_ids: Optional[List[int]] = Field(None, description="Specific lease IDs (if None, generates for all active leases)")
+    
+    @field_validator('week_start')
+    @classmethod
+    def validate_sunday(cls, v):
+        if v.weekday() != 6:
+            raise ValueError("week_start must be a Sunday")
+        return v
 
 
-class DTRUpdateRequest(BaseModel):
-    """Request to update DTR fields"""
-    notes: Optional[str] = None
+class CheckNumberUpdateRequest(BaseModel):
+    """Request to update check number"""
+    check_number: str = Field(..., min_length=1, max_length=50)
+    payment_date: Optional[datetime] = None
+
+
+class FinalizeDTRRequest(BaseModel):
+    """Request to manually finalize a DRAFT DTR"""
+    confirm_all_charges_posted: bool = Field(..., description="Confirmation that all charges are posted")
+    
+    @field_validator('confirm_all_charges_posted')
+    @classmethod
+    def validate_confirmation(cls, v):
+        if not v:
+            raise ValueError("You must confirm all charges are posted before finalizing")
+        return v
+
+
+class DTRFilterParams(BaseModel):
+    """Filter parameters for DTR list"""
+    page: int = Field(1, ge=1)
+    per_page: int = Field(50, ge=1, le=200)
+    
+    # Filters
+    receipt_number: Optional[str] = None
     status: Optional[DTRStatus] = None
-
-
-class DTRVoidRequest(BaseModel):
-    """Request to void a DTR"""
-    reason: str = Field(..., min_length=10, max_length=500)
-
-
-class DTRPaymentRequest(BaseModel):
-    """Request to mark DTR as paid"""
-    payment_method: PaymentMethod
-    payment_date: date
+    payment_method: Optional[PaymentMethod] = None
+    week_start: Optional[date] = None
+    week_end: Optional[date] = None
+    medallion_number: Optional[str] = None
+    tlc_license: Optional[str] = None
+    driver_name: Optional[str] = None
+    plate_number: Optional[str] = None
     ach_batch_number: Optional[str] = None
     check_number: Optional[str] = None
+    
+    # Sorting
+    sort_by: str = Field('generation_date', description="Field to sort by")
+    sort_order: str = Field('desc', pattern='^(asc|desc)$')
+
+
+class DTRSummaryResponse(BaseModel):
+    """Summary statistics for DTRs"""
+    total_count: int
+    total_amount: Decimal
+    paid_amount: Decimal
+    unpaid_amount: Decimal
+    
+    # By status breakdown
+    draft_count: Optional[int] = 0
+    finalized_count: Optional[int] = 0
+    paid_count: Optional[int] = 0

@@ -1,157 +1,99 @@
 # app/driver_payments/models.py
 
 import enum
-from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
-
+from datetime import datetime
 from sqlalchemy import (
-    Integer, String, Numeric, Date, DateTime, ForeignKey, 
-    Boolean, Text, Enum as SQLEnum
+    Column, Integer, String, Numeric, Date, DateTime,
+    Enum, Boolean, Text
 )
-from sqlalchemy.orm import relationship, Mapped, mapped_column
-
+from sqlalchemy.orm import relationship
 from app.core.db import Base
-from app.users.models import AuditMixin
-
-
-class PaymentType(str, enum.Enum):
-    """Payment method for driver"""
-    ACH = "ACH"
-    CHECK = "Check"
-
-
-class DTRStatus(str, enum.Enum):
-    """Status of Driver Transaction Receipt"""
-    DRAFT = "DRAFT"
-    GENERATED = "GENERATED"
-    PAID = "PAID"
-    VOID = "VOID"
 
 
 class ACHBatchStatus(str, enum.Enum):
-    """Status of ACH Batch"""
+    """ACH Batch Status Values"""
     DRAFT = "DRAFT"
-    CONFIRMED = "CONFIRMED"
     NACHA_GENERATED = "NACHA_GENERATED"
     SUBMITTED = "SUBMITTED"
+    PROCESSED = "PROCESSED"
     REVERSED = "REVERSED"
 
 
-class ACHBatch(Base, AuditMixin):
+class ACHBatch(Base):
     """
-    ACH Batch for processing multiple driver payments electronically.
-    Batch numbers follow format: YYMM-XXX (e.g., 2510-001)
+    ACH Batch for grouping multiple DTR payments
+    
+    Generates NACHA file for bank processing
+    Format: YYMM-XXX (e.g., 2510-987)
     """
     __tablename__ = "ach_batches"
     
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    batch_number: Mapped[str] = mapped_column(
-        String(20), unique=True, nullable=False, index=True,
-        comment="Format: YYMM-XXX (e.g., 2510-001)"
-    )
+    id = Column(Integer, primary_key=True, index=True)
     
-    # Batch Information
-    batch_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False,
-        comment="When the batch was created"
-    )
-    effective_date: Mapped[date] = mapped_column(
-        Date, nullable=False,
-        comment="Effective entry date for ACH processing"
-    )
-    status: Mapped[ACHBatchStatus] = mapped_column(
-        SQLEnum(ACHBatchStatus), nullable=False, 
-        default=ACHBatchStatus.DRAFT, index=True
-    )
+    # Batch Identification
+    batch_number = Column(String(50), unique=True, nullable=False, index=True)
     
-    # Financial Totals
-    total_payments: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0,
-        comment="Number of payments in batch"
-    )
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), nullable=False, default=Decimal("0.00"),
-        comment="Total dollar amount of batch"
-    )
-    
-    # NACHA File Information
-    nacha_file_path: Mapped[Optional[str]] = mapped_column(
-        String(500), nullable=True,
-        comment="S3 path to generated NACHA file"
-    )
-    nacha_generated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    
-    # Reversal Information
-    is_reversed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, index=True
-    )
-    reversed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    reversed_by: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    reversal_reason: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True
-    )
-    
-    def __repr__(self):
-        return f"<ACHBatch {self.batch_number} - {self.total_payments} payments - ${self.total_amount}>"
-
-
-class CompanyBankConfiguration(Base, AuditMixin):
-    """
-    Company bank configuration for NACHA file generation.
-    Stores sensitive banking information for ACH processing.
-    """
-    __tablename__ = "company_bank_configuration"
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    
-    # Company Information
-    company_name: Mapped[str] = mapped_column(
-        String(255), nullable=False,
-        comment="Company name for NACHA file"
-    )
-    company_tax_id: Mapped[str] = mapped_column(
-        String(10), nullable=False,
-        comment="Company EIN or tax ID (10 digits)"
-    )
-    
-    # Bank Information
-    bank_name: Mapped[str] = mapped_column(
-        String(255), nullable=False
-    )
-    bank_routing_number: Mapped[str] = mapped_column(
-        String(9), nullable=False,
-        comment="9-digit ABA routing number"
-    )
-    bank_account_number: Mapped[str] = mapped_column(
-        String(17), nullable=False,
-        comment="Company account number (up to 17 digits)"
-    )
-    
-    # NACHA Configuration
-    immediate_origin: Mapped[str] = mapped_column(
-        String(10), nullable=False,
-        comment="10-digit originator ID for NACHA"
-    )
-    immediate_destination: Mapped[str] = mapped_column(
-        String(10), nullable=False,
-        comment="10-digit destination routing for NACHA"
-    )
-    company_entry_description: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="DRVPAY",
-        comment="Description for NACHA batch (max 10 chars)"
-    )
+    # Dates
+    batch_date = Column(DateTime, nullable=False, default=datetime.utcnow)
+    effective_date = Column(Date, nullable=False)
     
     # Status
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True
-    )
+    status = Column(Enum(ACHBatchStatus), nullable=False, default=ACHBatchStatus.DRAFT)
+    
+    # Summary
+    total_payments = Column(Integer, nullable=False, default=0)
+    total_amount = Column(Numeric(12, 2), nullable=False, default=Decimal('0.00'))
+    
+    # NACHA File
+    nacha_file_path = Column(String(500), nullable=True)
+    nacha_generated_at = Column(DateTime, nullable=True)
+    
+    # Reversal
+    is_reversed = Column(Boolean, default=False)
+    reversed_at = Column(DateTime, nullable=True)
+    reversal_reason = Column(Text, nullable=True)
+    
+    # Audit
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_by = Column(Integer, nullable=True)
+    
+    # Relationships
+    dtrs = relationship("DTR", back_populates="ach_batch")
+    
+    def __repr__(self):
+        return f"<ACHBatch {self.batch_number} - {self.status} - ${self.total_amount}>"
+
+
+class CompanyBankConfiguration(Base):
+    """
+    Company Bank Configuration for NACHA file generation
+    Single active record for the company
+    """
+    __tablename__ = "company_bank_configurations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Company Information
+    company_name = Column(String(255), nullable=False)
+    company_tax_id = Column(String(10), nullable=False)  # EIN (10 digits)
+    
+    # Bank Information
+    bank_name = Column(String(255), nullable=False)
+    bank_routing_number = Column(String(9), nullable=False)  # 9-digit ABA routing
+    bank_account_number = Column(String(17), nullable=False)
+    
+    # NACHA Configuration
+    immediate_origin = Column(String(10), nullable=False)
+    immediate_destination = Column(String(10), nullable=False)
+    company_entry_description = Column(String(10), nullable=False, default="DRVPAY")
+    
+    # Status
+    is_active = Column(Boolean, default=True)
+    
+    # Audit
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     def __repr__(self):
         return f"<CompanyBankConfig {self.company_name} - {self.bank_name}>"

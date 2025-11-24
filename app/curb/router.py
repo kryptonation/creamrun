@@ -22,10 +22,12 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
+
 # Dependency to inject the CurbService
 def get_curb_service(db: Session = Depends(get_db)) -> CurbService:
     """Dependency to get CurbService instance."""
     return CurbService(db)
+
 
 @router.post(
     "/curb/import-by-medallion",
@@ -33,9 +35,17 @@ def get_curb_service(db: Session = Depends(get_db)) -> CurbService:
     status_code=status.HTTP_200_OK,
 )
 def import_curb_data(
-    from_date: Optional[date] = Query(None, description="Start date for the import (YYYY-MM-DD). Defaults to yesterday."),
-    to_date: Optional[date] = Query(None, description="End date for the import (YYYY-MM-DD). Defaults to today."),
-    medallion_no: Optional[str] = Query(None, description="A specific medallion number or a comma-separated list. If omitted, all active medallions are used."),
+    from_date: Optional[date] = Query(
+        None,
+        description="Start date for the import (YYYY-MM-DD). Defaults to yesterday.",
+    ),
+    to_date: Optional[date] = Query(
+        None, description="End date for the import (YYYY-MM-DD). Defaults to today."
+    ),
+    medallion_no: Optional[str] = Query(
+        None,
+        description="A specific medallion number or a comma-separated list. If omitted, all active medallions are used.",
+    ),
     curb_service: CurbService = Depends(get_curb_service),
     _current_user: User = Depends(get_current_user),
 ):
@@ -55,15 +65,23 @@ def import_curb_data(
         )
         return JSONResponse(content=result, status_code=status.HTTP_200_OK)
     except CurbError as e:
-        logger.error("A business logic error occurred during CURB import: %s", e, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        logger.error(
+            "A business logic error occurred during CURB import: %s", e, exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
-        logger.error("An unexpected server error occurred during CURB import: %s", e, exc_info=True)
+        logger.error(
+            "An unexpected server error occurred during CURB import: %s",
+            e,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during the import process."
+            detail="An unexpected error occurred during the import process.",
         ) from e
-    
+
 
 @router.post(
     "/curb/map-trips",
@@ -82,11 +100,14 @@ def map_reconciled_curb_trips(
         result = curb_service.map_reconciled_trips()
         return JSONResponse(content=result, status_code=status.HTTP_200_OK)
     except Exception as e:
-        logger.error("An unexpected error occurred during trip mapping: %s", e, exc_info=True)
+        logger.error(
+            "An unexpected error occurred during trip mapping: %s", e, exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during the mapping process."
+            detail="An unexpected error occurred during the mapping process.",
         ) from e
+
 
 @router.post(
     "/curb/post-earnings-to-ledger",
@@ -94,10 +115,19 @@ def map_reconciled_curb_trips(
     status_code=status.HTTP_200_OK,
 )
 async def post_earnings_to_ledger(
-    start_date: date = Query(..., description="Start date of the period to post earnings for (YYYY-MM-DD)."),
-    end_date: date = Query(..., description="End date of the period to post earnings for (YYYY-MM-DD)."),
-    lease_id: Optional[int] = Query(None, description="Optional: Filter to post earnings for a specific lease ID."),
-    driver_id: Optional[int] = Query(None, description="Optional: Filter to post earnings for a specific driver ID (internal primary key)."),
+    start_date: date = Query(
+        ..., description="Start date of the period to post earnings for (YYYY-MM-DD)."
+    ),
+    end_date: date = Query(
+        ..., description="End date of the period to post earnings for (YYYY-MM-DD)."
+    ),
+    lease_id: Optional[int] = Query(
+        None, description="Optional: Filter to post earnings for a specific lease ID."
+    ),
+    driver_id: Optional[int] = Query(
+        None,
+        description="Optional: Filter to post earnings for a specific driver ID (internal primary key).",
+    ),
     curb_service: CurbService = Depends(get_curb_service),
     _current_user: User = Depends(get_current_user),
 ):
@@ -112,13 +142,15 @@ async def post_earnings_to_ledger(
     """
     try:
         if start_date > end_date:
-            raise HTTPException(status_code=400, detail="The start_date cannot be after the end_date.")
+            raise HTTPException(
+                status_code=400, detail="The start_date cannot be after the end_date."
+            )
 
         result = curb_service.post_mapped_earnings_to_ledger(
             start_date=start_date,
             end_date=end_date,
             lease_id=lease_id,
-            driver_id=driver_id
+            driver_id=driver_id,
         )
 
         # Check for partial failures
@@ -134,16 +166,21 @@ async def post_earnings_to_ledger(
             status_code=status_code,
         )
     except TripProcessingError as e:
-        logger.error("A critical error occurred during earnings posting: %s", e, exc_info=True)
+        logger.error(
+            "A critical error occurred during earnings posting: %s", e, exc_info=True
+        )
         raise HTTPException(
             status_code=500, detail=f"A critical ledger error occurred: {e}"
         ) from e
     except Exception as e:
         logger.error(
-            "An unexpected server error occurred during earnings posting: %s", e, exc_info=True
+            "An unexpected server error occurred during earnings posting: %s",
+            e,
+            exc_info=True,
         )
         raise HTTPException(
-            status_code=500, detail="An unexpected error occurred during the posting process."
+            status_code=500,
+            detail="An unexpected error occurred during the posting process.",
         ) from e
 
 
@@ -156,7 +193,9 @@ def view_all_trips(
     sort_order: str = Query("desc", description="Sort order: 'asc' or 'desc'."),
     trip_id: Optional[str] = Query(None, description="Filter by Trip ID."),
     driver_id: Optional[str] = Query(None, description="Filter by Driver ID / TLC No."),
-    medallion_no: Optional[str] = Query(None, description="Filter by Medallion Number."),
+    medallion_no: Optional[str] = Query(
+        None, description="Filter by Medallion Number."
+    ),
     start_date: Optional[date] = Query(None, description="Filter by trip start date."),
     end_date: Optional[date] = Query(None, description="Filter by trip end date."),
     curb_service: CurbService = Depends(get_curb_service),
@@ -171,24 +210,34 @@ def view_all_trips(
 
     try:
         trips, total_items = curb_service.repo.list_trips(
-            page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
-            trip_id=trip_id, driver_id_tlc=driver_id, medallion_no=medallion_no,
-            start_date=start_date, end_date=end_date,
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            trip_id=trip_id,
+            driver_id_tlc=driver_id,
+            medallion_no=medallion_no,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         response_items = [CurbTripResponse.model_validate(trip) for trip in trips]
         total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
 
         return PaginatedCurbTripResponse(
-            items=response_items, total_items=total_items, page=page,
-            per_page=per_page, total_pages=total_pages
+            items=response_items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
         )
     except Exception as e:
         logger.error("Error fetching trips view: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500, detail="An unexpected error occurred while fetching trip data."
+            status_code=500,
+            detail="An unexpected error occurred while fetching trip data.",
         ) from e
-    
+
 
 @router.get(
     "/view-curb-data",
@@ -208,6 +257,9 @@ def view_curb_data(
     ),
     start_date: Optional[date] = Query(None, description="Filter by trip start date."),
     end_date: Optional[date] = Query(None, description="Filter by trip end date."),
+    transaction_date: Optional[date] = Query(
+        None, description="Filter by transaction date."
+    ),
     curb_service: CurbService = Depends(get_curb_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -217,20 +269,38 @@ def view_curb_data(
     """
     # This endpoint behaves identically to /view for now, but is kept for logical separation
     # as per the UI design.
-    return view_all_trips(
-        use_stubs=use_stubs,
-        page=page,
-        per_page=per_page,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        trip_id=trip_id,
-        driver_id=driver_id,
-        medallion_no=medallion_no,
-        start_date=start_date,
-        end_date=end_date,
-        curb_service=curb_service,
-        _current_user=current_user,
-    )
+
+    # For transaction_date filtering, pass it through to the service layer
+    try:
+        trips, total_items = curb_service.repo.list_trips(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            trip_id=trip_id,
+            driver_id_tlc=driver_id,
+            medallion_no=medallion_no,
+            start_date=start_date,
+            end_date=end_date,
+            transaction_date=transaction_date,
+        )
+
+        response_items = [CurbTripResponse.model_validate(trip) for trip in trips]
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+
+        return PaginatedCurbTripResponse(
+            items=response_items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
+        )
+    except Exception as e:
+        logger.error("Error fetching CURB data: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while fetching CURB data.",
+        ) from e
 
 
 @router.get("/export", summary="Export Trip Data")
@@ -250,30 +320,41 @@ def export_trips(
     Exports filtered trip data to the specified format (Excel or PDF).
     """
     try:
+        # For exports, fetch up to 1 lakh (100,000) records
         trips, _ = curb_service.repo.list_trips(
-            page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
-            trip_id=trip_id, driver_id_tlc=driver_id, medallion_no=medallion_no,
-            start_date=start_date, end_date=end_date,
+            page=1,
+            per_page=100000,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            trip_id=trip_id,
+            driver_id_tlc=driver_id,
+            medallion_no=medallion_no,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         if not trips:
-            raise ValueError("No trip data available for export with the given filters.")
+            raise ValueError(
+                "No trip data available for export with the given filters."
+            )
 
-        export_data = [CurbTripResponse.model_validate(trip).model_dump() for trip in trips]
-        
+        export_data = [
+            CurbTripResponse.model_validate(trip).model_dump() for trip in trips
+        ]
+
         filename = f"trips_export_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
-        
+
         # Use ExporterFactory to get the appropriate exporter
         exporter = ExporterFactory.get_exporter(export_format, export_data)
         file_content = exporter.export()
-        
+
         # Set media type based on export format
         media_types = {
             "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pdf": "application/pdf"
+            "pdf": "application/pdf",
         }
         media_type = media_types.get(export_format, "application/octet-stream")
-        
+
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)
 

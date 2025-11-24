@@ -1,7 +1,17 @@
 # app/dtr/exceptions.py
 
+"""
+Custom exceptions for DTR module
+"""
+
+
 class DTRException(Exception):
     """Base exception for DTR module"""
+    pass
+
+
+class DTRValidationError(DTRException):
+    """Raised when DTR validation fails"""
     pass
 
 
@@ -15,41 +25,68 @@ class DTRNotFoundError(DTRException):
     pass
 
 
-class DTRValidationError(DTRException):
-    """Raised when DTR validation fails"""
-    pass
-
-
 class DTRAlreadyExistsError(DTRException):
-    """Raised when attempting to create duplicate DTR"""
+    """Raised when trying to create duplicate DTR"""
     pass
 
 
-class DTRPeriodError(DTRException):
-    """Raised when payment period is invalid"""
+class DTRStatusError(DTRException):
+    """Raised when DTR is in wrong status for operation"""
     pass
 
 
-class DTRPaymentError(DTRException):
-    """Raised when payment processing fails"""
+class MidWeekTerminationError(DTRException):
+    """Raised when mid-week termination handling fails"""
     pass
 
 
-class DTRVoidError(DTRException):
-    """Raised when voiding DTR fails"""
+class PendingChargesError(DTRException):
+    """Raised when charges are still pending"""
     pass
 
 
-class DTRExportError(DTRException):
-    """Raised when DTR export fails"""
+# app/driver_payments/exceptions.py
+
+"""
+Custom exceptions for Driver Payments module
+"""
+
+
+class DriverPaymentException(Exception):
+    """Base exception for driver payments"""
     pass
 
 
-class DTRCalculationError(DTRException):
-    """Raised when DTR calculation fails"""
+class ACHBatchError(DriverPaymentException):
+    """Base exception for ACH batch operations"""
     pass
 
 
-class InsufficientDataError(DTRException):
-    """Raised when required data is missing for DTR generation"""
+class MissingBankInformationError(ACHBatchError):
+    """Raised when driver is missing bank information"""
+    pass
+
+
+class CompanyBankConfigError(ACHBatchError):
+    """Raised when company bank configuration is missing or invalid"""
+    pass
+
+
+class NACHAGenerationError(ACHBatchError):
+    """Raised when NACHA file generation fails"""
+    pass
+
+
+class ACHBatchNotFoundError(ACHBatchError):
+    """Raised when ACH batch is not found"""
+    pass
+
+
+class ACHBatchReversalError(ACHBatchError):
+    """Raised when batch reversal fails"""
+    pass
+
+
+class InvalidBatchStatusError(ACHBatchError):
+    """Raised when batch is in invalid status for operation"""
     pass

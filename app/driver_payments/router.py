@@ -1,260 +1,200 @@
 # app/driver_payments/router.py
 
-import math
+"""
+Driver Payments Router - Combines DTR and ACH Batch endpoints
+"""
+
 from datetime import date, datetime
-from io import BytesIO
 from typing import Optional
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.core.db import get_db
 from app.users.models import User
 from app.users.utils import get_current_user
+from app.dtr.repository import DTRRepository
+from app.dtr.schemas import DTRListResponse, DTRListItemResponse
+from app.dtr.models import DTRStatus, PaymentMethod
+from app.driver_payments.ach_service import ACHBatchService
+from app.driver_payments.models import ACHBatchStatus
 from app.utils.logger import get_logger
-
-# Import DTR model from app.dtr
-from app.dtr.models import DTRStatus
-from app.dtr.services import DTRService
-from app.dtr.schemas import DTRResponse
-
-# Import ACH-specific models from driver_payments
-from app.driver_payments.models import (
-    ACHBatchStatus, PaymentType
-)
-from app.driver_payments.ach_batch_service import ACHBatchService
-from app.driver_payments.schemas import (
-    ACHBatchCreateRequest, ACHBatchResponse, ACHBatchDetailResponse,
-    PaginatedACHBatchResponse, CheckPaymentRequest,
-    BatchReversalRequest, GenerateDTRsRequest
-)
-from pydantic import BaseModel
-from typing import List
-from app.driver_payments.exceptions import (
-    ACHBatchNotFoundError, MissingBankInformationError,
-    ACHBatchReversalError, CompanyBankConfigError
-)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/payments/driver-payments", tags=["Driver Payments"])
 
 
-# Local schema for pagination
-class PaginatedDTRResponse(BaseModel):
-    """Paginated list of DTRs."""
-    items: List[DTRResponse]
-    total_items: int
-    page: int
-    per_page: int
-    total_pages: int
+# ===== SCHEMAS =====
+
+class ACHBatchCreateRequest(BaseModel):
+    """Request to create ACH batch"""
+    dtr_ids: list[int]
+    effective_date: Optional[date] = None
 
 
-# Dependencies
-def get_dtr_service(db: Session = Depends(get_db)) -> DTRService:
-    """Provides DTRService instance"""
-    return DTRService(db)
+class ACHBatchResponse(BaseModel):
+    """ACH batch response"""
+    id: int
+    batch_number: str
+    batch_date: datetime
+    effective_date: date
+    status: ACHBatchStatus
+    total_payments: int
+    total_amount: float
+    nacha_file_path: Optional[str] = None
+    nacha_generated_at: Optional[datetime] = None
+    is_reversed: bool
+    reversed_at: Optional[datetime] = None
+    reversal_reason: Optional[str] = None
 
 
-def get_ach_service(db: Session = Depends(get_db)) -> ACHBatchService:
-    """Provides ACHBatchService instance"""
-    return ACHBatchService(db)
+class ACHBatchDetailResponse(ACHBatchResponse):
+    """Detailed batch response with DTRs"""
+    dtrs: list[DTRListItemResponse]
 
 
-# DTR ENDPOINTS (Using app.dtr.models.DTR)
+class BatchReversalRequest(BaseModel):
+    """Request to reverse batch"""
+    reason: str
 
-@router.get("", response_model=PaginatedDTRResponse, summary="List Driver Transaction Receipts")
-def list_dtrs(
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
-    sort_by: str = Query("period_end_date", description="Sort field"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
-    
-    # Search filters
-    receipt_number: Optional[str] = Query(None, description="Filter by receipt number"),
-    driver_name: Optional[str] = Query(None, description="Filter by driver name"),
-    
-    # ENHANCED: Comma-separated multi-value filters
-    tlc_license: Optional[str] = Query(
-        None, 
-        description="Filter by TLC License (comma-separated for multiple values, e.g., '5123456,5234567')"
-    ),
-    medallion_no: Optional[str] = Query(
-        None, 
-        description="Filter by Medallion Number (comma-separated for multiple values, e.g., '1Y23,2X45')"
-    ),
-    plate_number: Optional[str] = Query(
-        None, 
-        description="Filter by Plate Number (comma-separated for multiple values, e.g., 'ABC123,DEF456')"
-    ),
-    vin: Optional[str] = Query(
-        None, 
-        description="Filter by VIN (comma-separated for multiple values, e.g., '1HGBH41JXMN109186,2HGBH41JXMN109187')"
-    ),
-    
-    # Date filters
-    period_start_date: Optional[date] = Query(None, description="Filter by period start date (from)"),
-    period_end_date: Optional[date] = Query(None, description="Filter by period start date (to)"),
-    
-    # Status filters
-    payment_type: Optional[PaymentType] = Query(None, description="Filter by payment type"),
-    dtr_status: Optional[DTRStatus] = Query(None, description="Filter by DTR status"),
-    is_paid: Optional[bool] = Query(None, description="Filter by payment status"),
-    
-    # Payment reference filters
-    ach_batch_number: Optional[str] = Query(None, description="Filter by ACH batch number"),
-    check_number: Optional[str] = Query(None, description="Filter by check number"),
-    
-    dtr_service: DTRService = Depends(get_dtr_service),
-    _current_user: User = Depends(get_current_user),
+
+# ===== ENDPOINTS =====
+
+@router.get("/manage", response_model=DTRListResponse)
+def list_driver_payments(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    receipt_number: Optional[str] = Query(None),
+    status: Optional[DTRStatus] = Query(None),
+    payment_method: Optional[PaymentMethod] = Query(None),
+    week_start: Optional[date] = Query(None),
+    week_end: Optional[date] = Query(None),
+    medallion_number: Optional[str] = Query(None),
+    tlc_license: Optional[str] = Query(None),
+    driver_name: Optional[str] = Query(None),
+    check_number: Optional[str] = Query(None),
+    sort_by: str = Query('generation_date'),
+    sort_order: str = Query('desc'),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    List all Driver Transaction Receipts with filtering and pagination.
+    List all driver payments (DTRs) with filtering and sorting.
     
-    ENHANCED FILTERING:
-    Supports comma-separated values for medallion_no, tlc_license, plate_number, and vin.
-    Example: medallion_no=1Y23,2X45,3Z67 will return DTRs matching any of these medallions.
+    This is the main endpoint for the "Manage Driver Payments" screen.
     """
     try:
-        dtrs, total_items = dtr_service.repository.search_dtrs(
+        repo = DTRRepository(db)
+        
+        dtrs, total = repo.list_with_filters(
+            page=page,
+            per_page=per_page,
             receipt_number=receipt_number,
-            driver_name=driver_name,
+            status=status,
+            payment_method=payment_method,
+            week_start=week_start,
+            week_end=week_end,
+            medallion_number=medallion_number,
             tlc_license=tlc_license,
-            medallion_no=medallion_no,
-            plate_number=plate_number,
-            vin=vin,  # NEW: VIN filtering
-            period_start_from=period_start_date,
-            period_start_to=period_end_date,
-            status=dtr_status,
-            ach_batch_number=ach_batch_number,
+            driver_name=driver_name,
             check_number=check_number,
             sort_by=sort_by,
-            sort_order=sort_order,
-            page=page,
-            page_size=per_page
+            sort_order=sort_order
         )
         
-        # Map DTR to response schema
-        response_items = [DTRResponse.model_validate(dtr) for dtr in dtrs]
+        # Map to list item response
+        items = []
+        for dtr in dtrs:
+            items.append(DTRListItemResponse(
+                id=dtr.id,
+                receipt_number=dtr.receipt_number,
+                dtr_number=dtr.dtr_number,
+                week_start_date=dtr.week_start_date,
+                week_end_date=dtr.week_end_date,
+                medallion_number=dtr.medallion.medallion_number if dtr.medallion else None,
+                tlc_license=dtr.primary_driver.tlc_license.tlc_license_number if dtr.primary_driver else None,
+                driver_name=f"{dtr.primary_driver.first_name} {dtr.primary_driver.last_name}" if dtr.primary_driver else None,
+                plate_number=(dtr.vehicle.get_active_plate_number() if dtr.vehicle and hasattr(dtr.vehicle, 'get_active_plate_number')
+                              else (dtr.vehicle.plate_number if dtr.vehicle and getattr(dtr.vehicle, 'plate_number', None) else None)),
+                total_due_to_driver=dtr.total_due_to_driver,
+                status=dtr.status,
+                payment_method=dtr.payment_method,
+                ach_batch_number=dtr.ach_batch_number,
+                check_number=dtr.check_number
+            ))
         
-        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+        total_pages = math.ceil(total / per_page) if total > 0 else 0
         
-        return PaginatedDTRResponse(
-            items=response_items,
-            total_items=total_items,
+        return DTRListResponse(
+            items=items,
+            total=total,
             page=page,
             per_page=per_page,
             total_pages=total_pages
         )
-    
-    except Exception as e:
-        logger.error("Error fetching DTRs", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching DTRs.") from e
-
-
-@router.get("/{dtr_id}", response_model=DTRResponse, summary="Get DTR by ID")
-def get_dtr(
-    dtr_id: int,
-    dtr_service: DTRService = Depends(get_dtr_service),
-    _current_user: User = Depends(get_current_user),
-):
-    """Get a single DTR by ID"""
-    try:
-        dtr = dtr_service.repository.get_by_id(dtr_id)
         
-        if not dtr:
-            raise HTTPException(status_code=404, detail=f"DTR with ID {dtr_id} not found")
-        
-        return DTRResponse.model_validate(dtr)
-    
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("Error fetching DTR", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching the DTR.") from e
+        logger.error(f"Error listing driver payments: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list driver payments") from e
 
 
-@router.post("/generate", status_code=status.HTTP_201_CREATED)
-def generate_dtr(
-    request: GenerateDTRsRequest,
-    dtr_service: DTRService = Depends(get_dtr_service),
-    _current_user: User = Depends(get_current_user),
+@router.get("/ach-batch-mode")
+def get_ach_eligible_payments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Manually generate DTR for specific criteria.
-    Supports filtering by medallion or TLC license.
+    Get DTRs eligible for ACH batch processing.
+    
+    Returns only FINALIZED, unpaid DTRs with ACH payment method.
     """
     try:
-        result = dtr_service.generate_dtrs_for_period(
-            period_start=request.period_start_date,
-            period_end=request.period_end_date,
-            medallion_no=request.medallion_no,
-            tlc_license_no=request.tlc_license_no,
-            auto_finalize=False,
-            regenerate_existing=False
-        )
+        repo = DTRRepository(db)
+        dtrs = repo.get_unpaid_dtrs_for_ach()
+        
+        # Map to response
+        items = []
+        for dtr in dtrs:
+            items.append({
+                'id': dtr.id,
+                'receipt_number': dtr.receipt_number,
+                'week_start_date': str(dtr.week_start_date),
+                'medallion_number': dtr.medallion.medallion_number if dtr.medallion else None,
+                'driver_name': f"{dtr.primary_driver.first_name} {dtr.primary_driver.last_name}" if dtr.primary_driver else None,
+                'total_due': float(dtr.total_due_to_driver)
+            })
+        
+        total_amount = sum(dtr.total_due_to_driver for dtr in dtrs)
         
         return {
-            "message": "DTR generation completed",
-            "total_generated": result['generated_count'],
-            "total_skipped": result['skipped_count'],
-            "total_failed": result['failed_count'],
-            "details": result
+            'eligible_dtrs': items,
+            'total_count': len(items),
+            'total_amount': float(total_amount)
         }
-    
+        
     except Exception as e:
-        logger.error("Error generating DTRs", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to generate DTRs") from e
+        logger.error(f"Error getting ACH eligible payments: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get ACH eligible payments") from e
 
-
-@router.put("/{dtr_id}/check-number")
-def update_check_number(
-    dtr_id: int,
-    request: CheckPaymentRequest,
-    dtr_service: DTRService = Depends(get_dtr_service),
-    db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
-):
-    """Update check number for a DTR"""
-    try:
-        dtr = dtr_service.repository.get_by_id(dtr_id)
-        
-        if not dtr:
-            raise HTTPException(status_code=404, detail=f"DTR with ID {dtr_id} not found")
-        
-        # Update check number
-        dtr.check_number = request.check_number
-        dtr.payment_method = "Check"
-        dtr.payment_date = datetime.now()
-        dtr.status = DTRStatus.PAID
-        
-        db.commit()
-        db.refresh(dtr)
-        
-        return {"message": "Check number updated successfully", "dtr_id": dtr.id}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error updating check number", error=e, exc_info=True)
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update check number") from e
-
-
-# ACH BATCH ENDPOINTS (Unique to driver_payments module)
 
 @router.post("/ach-batch", response_model=ACHBatchResponse, status_code=status.HTTP_201_CREATED)
 def create_ach_batch(
     request: ACHBatchCreateRequest,
-    ach_service: ACHBatchService = Depends(get_ach_service),
-    _current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Create a new ACH batch from selected DTRs.
-    Generates NACHA file for bank processing.
+    Create ACH batch from selected DTRs.
+    
+    Generates NACHA file and marks DTRs as PAID.
     """
     try:
-        batch = ach_service.create_ach_batch(
+        service = ACHBatchService(db)
+        
+        batch = service.create_ach_batch(
             dtr_ids=request.dtr_ids,
             effective_date=request.effective_date
         )
@@ -264,229 +204,211 @@ def create_ach_batch(
             batch_number=batch.batch_number,
             batch_date=batch.batch_date,
             effective_date=batch.effective_date,
-            status=batch.status.value,
+            status=batch.status,
             total_payments=batch.total_payments,
-            total_amount=batch.total_amount,
+            total_amount=float(batch.total_amount),
             nacha_file_path=batch.nacha_file_path,
             nacha_generated_at=batch.nacha_generated_at,
             is_reversed=batch.is_reversed,
             reversed_at=batch.reversed_at,
-            reversal_reason=batch.reversal_reason,
-            created_on=batch.created_on
+            reversal_reason=batch.reversal_reason
         )
-    
-    except (MissingBankInformationError, CompanyBankConfigError) as e:
+        
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error("Error creating ACH batch", error=e, exc_info=True)
+        logger.error(f"Error creating ACH batch: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create ACH batch") from e
 
 
-@router.get("/ach-batch", response_model=PaginatedACHBatchResponse)
+@router.get("/ach-batch")
 def list_ach_batches(
     page: int = Query(1, ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    status_filter: Optional[ACHBatchStatus] = Query(None),
-    ach_service: ACHBatchService = Depends(get_ach_service),
-    _current_user: User = Depends(get_current_user),
+    per_page: int = Query(50, ge=1, le=100),
+    status: Optional[ACHBatchStatus] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """List all ACH batches with pagination"""
+    """List ACH batches with pagination"""
     try:
-        batches, total = ach_service.list_ach_batches(
+        service = ACHBatchService(db)
+        
+        batches, total = service.list_batches(
             page=page,
             per_page=per_page,
-            status_filter=status_filter
+            status=status
         )
         
-        response_items = [
+        items = [
             ACHBatchResponse(
                 id=batch.id,
                 batch_number=batch.batch_number,
                 batch_date=batch.batch_date,
                 effective_date=batch.effective_date,
-                status=batch.status.value,
+                status=batch.status,
                 total_payments=batch.total_payments,
-                total_amount=batch.total_amount,
+                total_amount=float(batch.total_amount),
                 nacha_file_path=batch.nacha_file_path,
                 nacha_generated_at=batch.nacha_generated_at,
                 is_reversed=batch.is_reversed,
                 reversed_at=batch.reversed_at,
-                reversal_reason=batch.reversal_reason,
-                created_on=batch.created_on
+                reversal_reason=batch.reversal_reason
             )
             for batch in batches
         ]
         
-        return PaginatedACHBatchResponse(
-            items=response_items,
-            total_items=total,
-            page=page,
-            per_page=per_page,
-            total_pages=math.ceil(total / per_page) if per_page > 0 else 0
-        )
-    
+        total_pages = math.ceil(total / per_page) if total > 0 else 0
+        
+        return {
+            'items': items,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages
+        }
+        
     except Exception as e:
-        logger.error("Error listing ACH batches", error=e, exc_info=True)
+        logger.error(f"Error listing ACH batches: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to list ACH batches") from e
 
 
 @router.get("/ach-batch/{batch_id}", response_model=ACHBatchDetailResponse)
-def get_ach_batch(
+def get_ach_batch_details(
     batch_id: int,
-    ach_service: ACHBatchService = Depends(get_ach_service),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user)
 ):
-    """Get detailed information about an ACH batch"""
+    """Get ACH batch details with included DTRs"""
     try:
-        batch = ach_service.get_ach_batch_by_id(batch_id)
+        service = ACHBatchService(db)
+        
+        batch = service.get_batch_by_id(batch_id)
         
         if not batch:
-            raise HTTPException(status_code=404, detail=f"ACH batch with ID {batch_id} not found")
+            raise HTTPException(status_code=404, detail="Batch not found")
         
-        # Query DTRs associated with this batch
+        # Get DTRs in this batch
         from app.dtr.models import DTR
         dtrs = db.query(DTR).filter(DTR.ach_batch_id == batch_id).all()
+        
+        # Map DTRs to response
+        dtr_items = []
+        for dtr in dtrs:
+            dtr_items.append(DTRListItemResponse(
+                id=dtr.id,
+                receipt_number=dtr.receipt_number,
+                dtr_number=dtr.dtr_number,
+                week_start_date=dtr.week_start_date,
+                week_end_date=dtr.week_end_date,
+                medallion_number=dtr.medallion.medallion_number if dtr.medallion else None,
+                tlc_license=dtr.primary_driver.tlc_license.tlc_license_number if dtr.primary_driver else None,
+                driver_name=f"{dtr.primary_driver.first_name} {dtr.primary_driver.last_name}" if dtr.primary_driver else None,
+                plate_number=(dtr.vehicle.get_active_plate_number() if dtr.vehicle and hasattr(dtr.vehicle, 'get_active_plate_number')
+                              else (dtr.vehicle.plate_number if dtr.vehicle and getattr(dtr.vehicle, 'plate_number', None) else None)),
+                total_due_to_driver=dtr.total_due_to_driver,
+                status=dtr.status,
+                payment_method=dtr.payment_method,
+                ach_batch_number=dtr.ach_batch_number,
+                check_number=dtr.check_number
+            ))
         
         return ACHBatchDetailResponse(
             id=batch.id,
             batch_number=batch.batch_number,
             batch_date=batch.batch_date,
             effective_date=batch.effective_date,
-            status=batch.status.value,
+            status=batch.status,
             total_payments=batch.total_payments,
-            total_amount=batch.total_amount,
+            total_amount=float(batch.total_amount),
             nacha_file_path=batch.nacha_file_path,
             nacha_generated_at=batch.nacha_generated_at,
             is_reversed=batch.is_reversed,
             reversed_at=batch.reversed_at,
             reversal_reason=batch.reversal_reason,
-            created_on=batch.created_on,
-            updated_on=batch.updated_on,
-            dtr_ids=[dtr.id for dtr in dtrs]
+            dtrs=dtr_items
         )
-    
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error fetching ACH batch", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch ACH batch") from e
+        logger.error(f"Error getting batch details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get batch details") from e
 
 
-@router.get("/ach-batch/{batch_id}/nacha", response_class=StreamingResponse)
+@router.post("/ach-batch/{batch_id}/reverse", response_model=ACHBatchResponse)
+def reverse_ach_batch(
+    batch_id: int,
+    request: BatchReversalRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Reverse an ACH batch.
+    
+    Reverts all DTRs to FINALIZED status and marks batch as reversed.
+    """
+    try:
+        service = ACHBatchService(db)
+        
+        batch = service.reverse_ach_batch(
+            batch_id=batch_id,
+            reason=request.reason
+        )
+        
+        return ACHBatchResponse(
+            id=batch.id,
+            batch_number=batch.batch_number,
+            batch_date=batch.batch_date,
+            effective_date=batch.effective_date,
+            status=batch.status,
+            total_payments=batch.total_payments,
+            total_amount=float(batch.total_amount),
+            nacha_file_path=batch.nacha_file_path,
+            nacha_generated_at=batch.nacha_generated_at,
+            is_reversed=batch.is_reversed,
+            reversed_at=batch.reversed_at,
+            reversal_reason=batch.reversal_reason
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error reversing batch: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to reverse batch") from e
+
+
+@router.get("/ach-batch/{batch_id}/download-nacha")
 def download_nacha_file(
     batch_id: int,
-    ach_service: ACHBatchService = Depends(get_ach_service),
-    _current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Download NACHA file for an ACH batch"""
+    """Download NACHA file for ACH batch"""
     try:
-        batch = ach_service.get_ach_batch_by_id(batch_id)
+        service = ACHBatchService(db)
+        
+        batch = service.get_batch_by_id(batch_id)
         
         if not batch:
-            raise HTTPException(status_code=404, detail=f"ACH batch with ID {batch_id} not found")
+            raise HTTPException(status_code=404, detail="Batch not found")
         
         if not batch.nacha_file_path:
             raise HTTPException(status_code=404, detail="NACHA file not generated yet")
         
-        # Read NACHA file content
-        with open(batch.nacha_file_path, 'rb') as f:
-            nacha_content = f.read()
+        from pathlib import Path
+        file_path = Path(batch.nacha_file_path)
         
-        return StreamingResponse(
-            BytesIO(nacha_content),
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="NACHA file not found on disk")
+        
+        return FileResponse(
+            path=file_path,
             media_type="text/plain",
-            headers={
-                "Content-Disposition": f"attachment; filename={batch.batch_number}.txt"
-            }
+            filename=f"{batch.batch_number}.ach"
         )
-    
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error downloading NACHA file", error=e, exc_info=True)
+        logger.error(f"Error downloading NACHA file: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to download NACHA file") from e
-
-
-@router.post("/ach-batch/{batch_id}/reverse")
-def reverse_ach_batch(
-    batch_id: int,
-    request: BatchReversalRequest,
-    ach_service: ACHBatchService = Depends(get_ach_service),
-    _current_user: User = Depends(get_current_user),
-):
-    """Reverse an ACH batch"""
-    try:
-        ach_service.reverse_ach_batch(batch_id, request.reason)
-        
-        return {"message": "ACH batch reversed successfully", "batch_id": batch_id}
-    
-    except ACHBatchNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except ACHBatchReversalError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        logger.error("Error reversing ACH batch", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to reverse ACH batch") from e
-
-
-# Export functionality
-@router.get("/export/csv")
-def export_dtrs_csv(
-    period_start_date: Optional[date] = Query(None),
-    period_end_date: Optional[date] = Query(None),
-    dtr_service: DTRService = Depends(get_dtr_service),
-    _current_user: User = Depends(get_current_user),
-):
-    """Export DTRs to CSV"""
-    try:
-        dtrs, _ = dtr_service.repository.search_dtrs(
-            period_start_from=period_start_date,
-            period_start_to=period_end_date,
-            page=1,
-            page_size=10000  # Get all
-        )
-        
-        # Generate CSV content
-        import csv
-        from io import StringIO
-        
-        output = StringIO()
-        writer = csv.writer(output)
-        
-        # Header
-        writer.writerow([
-            'Receipt Number', 'Driver Name', 'TLC License', 'Medallion', 'Plate Number',
-            'Period Start', 'Period End', 'Gross Earnings', 'Total Deductions',
-            'Net Earnings', 'Total Due', 'Payment Method', 'Status'
-        ])
-        
-        # Data
-        for dtr in dtrs:
-            writer.writerow([
-                dtr.receipt_number,
-                f"{dtr.driver.first_name} {dtr.driver.last_name}" if dtr.driver else '',
-                dtr.driver.tlc_license.tlc_license_number if dtr.driver and dtr.driver.tlc_license else '',
-                dtr.medallion.medallion_number if dtr.medallion else '',
-                dtr.vehicle.get_active_plate_number() if dtr.vehicle else '',
-                dtr.period_start_date,
-                dtr.period_end_date,
-                dtr.total_gross_earnings,
-                dtr.subtotal_deductions,
-                dtr.net_earnings,
-                dtr.total_due_to_driver,
-                dtr.payment_method or '',
-                dtr.status.value
-            ])
-        
-        output.seek(0)
-        
-        return StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=dtrs_export.csv"}
-        )
-    
-    except Exception as e:
-        logger.error("Error exporting DTRs to CSV", error=e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to export DTRs") from e

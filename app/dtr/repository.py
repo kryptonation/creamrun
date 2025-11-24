@@ -1,469 +1,262 @@
 # app/dtr/repository.py
 
 from datetime import date
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
+from decimal import Decimal
 
+from sqlalchemy import and_, or_, desc, asc, func
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, func
 
-from app.dtr.models import DTR, DTRStatus
+from app.dtr.models import DTR, DTRStatus, PaymentMethod
+from app.drivers.models import Driver
+from app.vehicles.models import Vehicle
+from app.medallions.models import Medallion
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class DTRRepository:
-    """
-    DTR Repository - Supports lease-based queries
-    
-    Key Changes:
-    - get_by_lease_period: Query by lease and period (not driver)
-    - Removed driver_id from unique lookups
-    - All methods updated for lease-centric approach
-    """
+    """Repository for DTR data access"""
     
     def __init__(self, db: Session):
         self.db = db
     
-    def create(self, dtr_data: dict) -> DTR:
-        """Create a new DTR"""
-        dtr = DTR(**dtr_data)
-        self.db.add(dtr)
-        self.db.flush()  # Flush to get ID without committing
-        return dtr
-    
     def get_by_id(self, dtr_id: int) -> Optional[DTR]:
-        """Get DTR by ID"""
-        return self.db.query(DTR).filter(DTR.id == dtr_id).first()
-    
-    def get_by_dtr_number(self, dtr_number: str) -> Optional[DTR]:
-        """Get DTR by DTR number"""
-        return self.db.query(DTR).filter(DTR.dtr_number == dtr_number).first()
+        """Get DTR by ID with all relationships loaded"""
+        return (
+            self.db.query(DTR)
+            .options(
+                joinedload(DTR.lease),
+                joinedload(DTR.primary_driver),
+                joinedload(DTR.vehicle),
+                joinedload(DTR.medallion),
+                joinedload(DTR.ach_batch)
+            )
+            .filter(DTR.id == dtr_id)
+            .first()
+        )
     
     def get_by_receipt_number(self, receipt_number: str) -> Optional[DTR]:
         """Get DTR by receipt number"""
         return self.db.query(DTR).filter(DTR.receipt_number == receipt_number).first()
     
-    def get_by_lease_period(
-        self, 
-        lease_id: int, 
-        period_start: date, 
-        period_end: date
-    ) -> Optional[DTR]:
-        """
-        CORRECTED: Get DTR by lease and period (removed driver_id).
-        
-        Returns the DTR for the given lease and period.
-        Should only return ONE DTR per lease per period due to unique constraint.
-        """
-        return self.db.query(DTR).filter(
-            and_(
-                DTR.lease_id == lease_id,
-                DTR.period_start_date == period_start,
-                DTR.period_end_date == period_end
-            )
-        ).first()
+    def get_by_dtr_number(self, dtr_number: str) -> Optional[DTR]:
+        """Get DTR by DTR number"""
+        return self.db.query(DTR).filter(DTR.dtr_number == dtr_number).first()
     
-    def check_dtr_exists(
-        self, 
-        lease_id: int, 
-        period_start: date
-    ) -> bool:
-        """
-        CORRECTED: Check if DTR exists for lease and period start.
-        
-        Simplified - no longer needs driver_id.
-        """
-        return self.db.query(DTR).filter(
-            and_(
-                DTR.lease_id == lease_id,
-                DTR.period_start_date == period_start
-            )
-        ).first() is not None
-    
-    def get_dtrs_by_lease(
-        self, 
+    def get_by_lease_and_period(
+        self,
         lease_id: int,
-        status: Optional[DTRStatus] = None,
-        limit: Optional[int] = None
-    ) -> List[DTR]:
-        """Get all DTRs for a lease"""
-        query = self.db.query(DTR).filter(DTR.lease_id == lease_id)
-        
-        if status:
-            query = query.filter(DTR.status == status)
-        
-        query = query.order_by(DTR.period_start_date.desc())
-        
-        if limit:
-            query = query.limit(limit)
-        
-        return query.all()
-    
-    def get_dtrs_by_driver(
-        self, 
-        driver_id: int,
-        status: Optional[DTRStatus] = None,
-        limit: Optional[int] = None
-    ) -> List[DTR]:
-        """
-        Get DTRs where driver is the primary leaseholder.
-        
-        Note: This only returns DTRs where the driver is the primary driver.
-        Additional driver information is in the additional_drivers_detail JSON.
-        """
-        query = self.db.query(DTR).filter(DTR.driver_id == driver_id)
-        
-        if status:
-            query = query.filter(DTR.status == status)
-        
-        query = query.order_by(DTR.period_start_date.desc())
-        
-        if limit:
-            query = query.limit(limit)
-        
-        return query.all()
-    
-    def get_dtrs_by_period(
-        self,
-        period_start: date,
-        period_end: date,
-        status: Optional[DTRStatus] = None
-    ) -> List[DTR]:
-        """Get all DTRs for a specific period"""
-        query = self.db.query(DTR).filter(
-            and_(
-                DTR.period_start_date == period_start,
-                DTR.period_end_date == period_end
+        week_start: date
+    ) -> Optional[DTR]:
+        """Get DTR for a specific lease and week"""
+        return (
+            self.db.query(DTR)
+            .filter(
+                and_(
+                    DTR.lease_id == lease_id,
+                    DTR.week_start_date == week_start
+                )
             )
+            .first()
         )
-        
-        if status:
-            query = query.filter(DTR.status == status)
-        
-        return query.order_by(DTR.lease_id).all()
     
-    def get_dtrs_by_status(self, status: DTRStatus) -> List[DTR]:
-        """Get all DTRs with specific status"""
-        return self.db.query(DTR).filter(DTR.status == status).all()
-    
-    def get_unpaid_dtrs(self, lease_id: Optional[int] = None) -> List[DTR]:
-        """Get all unpaid DTRs (FINALIZED but not PAID)"""
-        query = self.db.query(DTR).filter(
-            DTR.status == DTRStatus.FINALIZED
-        )
-        
-        if lease_id:
-            query = query.filter(DTR.lease_id == lease_id)
-        
-        return query.order_by(DTR.period_start_date).all()
-    
-    def get_last_dtr_for_lease(self, lease_id: int) -> Optional[DTR]:
-        """Get the most recent DTR for a lease"""
-        return self.db.query(DTR).filter(
-            DTR.lease_id == lease_id
-        ).order_by(DTR.period_end_date.desc()).first()
-    
-    def update(self, dtr_id: int, update_data: dict) -> DTR:
-        """Update DTR"""
-        dtr = self.get_by_id(dtr_id)
-        if not dtr:
-            raise ValueError(f"DTR with ID {dtr_id} not found")
-        
-        for key, value in update_data.items():
-            if hasattr(dtr, key):
-                setattr(dtr, key, value)
-        
-        self.db.flush()
-        return dtr
-    
-    def delete(self, dtr_id: int) -> bool:
-        """Delete DTR"""
-        dtr = self.get_by_id(dtr_id)
-        if not dtr:
-            return False
-        
-        self.db.delete(dtr)
-        self.db.flush()
-        return True
-    
-    def update_status(self, dtr_id: int, new_status: DTRStatus) -> DTR:
-        """Update DTR status"""
-        return self.update(dtr_id, {'status': new_status})
-    
-    def mark_as_paid(
-        self, 
-        dtr_id: int, 
-        payment_method: str,
-        payment_date: date,
-        ach_batch_number: Optional[str] = None,
-        check_number: Optional[str] = None
-    ) -> DTR:
-        """Mark DTR as paid"""
-        update_data = {
-            'status': DTRStatus.PAID,
-            'payment_method': payment_method,
-            'payment_date': payment_date
-        }
-        
-        if ach_batch_number:
-            update_data['ach_batch_number'] = ach_batch_number
-        
-        if check_number:
-            update_data['check_number'] = check_number
-        
-        return self.update(dtr_id, update_data)
-    
-    def void_dtr(self, dtr_id: int, reason: str) -> DTR:
-        """Void a DTR"""
-        return self.update(dtr_id, {
-            'status': DTRStatus.VOIDED,
-            'voided_reason': reason
-        })
-    
-    def search_dtrs(
+    def list_with_filters(
         self,
-        lease_id: Optional[int] = None,
-        driver_id: Optional[int] = None,
-        vehicle_id: Optional[int] = None,
-        medallion_id: Optional[int] = None,
-        status: Optional[DTRStatus] = None,
-        period_start_from: Optional[date] = None,
-        period_start_to: Optional[date] = None,
-        dtr_number: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 50,
         receipt_number: Optional[str] = None,
+        status: Optional[DTRStatus] = None,
+        payment_method: Optional[PaymentMethod] = None,
+        week_start: Optional[date] = None,
+        week_end: Optional[date] = None,
+        medallion_number: Optional[str] = None,
+        tlc_license: Optional[str] = None,
         driver_name: Optional[str] = None,
-        tlc_license: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
-        medallion_no: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
-        plate_number: Optional[str] = None,  # SUPPORTS COMMA-SEPARATED
-        vin: Optional[str] = None,  # NEW: SUPPORTS COMMA-SEPARATED
+        plate_number: Optional[str] = None,
         ach_batch_number: Optional[str] = None,
         check_number: Optional[str] = None,
-        sort_by: str = "period_start_date",
-        sort_order: str = "desc",
-        page: int = 1,
-        page_size: int = 50
+        sort_by: str = 'generation_date',
+        sort_order: str = 'desc'
     ) -> Tuple[List[DTR], int]:
         """
-        Search DTRs with multiple filters including comma-separated multi-value support.
+        List DTRs with comprehensive filtering and sorting.
         
-        ENHANCED FILTERING:
-        - tlc_license: Comma-separated list (e.g., "5123456,5234567,5345678")
-        - medallion_no: Comma-separated list (e.g., "1Y23,2X45,3Z67")
-        - plate_number: Comma-separated list (e.g., "ABC123,DEF456,GHI789")
-        - vin: Comma-separated list (e.g., "1HGBH41JXMN109186,2HGBH41JXMN109187")
-        
-        Returns: (list of DTRs, total count)
+        Returns: (list_of_dtrs, total_count)
         """
-        from app.drivers.models import Driver, TLCLicense
-        from app.vehicles.models import Vehicle, VehicleRegistration
-        from app.medallions.models import Medallion
-        
-        # Build base query with eager loading for performance
         query = self.db.query(DTR).options(
-            joinedload(DTR.driver).joinedload(Driver.tlc_license),
-            joinedload(DTR.vehicle).joinedload(Vehicle.registrations),
-            joinedload(DTR.medallion),
-            joinedload(DTR.lease)
+            joinedload(DTR.lease),
+            joinedload(DTR.primary_driver),
+            joinedload(DTR.vehicle),
+            joinedload(DTR.medallion)
         )
         
-        # Simple ID filters
-        if lease_id:
-            query = query.filter(DTR.lease_id == lease_id)
-        
-        if driver_id:
-            query = query.filter(DTR.driver_id == driver_id)
-        
-        if vehicle_id:
-            query = query.filter(DTR.vehicle_id == vehicle_id)
-        
-        if medallion_id:
-            query = query.filter(DTR.medallion_id == medallion_id)
+        # Apply filters
+        if receipt_number:
+            query = query.filter(DTR.receipt_number.ilike(f'%{receipt_number}%'))
         
         if status:
             query = query.filter(DTR.status == status)
         
-        # Date range filters
-        if period_start_from:
-            query = query.filter(DTR.period_start_date >= period_start_from)
+        if payment_method:
+            query = query.filter(DTR.payment_method == payment_method)
         
-        if period_start_to:
-            query = query.filter(DTR.period_start_date <= period_start_to)
+        if week_start:
+            query = query.filter(DTR.week_start_date >= week_start)
         
-        # Number filters
-        if dtr_number:
-            query = query.filter(DTR.dtr_number.ilike(f"%{dtr_number}%"))
+        if week_end:
+            query = query.filter(DTR.week_end_date <= week_end)
         
-        if receipt_number:
-            query = query.filter(DTR.receipt_number.ilike(f"%{receipt_number}%"))
+        if ach_batch_number:
+            query = query.filter(DTR.ach_batch_number == ach_batch_number)
         
-        # Driver name filter (searches first, last, and full name)
+        if check_number:
+            query = query.filter(DTR.check_number.ilike(f'%{check_number}%'))
+        
+        # Join filters
+        if medallion_number:
+            query = query.join(DTR.medallion).filter(
+                Medallion.medallion_number.ilike(f'%{medallion_number}%')
+            )
+        
+        if tlc_license:
+            query = query.join(DTR.primary_driver).filter(
+                Driver.tlc_license.ilike(f'%{tlc_license}%')
+            )
+        
         if driver_name:
-            query = query.join(Driver, DTR.driver_id == Driver.id).filter(
+            query = query.join(DTR.primary_driver).filter(
                 or_(
-                    Driver.first_name.ilike(f"%{driver_name}%"),
-                    Driver.last_name.ilike(f"%{driver_name}%"),
-                    func.concat(Driver.first_name, ' ', Driver.last_name).ilike(f"%{driver_name}%")
+                    Driver.first_name.ilike(f'%{driver_name}%'),
+                    Driver.last_name.ilike(f'%{driver_name}%')
                 )
             )
         
-        # TLC LICENSE - COMMA-SEPARATED SUPPORT
-        if tlc_license:
-            # Split by comma and strip whitespace
-            tlc_numbers = [num.strip() for num in tlc_license.split(',') if num.strip()]
-            
-            if tlc_numbers:
-                # Build OR conditions for each TLC license number
-                tlc_conditions = []
-                for tlc_num in tlc_numbers:
-                    tlc_conditions.append(TLCLicense.tlc_license_number.ilike(f"%{tlc_num}%"))
-                
-                query = query.join(Driver, DTR.driver_id == Driver.id)\
-                             .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)\
-                             .filter(or_(*tlc_conditions))
-        
-        # MEDALLION NUMBER - COMMA-SEPARATED SUPPORT
-        if medallion_no:
-            # Split by comma and strip whitespace
-            medallion_numbers = [num.strip() for num in medallion_no.split(',') if num.strip()]
-            
-            if medallion_numbers:
-                # Build OR conditions for each medallion number
-                medallion_conditions = []
-                for med_num in medallion_numbers:
-                    medallion_conditions.append(Medallion.medallion_number.ilike(f"%{med_num}%"))
-                
-                query = query.join(Medallion, DTR.medallion_id == Medallion.id)\
-                             .filter(or_(*medallion_conditions))
-        
-        # PLATE NUMBER - COMMA-SEPARATED SUPPORT
         if plate_number:
-            # Split by comma and strip whitespace
-            plate_numbers = [num.strip() for num in plate_number.split(',') if num.strip()]
-            
-            if plate_numbers:
-                # Build OR conditions for each plate number
-                plate_conditions = []
-                for plate_num in plate_numbers:
-                    plate_conditions.append(VehicleRegistration.plate_number.ilike(f"%{plate_num}%"))
-                
-                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
-                             .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)\
-                             .filter(or_(*plate_conditions))
-        
-        # VIN - NEW: COMMA-SEPARATED SUPPORT
-        if vin:
-            # Split by comma and strip whitespace
-            vin_numbers = [v.strip() for v in vin.split(',') if v.strip()]
-            
-            if vin_numbers:
-                # Build OR conditions for each VIN
-                vin_conditions = []
-                for vin_num in vin_numbers:
-                    vin_conditions.append(Vehicle.vin.ilike(f"%{vin_num}%"))
-                
-                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
-                             .filter(or_(*vin_conditions))
-        
-        # ACH batch number filter
-        if ach_batch_number:
-            query = query.filter(DTR.ach_batch_number.ilike(f"%{ach_batch_number}%"))
-        
-        # Check number filter
-        if check_number:
-            query = query.filter(DTR.check_number.ilike(f"%{check_number}%"))
+            query = query.join(DTR.vehicle).filter(
+                Vehicle.plate_number.ilike(f'%{plate_number}%')
+            )
         
         # Get total count before pagination
         total = query.count()
         
         # Apply sorting
-        sort_mapping = {
-            "period_start_date": DTR.period_start_date,
-            "period_end_date": DTR.period_end_date,
-            "receipt_number": DTR.receipt_number,
-            "driver_name": Driver.first_name,  # Requires driver join
-            "tlc_license": TLCLicense.tlc_license_number,  # Requires joins
-            "medallion_number": Medallion.medallion_number,  # Requires medallion join
-            "plate_number": VehicleRegistration.plate_number,  # Requires vehicle joins
-            "status": DTR.status,
-            "total_due_to_driver": DTR.total_due_to_driver,
-            "generation_date": DTR.generation_date
-        }
-        
-        if sort_by in sort_mapping:
-            sort_column = sort_mapping[sort_by]
-            
-            # Add necessary joins for sorting if not already joined
-            if sort_by == "driver_name" and driver_name is None:
-                query = query.join(Driver, DTR.driver_id == Driver.id)
-            elif sort_by == "tlc_license" and tlc_license is None:
-                query = query.join(Driver, DTR.driver_id == Driver.id)\
-                             .join(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)
-            elif sort_by == "medallion_number" and medallion_no is None:
-                query = query.join(Medallion, DTR.medallion_id == Medallion.id)
-            elif sort_by == "plate_number" and plate_number is None:
-                query = query.join(Vehicle, DTR.vehicle_id == Vehicle.id)\
-                             .join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id)
-            
-            if sort_order.lower() == "asc":
-                query = query.order_by(sort_column.asc())
-            else:
-                query = query.order_by(sort_column.desc())
+        sort_column = getattr(DTR, sort_by, DTR.generation_date)
+        if sort_order == 'desc':
+            query = query.order_by(desc(sort_column))
         else:
-            # Default sorting
-            query = query.order_by(DTR.period_start_date.desc())
+            query = query.order_by(asc(sort_column))
         
         # Apply pagination
-        dtrs = query.offset((page - 1) * page_size)\
-                   .limit(page_size)\
-                   .all()
+        offset = (page - 1) * per_page
+        dtrs = query.offset(offset).limit(per_page).all()
         
         return dtrs, total
     
-    def get_dtrs_for_ach_batch(
-        self,
-        status: DTRStatus = DTRStatus.FINALIZED,
-        payment_method: str = 'ACH'
-    ) -> List[DTR]:
-        """Get DTRs eligible for ACH batch processing"""
-        return self.db.query(DTR).filter(
-            and_(
-                DTR.status == status,
-                DTR.payment_method == payment_method,
-                DTR.ach_batch_number.is_(None)  # Not already in a batch
+    def get_unpaid_dtrs_for_ach(self) -> List[DTR]:
+        """Get all unpaid DTRs eligible for ACH payment"""
+        return (
+            self.db.query(DTR)
+            .filter(
+                and_(
+                    DTR.status == DTRStatus.FINALIZED,
+                    DTR.payment_method == PaymentMethod.ACH,
+                    DTR.ach_batch_id.is_(None),
+                    DTR.payment_date.is_(None)
+                )
             )
-        ).order_by(DTR.period_start_date).all()
+            .all()
+        )
     
-    def get_statistics(
+    def get_dtrs_by_ids(self, dtr_ids: List[int]) -> List[DTR]:
+        """Get multiple DTRs by IDs"""
+        return (
+            self.db.query(DTR)
+            .options(
+                joinedload(DTR.primary_driver),
+                joinedload(DTR.lease)
+            )
+            .filter(DTR.id.in_(dtr_ids))
+            .all()
+        )
+    
+    def update_check_number(
         self,
-        period_start: Optional[date] = None,
-        period_end: Optional[date] = None
-    ) -> dict:
-        """Get DTR statistics for reporting"""
-        query = self.db.query(DTR)
+        dtr_id: int,
+        check_number: str,
+        payment_date: Optional[date] = None
+    ) -> DTR:
+        """Update check number for a DTR"""
+        dtr = self.get_by_id(dtr_id)
         
-        if period_start:
-            query = query.filter(DTR.period_start_date >= period_start)
+        if not dtr:
+            raise ValueError(f"DTR {dtr_id} not found")
         
-        if period_end:
-            query = query.filter(DTR.period_end_date <= period_end)
+        dtr.check_number = check_number
+        dtr.status = DTRStatus.PAID
+        dtr.payment_date = payment_date or date.today()
         
-        all_dtrs = query.all()
+        self.db.commit()
+        self.db.refresh(dtr)
         
-        from decimal import Decimal
-        from collections import Counter
+        return dtr
+    
+    def finalize_dtr(self, dtr_id: int, user_id: int) -> DTR:
+        """Manually finalize a DRAFT DTR (when all charges confirmed)"""
+        dtr = self.get_by_id(dtr_id)
         
-        total_count = len(all_dtrs)
-        status_counts = Counter(dtr.status.value for dtr in all_dtrs)
+        if not dtr:
+            raise ValueError(f"DTR {dtr_id} not found")
         
-        total_gross_earnings = sum((dtr.total_gross_earnings for dtr in all_dtrs), Decimal("0.00"))
-        total_deductions = sum((dtr.subtotal_deductions for dtr in all_dtrs), Decimal("0.00"))
-        total_net_earnings = sum((dtr.net_earnings for dtr in all_dtrs), Decimal("0.00"))
-        total_due_to_drivers = sum((dtr.total_due_to_driver for dtr in all_dtrs), Decimal("0.00"))
+        if dtr.status != DTRStatus.DRAFT:
+            raise ValueError(f"DTR {dtr_id} is not in DRAFT status")
+        
+        dtr.status = DTRStatus.FINALIZED
+        dtr.has_pending_charges = False
+        dtr.pending_charge_categories = None
+        dtr.finalized_at = date.today()
+        dtr.finalized_by = user_id
+        
+        self.db.commit()
+        self.db.refresh(dtr)
+        
+        return dtr
+    
+    def get_summary_stats(
+        self,
+        week_start: Optional[date] = None,
+        week_end: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """Get summary statistics for DTRs"""
+        query = self.db.query(
+            func.count(DTR.id).label('total_count'),
+            func.sum(DTR.total_due_to_driver).label('total_amount'),
+            func.sum(
+                func.case(
+                    (DTR.status == DTRStatus.PAID, DTR.total_due_to_driver),
+                    else_=Decimal('0.00')
+                )
+            ).label('paid_amount'),
+            func.sum(
+                func.case(
+                    (DTR.status != DTRStatus.PAID, DTR.total_due_to_driver),
+                    else_=Decimal('0.00')
+                )
+            ).label('unpaid_amount')
+        )
+        
+        if week_start:
+            query = query.filter(DTR.week_start_date >= week_start)
+        
+        if week_end:
+            query = query.filter(DTR.week_end_date <= week_end)
+        
+        result = query.first()
         
         return {
-            'total_dtrs': total_count,
-            'by_status': dict(status_counts),
-            'total_gross_earnings': float(total_gross_earnings),
-            'total_deductions': float(total_deductions),
-            'total_net_earnings': float(total_net_earnings),
-            'total_due_to_drivers': float(total_due_to_drivers),
-            'average_dtr_amount': float(total_due_to_drivers / total_count) if total_count > 0 else 0
+            'total_count': result.total_count or 0,
+            'total_amount': result.total_amount or Decimal('0.00'),
+            'paid_amount': result.paid_amount or Decimal('0.00'),
+            'unpaid_amount': result.unpaid_amount or Decimal('0.00')
         }

@@ -290,15 +290,17 @@ class Driver(Base, AuditMixin):
     driver_notes = relationship("DriverNote", back_populates="driver")
     
     transaction_receipts = relationship(
-        "DTR", 
-        back_populates="driver",
-        viewonly=True
+        "DTR",
+        back_populates="primary_driver",
+        viewonly=True,
+        foreign_keys="DTR.primary_driver_id"
     )
-    
+
     dtrs = relationship(
-        "DTR", 
-        back_populates="driver",
-        viewonly=True
+        "DTR",
+        back_populates="primary_driver",
+        viewonly=True,
+        foreign_keys="DTR.primary_driver_id"
     )
 
     def to_dict(self):

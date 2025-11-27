@@ -165,7 +165,11 @@ class S3Utils:
             structured_data_str = custom_metadata.get('structured-data')
             if structured_data_str:
                 try:
-                    processed_data['extracted_data'] = json.loads(structured_data_str)
+                    parse = json.loads(structured_data_str)
+                    if not parse:
+                        parse = {}
+
+                    processed_data['extracted_data'] = parse
                 except (json.JSONDecodeError, TypeError):
                     logger.error(f"Failed to parse structured-data JSON from S3 metadata for key: {key}")
                     processed_data['extracted_data'] = {"error": "Invalid JSON in metadata", "raw_data": structured_data_str}

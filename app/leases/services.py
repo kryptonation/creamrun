@@ -65,7 +65,7 @@ class LeaseService:
         lease_amount: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
-        exclude_additional_drivers: Optional[bool] = True,
+        exclude_additional_drivers: Optional[bool] = None,
         multiple: bool = False,
     ) -> Union[Lease, List[Lease], None]:
         """Get a lease by ID, vehicle ID, or status"""
@@ -170,7 +170,7 @@ class LeaseService:
                     )
                 )
             # ✅ NEW: Exclude additional drivers if requested
-            if exclude_additional_drivers:
+            if exclude_additional_drivers is not None:
                 logger.info(
                     f"Filtering leases for tlc_number={tlc_number}: excluding additional drivers"
                 )

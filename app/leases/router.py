@@ -30,8 +30,7 @@ from app.leases.utils import (
 from app.uploads.services import upload_service
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter.excel_exporter import ExcelExporter
-from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.exporter_utils import ExporterFactory
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -188,7 +187,7 @@ def list_leases(
     sort_by: Optional[str] = Query(None, description="Sort by field"),
     sort_order: Optional[str] = Query(None, description="Sort order"),
     exclude_additional_drivers: Optional[bool] = Query(
-        True, 
+        None , 
         description="Exclude leases where driver is additional driver (default: true)"
     ),  # ✅ NEW PARAMETER
     logged_in_user: User = Depends(get_current_user),
@@ -338,40 +337,34 @@ def view_lease(
         ) from e
 
 
-@router.get("/lease/export", summary="Export all the leases", tags=["Leases"])
+@router.get("/lease/export", summary="Export Leases Data")
 def export_leases(
+    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
+    sort_by: Optional[str] = Query(None),
+    sort_order: str = Query("desc"),
+    lease_id: Optional[str] = Query(None),
+    medallion_no: Optional[str] = Query(None),
+    tlc_number: Optional[str] = Query(None),
+    driver_id: Optional[str] = Query(None),
+    driver_name: Optional[str] = Query(None),
+    vin_no: Optional[str] = Query(None),
+    lease_type: Optional[str] = Query(None),
+    plate_no: Optional[str] = Query(None),
+    lease_start_date: Optional[date] = Query(None),
+    lease_end_date: Optional[date] = Query(None),
+    status: Optional[str] = Query(None),
+    exclude_additional_drivers: Optional[bool] = Query(True),
     db: Session = Depends(get_db),
-    format: Optional[str] = Query("excel", enum=["excel", "pdf"]),
-    page: int = Query(None, description="Page number"),
-    per_page: int = Query(None, description="Number of leases per page"),
-    lease_id: Optional[str] = Query(None, description="Filter by lease ID"),
-    medallion_no: Optional[str] = Query(None, description="Filter by medallion number"),
-    tlc_number: Optional[str] = Query(None, description="Filter by TLC license number"),
-    driver_id: Optional[str] = Query(None, description="Filter by driver ID"),
-    driver_name: Optional[str] = Query(None, description="Filter by driver name"),
-    vin_no: Optional[str] = Query(None, description="Filter by VIN number"),
-    lease_type: Optional[str] = Query(None, description="Filter by lease type"),
-    plate_no: Optional[str] = Query(None, description="Filter by plate number"),
-    lease_start_date: Optional[date] = Query(
-        None, description="Filter by lease start date"
-    ),
-    lease_end_date: Optional[date] = Query(
-        None, description="Filter by lease end date"
-    ),
-    status: Optional[str] = Query(None, description="Filter by lease status"),
-    exclude_additional_drivers: Optional[bool] = Query(
-        True, 
-        description="Exclude leases where driver is additional driver (default: true)"
-    ),
-    logged_in_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
-    """Export all the leases"""
-
+    """
+    Exports filtered leases data to the specified format (Excel or PDF).
+    """
     try:
-        leases, total_count = lease_service.get_lease(
+        leases, _ = lease_service.get_lease(
             db=db,
             page=1,
-            per_page=1000,
+            per_page=10000,
             lease_id=lease_id,
             medallion_number=medallion_no,
             tlc_number=tlc_number,
@@ -384,35 +377,39 @@ def export_leases(
             lease_end_date=lease_end_date,
             exclude_additional_drivers=exclude_additional_drivers,
             status=status,
+            sort_by=sort_by,
+            sort_order=sort_order,
             multiple=True,
         )
 
-        lease_info = [format_lease_export(db, lease) for lease in leases]
+        if not leases:
+            raise ValueError("No leases data available for export with the given filters.")
 
-        file = None
-        media_type = None
-        headers = None
+        export_data = [format_lease_export(db, lease) for lease in leases]
 
-        if format == "excel":
-            excel_exporter = ExcelExporter(lease_info)
-            file: BytesIO = excel_exporter.export()
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            headers = {"Content-Disposition": "attachment; filename=lease_export.xlsx"}
-        elif format == "pdf":
-            pdf_exporter = PDFExporter(lease_info)
-            file: BytesIO = pdf_exporter.export()
-            media_type = "application/pdf"
-            headers = {"Content-Disposition": "attachment; filename=lease_export.pdf"}
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format")
+        filename = f"leases_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
-        return StreamingResponse(file, media_type=media_type, headers=headers)
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
+
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
+
+        headers = {"Content-Disposition": f"attachment; filename={filename}"}
+        return StreamingResponse(file_content, media_type=media_type, headers=headers)
+
+    except ValueError as e:
+        logger.warning("Business logic error during leases export: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     except Exception as e:
-        logger.error("Error exporting lease list: %s", str(e), exc_info=True)
+        logger.error("Error exporting leases: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500, detail="Error exporting Leases list"
+            status_code=500,
+            detail="An error occurred during the export process.",
         ) from e
 
 

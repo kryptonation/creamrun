@@ -3,11 +3,13 @@
 from datetime import date, datetime, time
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, update
+from sqlalchemy import func, update , or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.drivers.models import Driver
 from app.medallions.models import Medallion
+from app.vehicles.models import Vehicle
+from app.leases.models import Lease
 from app.pvb.models import (
     PVBImport,
     PVBImportStatus,
@@ -15,6 +17,7 @@ from app.pvb.models import (
     PVBViolationStatus,
 )
 from app.utils.logger import get_logger
+from app.utils.general import apply_multi_filter
 
 logger = get_logger(__name__)
 
@@ -111,9 +114,29 @@ class PVBRepository:
         state: Optional[str] = None,
         type: Optional[str] = None,
         summons: Optional[str] = None,
-        issue_date: Optional[date] = None,
+        from_issue_date: Optional[date] = None,
+        to_issue_date: Optional[date] = None,
+        from_issue_time: Optional[time] = None,
+        to_issue_time: Optional[time] = None,
+        from_posting_date: Optional[date] = None,
+        to_posting_date: Optional[date] = None,
+        from_amount: Optional[float] = None,
+        to_amount: Optional[float] = None,
+        from_fine: Optional[float] = None,
+        to_fine: Optional[float] = None,
+        from_penalty: Optional[float] = None,
+        to_penalty: Optional[float] = None,
+        from_interest: Optional[float] = None,
+        to_interest: Optional[float] = None,
+        from_reduction: Optional[float] = None,
+        to_reduction: Optional[float] = None,
+        failure_reason: Optional[str] = None,
+        lease_id: Optional[str] = None,
+        vin: Optional[str] = None,
         driver_id: Optional[str] = None,
         medallion_no: Optional[str] = None,
+        status: Optional[str] = None,
+        source: Optional[str] = None,
     ) -> Tuple[List[PVBViolation], int]:
         """
         Retrieves a paginated, sorted, and filtered list of PVB violations.
@@ -123,28 +146,103 @@ class PVBRepository:
             .options(
                 joinedload(PVBViolation.driver),
                 joinedload(PVBViolation.medallion),
+                joinedload(PVBViolation.lease),
+                joinedload(PVBViolation.vehicle),
             )
             .outerjoin(Driver, PVBViolation.driver_id == Driver.id)
             .outerjoin(Medallion, PVBViolation.medallion_id == Medallion.id)
+            .outerjoin(Vehicle, PVBViolation.vehicle_id == Vehicle.id)
+            .outerjoin(Lease, PVBViolation.lease_id == Lease.id)
         )
 
         # Apply filters
         if plate:
-            query = query.filter(PVBViolation.plate.ilike(f"%{plate}%"))
+            query = apply_multi_filter(query, PVBViolation.plate, plate)
+
         if state:
-            query = query.filter(PVBViolation.state.ilike(f"%{state}%"))
+            query = apply_multi_filter(query, PVBViolation.state, state)
+
         if type:
-            query = query.filter(PVBViolation.type.ilike(f"%{type}%"))
+            query = apply_multi_filter(query, PVBViolation.type, type)
+            
         if summons:
-            query = query.filter(PVBViolation.summons.ilike(f"%{summons}%"))
-        if issue_date:
-            start_of_day = datetime.combine(issue_date, time.min)
-            end_of_day = datetime.combine(issue_date, time.max)
-            query = query.filter(PVBViolation.issue_date.between(start_of_day, end_of_day))
+            query = apply_multi_filter(query, PVBViolation.summons, summons)
+
+        if from_issue_date:
+            from_issue_date = datetime.combine(from_issue_date, datetime.min.time())
+            query = query.filter(PVBViolation.issue_date >= from_issue_date)
+
+        if to_issue_date:
+            to_issue_date = datetime.combine(to_issue_date, datetime.max.time())
+            query = query.filter(PVBViolation.issue_date <= to_issue_date)
+
+        if from_issue_time:
+            query = query.filter(PVBViolation.issue_time >= from_issue_time)
+
+        if to_issue_time:
+            query = query.filter(PVBViolation.issue_time <= to_issue_time)
+
+        if from_posting_date:
+            from_posting_date = datetime.combine(from_posting_date, datetime.min.time())
+            query = query.filter(PVBViolation.posting_date >= from_posting_date)
+
+        if to_posting_date:
+            to_posting_date = datetime.combine(to_posting_date, datetime.max.time())
+            query = query.filter(PVBViolation.posting_date <= to_posting_date)
+
+        if from_amount:
+            query = query.filter(PVBViolation.amount_due >= from_amount)
+            
+        if to_amount:
+            query = query.filter(PVBViolation.amount_due <= to_amount)
+
+        if from_fine:
+            query = query.filter(PVBViolation.fine >= from_fine)
+
+        if to_fine:
+            query = query.filter(PVBViolation.fine <= to_fine)
+
+        if from_penalty:
+            query = query.filter(PVBViolation.penalty >= from_penalty)
+
+        if to_penalty:
+            query = query.filter(PVBViolation.penalty <= to_penalty)
+        
+        if from_interest:
+            query = query.filter(PVBViolation.interest >= from_interest)
+
+        if to_interest:
+            query = query.filter(PVBViolation.interest <= to_interest)
+
+        if from_reduction:
+            query = query.filter(PVBViolation.reduction >= from_reduction)
+
+        if to_reduction:
+            query = query.filter(PVBViolation.reduction <= to_reduction)
+
+        if failure_reason:
+            query = apply_multi_filter(query, PVBViolation.failure_reason, failure_reason)
+
+        if lease_id:
+            query = apply_multi_filter(query, Lease.lease_id, lease_id)
+
+        if vin:
+            query = apply_multi_filter(query, Vehicle.vin, vin)
+
         if driver_id:
-            query = query.filter(Driver.driver_id.ilike(f"%{driver_id}%"))
+            query = apply_multi_filter(query, Driver.driver_id, driver_id)
+
         if medallion_no:
-            query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+            query = apply_multi_filter(query, Medallion.medallion_number, medallion_no)
+
+        if status:
+            statuses = [s.strip() for s in status.split(',') if s.strip()]
+            query = query.filter(PVBViolation.status.in_(statuses))
+
+        if source:
+            sources = [s.strip() for s in source.split(',') if s.strip()]
+            query = query.filter(PVBViolation.source.in_(sources))
+
 
         total_items = query.with_entities(func.count(PVBViolation.id)).scalar()
 
@@ -154,10 +252,20 @@ class PVBRepository:
             "state": PVBViolation.state,
             "type": PVBViolation.type,
             "summons": PVBViolation.summons,
-            "issue_date": PVBViolation.issue_date,
-            "issue_time": PVBViolation.issue_time,
+            "issue_datetime": PVBViolation.issue_date,
             "medallion_no": Medallion.medallion_number,
             "driver_id": Driver.driver_id,
+            "lease_id": Lease.lease_id,
+            "vin": Vehicle.vin,
+            "status": PVBViolation.status,
+            "amount": PVBViolation.amount_due,
+            "fine": PVBViolation.fine,
+            "penalty": PVBViolation.penalty,
+            "interest": PVBViolation.interest,
+            "reduction": PVBViolation.reduction,
+            "failure_reason": PVBViolation.failure_reason,
+            "posting_date": PVBViolation.posting_date,
+            "source": PVBViolation.source,
         }
         
         sort_column = sort_column_map.get(sort_by, PVBViolation.issue_date)
@@ -168,4 +276,22 @@ class PVBRepository:
 
         query = query.offset((page - 1) * per_page).limit(per_page)
 
-        return query.all(), total_items
+        states = [
+            row[0]
+            for row in self.db.query(PVBViolation.state)
+                .filter(PVBViolation.state.isnot(None))
+                .filter(func.length(func.trim(PVBViolation.state)) > 0)
+                .distinct()
+                .all()
+            ]
+        
+        types = [
+            row[0]
+            for row in self.db.query(PVBViolation.type)
+                .filter(PVBViolation.type.isnot(None))
+                .filter(func.length(func.trim(PVBViolation.type)) > 0)
+                .distinct()
+                .all()
+        ]
+
+        return query.all(), total_items , states , types

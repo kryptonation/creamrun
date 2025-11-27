@@ -6,27 +6,38 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.pvb.models import PVBViolationStatus
+from app.pvb.models import PVBViolationStatus , PVBSource
 
 
 class PVBViolationResponse(BaseModel):
     """
     Response schema for a single PVB violation, designed to match the UI grid.
     """
-    id: int
+    id: Optional[int] = None
     plate: str
     state: str
     type: str
     summons: str
-    issue_date: date
-    issue_time: Optional[time] = None
+    issue_datetime: Optional[datetime] = None
+    source: Optional[str] = None
     
     # Fields that get populated after association
     medallion_no: Optional[str] = None
     driver_id: Optional[str] = None
+    lease_id: Optional[str] = None
+    vin: Optional[str] = None
     
     posting_date: Optional[datetime] = None
-    status: PVBViolationStatus
+    status: str
+
+    fine: Optional[Decimal] = None
+    penalty: Optional[Decimal] = None
+    interest: Optional[Decimal] = None
+    reduction: Optional[Decimal] = None
+    amount: Optional[Decimal] = None
+    failure_reason: Optional[str] = None
+
+
 
     class Config:
         from_attributes = True
@@ -42,6 +53,14 @@ class PaginatedPVBViolationResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+    status_list: List[PVBViolationStatus] = Field(
+        default_factory=lambda: list(PVBViolationStatus)
+    )
+    source_list: List[PVBSource] = Field(
+        default_factory=lambda: list(PVBSource)
+    )
+    states : Optional[List[str]] = None
+    types : Optional[List[str]] = None
 
 
 class PVBManualCreateRequest(BaseModel):

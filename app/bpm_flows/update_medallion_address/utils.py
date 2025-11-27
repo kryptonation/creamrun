@@ -32,10 +32,10 @@ def prepare_address_update_payload(address,secondary_address, owner, step_data=N
         step_data = {}
 
     address_update_data = {
-        "medallion_number_1": owner.get("medallions")[0].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 0 else "",
-        "medallion_number_2": owner.get("medallions")[1].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 1 else "",
-        "medallion_number_3": owner.get("medallions")[2].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 2 else "",
-        "medallion_number_4": owner.get("medallions")[3].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 3 else "",
+        "medallion_number_1": owner.get("medallions")[0].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 0 and owner.get("medallions")[0].get("medallion_number") else "",
+        "medallion_number_2": owner.get("medallions")[1].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 1 and owner.get("medallions")[1].get("medallion_number") else "",
+        "medallion_number_3": owner.get("medallions")[2].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 2 and owner.get("medallions")[2].get("medallion_number") else "",
+        "medallion_number_4": owner.get("medallions")[3].get("medallion_number") if owner.get("medallions") and len(owner.get("medallions")) > 3 and owner.get("medallions")[3].get("medallion_number") else "",
         "corporation_name_for_medallion": owner["owner_name"] if owner["owner_type"] == "corporation" and owner["owner_name"] else "",
         "name": owner["owner_name"] if owner["owner_type"] == "individual" and owner["owner_name"] else "",
         "old_mailing_address": old_primary_address.address_line_1 if old_primary_address and old_primary_address.address_line_1 else "",

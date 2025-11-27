@@ -217,7 +217,12 @@ def build_driver_query(
     if has_active_lease := filters.get("has_active_lease") is not None:
         query=query.filter(Driver.lease_drivers.any(LeaseDriver.is_active == True) if has_vehicle else Driver.lease_drivers.any(LeaseDriver.is_active == False))
         matched_filters.append("has_active_lease")
-
+        
+        
+    if val := filters.get("is_additional_driver"):
+        if val is not None:
+            query = query.filter(Driver.lease_drivers.any(LeaseDriver.is_additional_driver == val))
+            matched_filters.append("is_additional_driver")
 
     if val := filters.get("is_drive_locked"):
         query = query.filter(Driver.drive_locked == val)
@@ -249,7 +254,7 @@ def build_driver_query(
 
     return query, matched_filters
 
-def get_formatted_drivers(drivers: List[Driver], db: Session):
+def get_formatted_drivers(drivers: List[Driver], db: Session , is_additional_driver: bool):
     """Get formatted drivers"""
     drivers_list = []
     current_date = func.current_date()
@@ -278,6 +283,18 @@ def get_formatted_drivers(drivers: List[Driver], db: Session):
                 )
             )
         )).scalar()
+        
+        lease_drivers = driver.lease_drivers or []
+
+        if is_additional_driver is not None:
+            val = bool(is_additional_driver)
+            lease_data = [
+                ld.lease.to_dict()
+                for ld in lease_drivers
+                if ld.is_additional_driver == val
+            ]
+        else:
+            lease_data = [ld.lease.to_dict() for ld in lease_drivers]
 
         drivers_list.append({
             "driver_details": {
@@ -342,7 +359,7 @@ def get_formatted_drivers(drivers: List[Driver], db: Session):
             "lease_info": {
                 "has_active_lease": has_active_lease,
                 "lease_type": driver.lease_drivers[0].lease.lease_type if driver.lease_drivers else None,
-                "lease_data": [ld.lease.to_dict() for ld in driver.lease_drivers] if driver.lease_drivers else []
+                "lease_data": lease_data
             },
             "has_documents": has_documents,
             "has_vehicle": has_vehicle,

@@ -274,6 +274,13 @@ class LoanService:
                     failed_count += 1
                     continue
 
+                if installment.week_start_date > datetime.utcnow().date():
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment.installment_id,
+                        success=False,
+                        error_message=f"Installment date {installment.week_start_date} is in the future"
+                    ))
+
                 # Create obligation in ledger
                 ledger_posting = ledger_service.create_obligation(
                     category=PostingCategory.LOAN,

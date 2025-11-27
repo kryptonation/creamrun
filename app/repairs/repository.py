@@ -1,13 +1,17 @@
 ### app/repairs/repository.py
 
-from datetime import date
+from datetime import date , datetime
 from typing import List, Optional, Tuple
+from decimal import Decimal
 
-from sqlalchemy import func, update
+
+from sqlalchemy import func, update , or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.drivers.models import Driver
 from app.medallions.models import Medallion
+from app.leases.models import Lease
+from app.vehicles.models import Vehicle
 from app.repairs.models import (
     RepairInstallment,
     RepairInstallmentStatus,
@@ -93,6 +97,10 @@ class RepairRepository:
         )
         self.db.execute(stmt)
 
+    def get_installment_by_installment_id(self, installment_id: str) -> Optional[RepairInstallment]:
+        """Fetches a single repair installment by its installment_id."""
+        return self.db.query(RepairInstallment).filter(RepairInstallment.installment_id == installment_id).first()
+
     def list_invoices(
         self,
         page: int,
@@ -101,10 +109,17 @@ class RepairRepository:
         sort_order: str,
         repair_id: Optional[str] = None,
         invoice_number: Optional[str] = None,
-        date: Optional[date] = None,
+        from_invoice_date: Optional[date] = None,
+        to_invoice_date: Optional[date] = None,
+        lease_type: Optional[str] = None,
+        workshop_type: Optional[str] = None,
+        from_total_amount: Optional[Decimal] = None,
+        to_total_amount: Optional[Decimal] = None,
         status: Optional[str] = None,
         driver_name: Optional[str] = None,
         medallion_no: Optional[str] = None,
+        lease_id: Optional[str] = None,
+        vin: Optional[str] = None,
     ) -> Tuple[List[RepairInvoice], int]:
         """
         Retrieves a paginated, sorted, and filtered list of Repair Invoices.
@@ -114,28 +129,69 @@ class RepairRepository:
             .options(
                 joinedload(RepairInvoice.driver),
                 joinedload(RepairInvoice.medallion),
+                joinedload(RepairInvoice.lease),
+                joinedload(RepairInvoice.vehicle),
             )
             .outerjoin(Driver, RepairInvoice.driver_id == Driver.id)
             .outerjoin(Medallion, RepairInvoice.medallion_id == Medallion.id)
+            .outerjoin(Lease, RepairInvoice.lease_id == Lease.id)
+            .outerjoin(Vehicle, RepairInvoice.vehicle_id == Vehicle.id)
+        
         )
 
         # Apply filters
         if repair_id:
-            query = query.filter(RepairInvoice.repair_id.ilike(f"%{repair_id}%"))
+            ids = [id.strip() for id in repair_id.split(',') if id.strip()]
+            query = query.filter(or_(*[RepairInvoice.repair_id.ilike(f"%{id}%") for id in ids]))
+
         if invoice_number:
-            query = query.filter(RepairInvoice.invoice_number.ilike(f"%{invoice_number}%"))
-        if date:
-            query = query.filter(RepairInvoice.invoice_date == date)
+            numbers = [number.strip() for number in invoice_number.split(',') if number.strip()]
+            query = query.filter(or_(*[RepairInvoice.invoice_number.ilike(f"%{number}%") for number in numbers]))
+
+        if from_invoice_date:
+            from_invoice_date = datetime.combine(from_invoice_date, datetime.min.time())
+            query = query.filter(RepairInvoice.invoice_date >= from_invoice_date)
+
+        if to_invoice_date:
+            to_invoice_date = datetime.combine(to_invoice_date, datetime.max.time())
+            query = query.filter(RepairInvoice.invoice_date <= to_invoice_date)
+
+        if lease_type:
+            types = [type.strip() for type in lease_type.split(',') if type.strip()]
+            query = query.filter(Lease.lease_type.in_(types))
+
+        if workshop_type:
+            types = [type.strip() for type in workshop_type.split(',') if type.strip()]
+            query = query.filter(RepairInvoice.workshop_type.in_(types))
+
+        if from_total_amount:
+            query = query.filter(RepairInvoice.total_amount >= from_total_amount)
+
+        if to_total_amount:
+            query = query.filter(RepairInvoice.total_amount <= to_total_amount)
+
         if status:
             try:
-                status_enum = RepairInvoiceStatus[status.upper()]
-                query = query.filter(RepairInvoice.status == status_enum)
+                sts = [st.strip() for st in status.split(',') if st.strip()]
+                query = query.filter(RepairInvoice.status.in_(sts))
             except KeyError:
                 logger.warning(f"Invalid status filter for repairs: {status}")
+
         if driver_name:
-            query = query.filter(Driver.full_name.ilike(f"%{driver_name}%"))
+            names = [name.strip() for name in driver_name.split(',') if name.strip()]
+            query = query.filter(or_(*[Driver.full_name.ilike(f"%{name}%") for name in names]))
+
         if medallion_no:
-            query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+            nos = [no.strip() for no in medallion_no.split(',') if no.strip()]
+            query = query.filter(or_(*[Medallion.medallion_number.ilike(f"%{no}%") for no in nos]))
+            
+        if lease_id:
+            lease_ids = [id.strip() for id in lease_id.split(',') if id.strip()]
+            query = query.filter(or_(*[Lease.lease_id.ilike(f"%{id}%") for id in lease_ids]))
+            
+        if vin:
+            vins = [vin.strip() for vin in vin.split(',') if vin.strip()]
+            query = query.filter(or_(*[Vehicle.vin.ilike(f"%{vin}%") for vin in vins]))
 
         total_items = query.with_entities(func.count(RepairInvoice.id)).scalar()
 
@@ -143,9 +199,12 @@ class RepairRepository:
         sort_column_map = {
             "repair_id": RepairInvoice.repair_id,
             "invoice_number": RepairInvoice.invoice_number,
-            "date": RepairInvoice.invoice_date,
+            "invoice_date": RepairInvoice.invoice_date,
+            "total_amount": RepairInvoice.total_amount,
+            "workshop_type": RepairInvoice.workshop_type,
             "status": RepairInvoice.status,
             "driver": Driver.full_name,
+            "lease_type": Lease.lease_type,
             "medallion_no": Medallion.medallion_number,
             "amount": RepairInvoice.total_amount,
         }
@@ -217,8 +276,8 @@ class RepairRepository:
         
         if status:
             try:
-                status_enum = RepairInstallmentStatus[status.upper()]
-                query = query.filter(RepairInstallment.status == status_enum)
+                sts = [st.strip().upper() for st in status.split(',') if st.strip()]
+                query = query.filter(RepairInstallment.status.in_(sts))
             except KeyError:
                 logger.warning(f"Invalid status filter for repair installments: {status}")
 

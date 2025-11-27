@@ -219,7 +219,6 @@ def export_ezpass_transactions(
         # Convert SQLAlchemy models to dictionaries for the exporter
         export_data = [
             EZPassTransactionResponse(
-                id=t.id,
                 transaction_id=t.transaction_id,
                 transaction_date=t.transaction_datetime,
                 transaction_time=t.transaction_datetime.time(),
@@ -235,7 +234,7 @@ def export_ezpass_transactions(
                 amount=t.amount,
                 failure_reason=t.failure_reason,
                 agency=t.agency,
-            ).model_dump()
+            ).model_dump(exclude={"id"})
             for t in transactions
         ]
 

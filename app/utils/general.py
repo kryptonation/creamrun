@@ -1,5 +1,8 @@
 ### app/utils/general.py
 
+from sqlalchemy import or_ , func
+from sqlalchemy.orm import Session
+
 # Standard library imports
 from typing import Optional, Dict
 import os
@@ -9,11 +12,16 @@ import base64
 import string
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-
 from app.core.config import settings
+
+from app.entities.models import BankAccount
 
 # Third party imports
 from fastapi import HTTPException
+
+def apply_multi_filter(query, column, value):
+    items = [v.strip() for v in value.split(",") if v.strip()]
+    return query.filter(or_(*[column.ilike(f"%{v}%") for v in items]))
 
 
 def get_safe_value(row: pd.Series, column_name:str):
@@ -365,3 +373,40 @@ def calculate_dov_lease_fields(
         "total_vehicle_lease": round(total_vehicle_lease, 2),
         "total_medallion_lease_payment": round(total_medallion_lease_payment, 2),
     }
+
+
+def get_random_routing_number(db: Session) -> str:
+    """
+    Return a random routing number from the BankAccount table.
+    Only non-empty, non-null routing numbers are considered.
+    """
+    try:
+        routing_numbers = (
+            db.query(BankAccount.bank_routing_number)
+            .filter(
+                BankAccount.bank_routing_number.isnot(None),
+                func.trim(BankAccount.bank_routing_number) != ""
+            )
+            .distinct()
+            .all()
+        )
+
+        # Convert rows to plain strings
+        routing_numbers = [row[0] for row in routing_numbers]
+
+        if not routing_numbers:
+            raise HTTPException(
+                status_code=404,
+                detail="No routing numbers available"
+            )
+
+        return random.choice(routing_numbers)
+
+    except HTTPException:
+        raise   # re-raise HTTPException without wrapping
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch routing numbers: {str(e)}"
+        )

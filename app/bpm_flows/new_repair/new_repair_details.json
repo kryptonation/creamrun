@@ -44,7 +44,7 @@
     "workshop_type": {
       "description": "Type of workshop that performed the repair.",
       "type": "string",
-      "enum": ["BIG_APPLE_WORKSHOP", "EXTERNAL_WORKSHOP"]
+      "enum": ["Big Apple Workshop", "External Workshop"]
     },
     "start_week": {
       "description": "Start date for the repayment schedule (must be a Sunday in ISO format). Options: Current Payment Period or Next Payment Period.",

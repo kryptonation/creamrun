@@ -85,7 +85,6 @@ def parse_vehicles(db: Session, df: pd.DataFrame):
                 vehicle.delivery_location = get_safe_value(row, "delivery_location")
                 vehicle.is_insurance_procured = get_safe_value(row, "is_insurance_procured")
                 vehicle.is_medallion_assigned = get_safe_value(row, "is_medallion_assigned")
-                vehicle.vehicle_status = VehicleStatus.AVAILABLE
                 vehicle.entity_id = entity.id if entity else None
                 vehicle.medallion_id = medallion_id
                 vehicle.vehicle_total_price = vehicle_total_price

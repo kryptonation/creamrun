@@ -169,6 +169,23 @@ class LeaseService:
                         ]
                     )
                 )
+            # ✅ NEW: Exclude additional drivers if requested
+            if exclude_additional_drivers:
+                logger.info(
+                    f"Filtering leases for tlc_number={tlc_number}: excluding additional drivers"
+                )
+                if not joined_lease_driver:
+                    query = query.join(
+                        LeaseDriver, Lease.id == LeaseDriver.lease_id
+                    )
+                    joined_lease_driver = True
+                    
+                query = query.filter(
+                    or_(
+                        LeaseDriver.is_additional_driver == False,
+                        LeaseDriver.is_additional_driver.is_(None)
+                    )
+                )
 
             if tlc_number:
                 tlc_numbers = [i.strip() for i in tlc_number.split(",") if i.strip()]
@@ -185,18 +202,6 @@ class LeaseService:
                         TLCLicense, Driver.tlc_license_number_id == TLCLicense.id
                     )
                     joined_tlc_license = True
-
-                # ✅ NEW: Exclude additional drivers if requested
-                if exclude_additional_drivers:
-                    logger.info(
-                        f"Filtering leases for tlc_number={tlc_number}: excluding additional drivers"
-                    )
-                    query = query.filter(
-                        or_(
-                            LeaseDriver.is_additional_driver == False,
-                            LeaseDriver.is_additional_driver.is_(None)
-                        )
-                    )
                     
                 query = query.filter(
                     or_(
@@ -406,7 +411,7 @@ class LeaseService:
                 query = query.order_by(Lease.updated_on.desc(), Lease.created_on.desc())
 
             if multiple:
-                total_count = query.count()
+                total_count = query.distinct(Lease.id).count()
                 if page and per_page:
                     query = query.offset((page - 1) * per_page).limit(per_page)
                 return query.all(), total_count
@@ -778,6 +783,7 @@ class LeaseService:
         lease_driver_id: Optional[int] = None,
         driver_id: Optional[str] = None,
         sort_order: Optional[str] = "desc",
+        is_additional_driver: Optional[bool] = None,
         multiple: bool = False,
     ) -> Union[LeaseDriver, List[LeaseDriver], None]:
         """Get lease drivers by ID"""
@@ -789,6 +795,8 @@ class LeaseService:
                 query = query.filter(LeaseDriver.lease_id == lease_id)
             if driver_id:
                 query = query.filter(LeaseDriver.driver_id == driver_id)
+            if is_additional_driver is not None:
+                query = query.filter(LeaseDriver.is_additional_driver == is_additional_driver)
             if sort_order:
                 query = query.order_by(
                     desc(LeaseDriver.created_on)

@@ -13,6 +13,7 @@ from app.bpm.services import bpm_service
 from app.bpm.step_info import step
 from app.drivers.services import driver_service
 from app.leases.services import lease_service
+from app.uploads.services import upload_service
 from app.repairs.models import WorkshopType
 from app.repairs.services import RepairService
 from app.utils.logger import get_logger
@@ -130,7 +131,7 @@ def search_driver_and_invoice_fetch(db: Session, case_no: str, case_params: Dict
         # Fetch active leases for the driver
         active_leases = lease_service.get_lease(
             db, 
-            driver_id=driver.id, 
+            driver_id=driver.driver_id, 
             status="Active", 
             exclude_additional_drivers=True, 
             multiple=True
@@ -184,12 +185,17 @@ def search_driver_and_invoice_fetch(db: Session, case_no: str, case_params: Dict
             "phone": driver.phone_number_1 or "N/A",
             "email": driver.email_address or "N/A",
         }
+
+        repair_invoice = upload_service.get_documents(
+            db=db , object_type="repair", object_id=case_no , document_type="repair_invoice"
+        )
         
         logger.info("Successfully fetched driver and lease details for Repair", case_no=case_no, driver_id=driver.id)
         
         return {
             "driver": driver_data,
             "leases": formatted_leases,
+            "repair_invoice": repair_invoice
         }
     
     except HTTPException:
@@ -283,7 +289,7 @@ def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str
             }
         
         # Validate driver existence
-        driver = driver_service.get_drivers(db, driver_id=step_data["driver_id"])
+        driver = driver_service.get_drivers(db, id=step_data["driver_id"])
         if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
         
@@ -295,7 +301,7 @@ def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str
         # Verify driver is the primary driver on the lease
         is_primary_driver = False
         for lease_driver in lease.lease_driver:
-            if lease_driver.driver_id == driver.id and not lease_driver.is_additional_driver:
+            if lease_driver.driver_id == driver.driver_id and not lease_driver.is_additional_driver:
                 is_primary_driver = True
                 break
         
@@ -341,6 +347,25 @@ def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str
             invoice_data=invoice_data,
             user_id=1  # TODO: Get actual user ID from context
         )
+
+
+        repair_invoice_doc = upload_service.get_documents(
+            db=db , object_type="repair", object_id=case_no , document_type="repair_invoice"
+        )
+
+        if repair_invoice_doc and repair_invoice_doc.get("document_path"):
+            upload_service.update_document(
+                db=db,document_dict={"document_id": repair_invoice_doc["document_id"]},
+                object_id=repair_invoice.id,
+                document_path=repair_invoice_doc.get("document_path"),
+                object_type="repair",
+                document_type="repair_invoice",
+                new_filename=repair_invoice_doc.get("document_name"),
+                file_size_kb=repair_invoice_doc.get("document_size"),
+                original_extension=repair_invoice_doc.get("document_format"),
+                document_date=datetime.now().strftime('%Y-%m-%d'),
+                notes=repair_invoice_doc.get("document_notes")
+            )
         
         # Create audit trail
         case = bpm_service.get_cases(db, case_no=case_no)

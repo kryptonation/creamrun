@@ -98,6 +98,7 @@ def search_drivers(
     has_documents: Optional[bool] = None,
     has_vehicle: Optional[bool] = None,
     has_active_lease: Optional[bool] = None,
+    is_additional_driver: Optional[bool] = None,
     is_drive_locked: Optional[bool] = None,
     lease_type: Optional[str] = None,
     is_archived: Optional[bool] = None,
@@ -121,6 +122,7 @@ def search_drivers(
             "has_documents": has_documents,
             "has_vehicle": has_vehicle,
             "has_active_lease": has_active_lease,
+            "is_additional_driver": is_additional_driver,
             "is_drive_locked": is_drive_locked,
             "lease_type": lease_type,
             "is_archived": is_archived,
@@ -136,7 +138,7 @@ def search_drivers(
         driver_type_list = ["Regular", "WAV"]
         lease_type_list = ["short-term", "long-term", "dov", "medallion-only"]
 
-        items = get_formatted_drivers(drivers, db) if drivers else []
+        items = get_formatted_drivers(drivers, db , is_additional_driver) if drivers else []
 
         return {
             "page": page,

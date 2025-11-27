@@ -33,15 +33,10 @@ def process_users_and_roles(db: Session, users_df: pd.DataFrame, roles_df: pd.Da
                             password=get_password_hash("bat@123"))
             logger.info("Creating User %s", admin_user.first_name)
         else:
-            user.middle_name = row['middle_name']
-            user.last_name = row['last_name']
-            user.email_address = row['email_address']
-            user.password = get_password_hash(row['bat@123'])
-            logger.info("User %s exists, updating", user.first_name)
+            logger.info("User %s exists, omitting", admin_user.first_name)
 
-        db.add(admin_role)
+# Assign role
         admin_user.roles = [admin_role]
-        db.add(admin_user)
         db.flush()
 
         # Populate Role table

@@ -13,11 +13,14 @@ from app.bpm.services import bpm_service
 from app.bpm.step_info import step
 from app.drivers.services import driver_service
 from app.leases.services import lease_service
+from app.vehicles.services import vehicle_service
+from app.medallions.services import medallion_service
 from app.pvb.models import PVBViolation, PVBViolationStatus, PVBSource
 from app.pvb.services import PVBService
 from app.pvb.tasks import post_pvb_violations_to_ledger_task
 from app.uploads.services import upload_service
 from app.utils.logger import get_logger
+from app.medallions.utils import format_medallion_response
 
 logger = get_logger(__name__)
 
@@ -27,7 +30,7 @@ ENTITY_MAPPER = {
 }
 
 
-@step(step_id="304", name="Fetch - Choose Driver", operation="fetch")
+@step(step_id="161", name="Fetch - Choose Driver", operation="fetch")
 def choose_driver_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
     """
     Fetches driver and lease information based on search criteria for the first step
@@ -61,11 +64,12 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: Dict[str, Any] =
             if driver:
                 active_leases = lease_service.get_lease(
                     db, 
-                    driver_id=driver.id, 
+                    driver_id=driver.driver_id, 
                     status="Active", 
                     exclude_additional_drivers=True, 
                     multiple=True
                 )
+
         
         # Search by Medallion Number
         elif medallion_no:
@@ -139,10 +143,17 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: Dict[str, Any] =
         # Format lease data for UI
         formatted_leases = []
         for lease in lease_list:
+            driver_lease = lease_service.get_lease_drivers(db=db , lease_id=lease.id , driver_id=driver.driver_id , is_additional_driver=False)
+
+            if not driver_lease:
+                continue
+            
+            medallion_owner = format_medallion_response(lease.medallion).get("medallion_owner" , "N/A") if lease.medallion else "N/A"
             formatted_leases.append({
                 "id": lease.id,
                 "lease_id": lease.lease_id,
                 "medallion_number": lease.medallion.medallion_number if lease.medallion else "N/A",
+                "medallion_owner": medallion_owner,
                 "plate_no": lease.vehicle.registrations[0].plate_number if lease.vehicle and lease.vehicle.registrations else "N/A",
                 "vin": lease.vehicle.vin if lease.vehicle else "N/A",
                 "vehicle_id": lease.vehicle_id if lease.vehicle_id else None,
@@ -158,12 +169,20 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: Dict[str, Any] =
             "phone": driver.phone_number_1 or "N/A",
             "email": driver.email_address or "N/A",
         }
+
+        pvb_invoice = upload_service.get_documents(
+            db=db,
+            object_type="pvb",
+            object_id=case_no,
+            document_type="pvb_invoice"
+        )
         
         logger.info("Successfully fetched driver and lease details for PVB", case_no=case_no, driver_id=driver.id)
         
         return {
             "driver": driver_data,
             "leases": formatted_leases,
+            "pvb_invoice": pvb_invoice
         }
     
     except HTTPException:
@@ -173,7 +192,7 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: Dict[str, Any] =
         raise HTTPException(status_code=500, detail="An error occurred while fetching driver details") from e
 
 
-@step(step_id="304", name="Process - Choose Driver", operation="process")
+@step(step_id="161", name="Process - Choose Driver", operation="process")
 def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
     """
     Creates a preliminary PVB violation record and associates it with the selected driver and lease.
@@ -189,20 +208,30 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
         logger.info("Processing driver selection for PVB case", case_no=case_no)
         
         # Validate required fields
-        driver_id = step_data.get("driver_id")
-        lease_id = step_data.get("lease_id")
-        vehicle_id = step_data.get("vehicle_id")
-        medallion_id = step_data.get("medallion_id")
-        vehicle_plate_no = step_data.get("vehicle_plate_no")
+        driver_id = step_data.get("driver_id" , None)
+        lease_id = step_data.get("lease_id" , None)
+        vehicle_id = step_data.get("vehicle_id" , None)
+        medallion_id = step_data.get("medallion_id" , None)
+        vehicle_plate_no = step_data.get("vehicle_plate_no" , None)
         
-        if not all([driver_id, lease_id, vehicle_id, medallion_id, vehicle_plate_no]):
+        required_fields = {
+            "driver_id": driver_id,
+            "lease_id": lease_id,
+            "vehicle_id": vehicle_id,
+            "medallion_id": medallion_id,
+            "vehicle_plate_no": vehicle_plate_no
+        }
+
+        missing = [name for name, value in required_fields.items() if not value]
+
+        if missing:
             raise HTTPException(
-                status_code=400, 
-                detail="Missing required fields: driver_id, lease_id, vehicle_id, medallion_id, and vehicle_plate_no are required"
+                status_code=400,
+                detail=f"Missing required fields: {', '.join(missing)}"
             )
         
         # Validate driver existence
-        driver = driver_service.get_drivers(db, driver_id=driver_id)
+        driver = driver_service.get_drivers(db, id=driver_id)
         if not driver:
             raise HTTPException(status_code=404, detail="Driver not found")
         
@@ -214,7 +243,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
         # Verify driver is the primary driver on the lease
         is_primary_driver = False
         for lease_driver in lease.lease_driver:
-            if lease_driver.driver_id == driver.id and not lease_driver.is_additional_driver:
+            if lease_driver.driver_id == driver.driver_id and not lease_driver.is_additional_driver:
                 is_primary_driver = True
                 break
         
@@ -223,6 +252,22 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 status_code=400, 
                 detail="Driver is not the primary driver on the selected lease"
             )
+        
+        vehicle = vehicle_service.get_vehicles(
+            db=db , vehicle_id=vehicle_id, plate_number=vehicle_plate_no
+        )
+        if not vehicle:
+            raise HTTPException(status_code=404, detail="Vehicle not found")
+        
+        if vehicle.id != lease.vehicle_id:
+            raise HTTPException(status_code=400, detail="Vehicle does not belong to the selected lease")
+        
+        medallion = medallion_service.get_medallion(db, medallion_id=medallion_id)
+        if not medallion:
+            raise HTTPException(status_code=404, detail="Medallion not found")
+        
+        if medallion.id != lease.medallion_id:
+            raise HTTPException(status_code=400, detail="Medallion does not belong to the selected lease")
         
         # Check if case entity already exists
         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
@@ -238,8 +283,16 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 violation.vehicle_id = vehicle_id
                 violation.medallion_id = medallion_id
                 violation.plate = vehicle_plate_no.split("-")[0] if "-" in vehicle_plate_no else vehicle_plate_no
-                violation.state = vehicle_plate_no.split("-")[1] if "-" in vehicle_plate_no else "NY"
-                violation.updated_on = datetime.utcnow()
+                violation.state = step_data.get("state" , None)
+                violation.type = step_data.get("type" , None)
+                violation.summons = step_data.get("summons" , None)
+                violation.issue_date = step_data.get("issue_date" , None)
+                violation.issue_time = step_data.get("issue_time" , None)
+                violation.fine = Decimal(step_data.get("fine" , None))
+                violation.penalty = Decimal(step_data.get("penalty" , None))
+                violation.interest = Decimal(step_data.get("interest" , None))
+                violation.reduction = Decimal(step_data.get("reduction" , None))
+                violation.amount_due = Decimal(step_data.get("amount_due" , None))
                 db.flush()
                 logger.info("Updated existing PVB violation record", violation_id=violation.id)
         else:
@@ -250,18 +303,42 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 "medallion_id": medallion_id,
                 "lease_id": lease.id,
                 "status": PVBViolationStatus.IMPORTED,
-                "source": PVBSource.MANUAL_ENTRY,
-                "case_no": case_no,
                 "plate": vehicle_plate_no.split("-")[0] if "-" in vehicle_plate_no else vehicle_plate_no,
-                "state": vehicle_plate_no.split("-")[1] if "-" in vehicle_plate_no else "NY",
-                "type": "TEMP",
-                "summons": f"TEMP-{case_no}",
-                "issue_date": datetime.utcnow().date(),
-                "amount_due": Decimal("0.00"),
-                "fine": Decimal("0.00"),
+                "state": step_data.get("state" , None),
+                "type": step_data.get("type" , None),
+                "summons": step_data.get("summons" , None),
+                "issue_time": step_data.get("issue_time" , None),
+                "issue_date": step_data.get("issue_date" , None),
+                "fine": Decimal(step_data.get("fine" , None)),
+                "penalty": Decimal(step_data.get("penalty" , None)),
+                "interest": Decimal(step_data.get("interest" , None)),
+                "reduction": Decimal(step_data.get("reduction" , None)),
+                "amount_due": Decimal(step_data.get("amount_due" , None)),
             }
             
             violation = pvb_service.create_manual_violation(case_no, initial_data, 1)
+
+            pvb_invoice = upload_service.get_documents(
+                db=db,
+                object_type="pvb",
+                object_id=case_no,
+                document_type="pvb_invoice"
+            )
+
+            if pvb_invoice and pvb_invoice.get("document_path"):
+                upload_service.update_document(
+                    db=db , 
+                    document_dict={"document_id": pvb_invoice.get("document_id")},
+                    document_path=pvb_invoice.get("document_path"),
+                    object_id= violation.id,
+                    object_type="pvb",
+                    document_type="pvb_invoice",
+                    new_filename=pvb_invoice.get("document_name"),
+                    file_size_kb=pvb_invoice.get("document_size"),
+                    original_extension=pvb_invoice.get("document_format"),
+                    document_date=datetime.now().strftime('%Y-%m-%d'),
+                    notes=pvb_invoice.get("document_notes")
+                )
             
             # Create case entity
             bpm_service.create_case_entity(
@@ -283,296 +360,296 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"An error occurred while processing driver selection: {str(e)}") from e
 
 
-@step(step_id="305", name="Fetch - Enter PVB Details", operation="fetch")
-def enter_details_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
-    """
-    Fetches the existing (partially filled) PVB violation details for editing.
-    Also returns associated driver, medallion, and vehicle information.
-    """
-    try:
-        logger.info("Fetching PVB details for case", case_no=case_no)
+# @step(step_id="160", name="Fetch - Enter PVB Details", operation="fetch")
+# def enter_details_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
+#     """
+#     Fetches the existing (partially filled) PVB violation details for editing.
+#     Also returns associated driver, medallion, and vehicle information.
+#     """
+#     try:
+#         logger.info("Fetching PVB details for case", case_no=case_no)
         
-        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
-        if not case_entity:
-            raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
+#         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
+#         if not case_entity:
+#             raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
         
-        violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
-        if not violation:
-            raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
+#         violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
+#         if not violation:
+#             raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
         
-        # Get associated entities
-        driver_data = None
-        if violation.driver:
-            driver_data = {
-                "id": violation.driver.id,
-                "driver_id": violation.driver.driver_id,
-                "full_name": violation.driver.full_name,
-                "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver.tlc_license else "N/A",
-            }
+#         # Get associated entities
+#         driver_data = None
+#         if violation.driver:
+#             driver_data = {
+#                 "id": violation.driver.id,
+#                 "driver_id": violation.driver.driver_id,
+#                 "full_name": violation.driver.full_name,
+#                 "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver.tlc_license else "N/A",
+#             }
         
-        medallion_data = None
-        if violation.medallion:
-            medallion_data = {
-                "id": violation.medallion.id,
-                "medallion_number": violation.medallion.medallion_number,
-            }
+#         medallion_data = None
+#         if violation.medallion:
+#             medallion_data = {
+#                 "id": violation.medallion.id,
+#                 "medallion_number": violation.medallion.medallion_number,
+#             }
         
-        vehicle_data = None
-        if violation.vehicle:
-            vehicle_data = {
-                "id": violation.vehicle.id,
-                "vin": violation.vehicle.vin,
-                "plate_number": violation.vehicle.registrations[0].plate_number if violation.vehicle.registrations else "N/A",
-            }
+#         vehicle_data = None
+#         if violation.vehicle:
+#             vehicle_data = {
+#                 "id": violation.vehicle.id,
+#                 "vin": violation.vehicle.vin,
+#                 "plate_number": violation.vehicle.registrations[0].plate_number if violation.vehicle.registrations else "N/A",
+#             }
         
-        return {
-            "violation": {
-                "id": violation.id,
-                "plate": violation.plate,
-                "state": violation.state,
-                "type": violation.type if violation.type != "TEMP" else "",
-                "summons": violation.summons if not violation.summons.startswith("TEMP-") else "",
-                "issue_date": violation.issue_date.isoformat() if violation.issue_date else "",
-                "issue_time": violation.issue_time.strftime("%H%M") if violation.issue_time else "",
-                "fine": float(violation.fine) if violation.fine else 0.00,
-                "penalty": float(violation.penalty) if violation.penalty else 0.00,
-                "interest": float(violation.interest) if violation.interest else 0.00,
-                "reduction": float(violation.reduction) if violation.reduction else 0.00,
-                "amount_due": float(violation.amount_due) if violation.amount_due else 0.00,
-            },
-            "driver": driver_data,
-            "medallion": medallion_data,
-            "vehicle": vehicle_data,
-        }
+#         return {
+#             "violation": {
+#                 "id": violation.id,
+#                 "plate": violation.plate,
+#                 "state": violation.state,
+#                 "type": violation.type if violation.type != "TEMP" else "",
+#                 "summons": violation.summons if not violation.summons.startswith("TEMP-") else "",
+#                 "issue_date": violation.issue_date.isoformat() if violation.issue_date else "",
+#                 "issue_time": violation.issue_time.strftime("%H%M") if violation.issue_time else "",
+#                 "fine": float(violation.fine) if violation.fine else 0.00,
+#                 "penalty": float(violation.penalty) if violation.penalty else 0.00,
+#                 "interest": float(violation.interest) if violation.interest else 0.00,
+#                 "reduction": float(violation.reduction) if violation.reduction else 0.00,
+#                 "amount_due": float(violation.amount_due) if violation.amount_due else 0.00,
+#             },
+#             "driver": driver_data,
+#             "medallion": medallion_data,
+#             "vehicle": vehicle_data,
+#         }
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error in enter_details_fetch for PVB", case_no=case_no, error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An error occurred while fetching PVB details: {str(e)}") from e
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error("Error in enter_details_fetch for PVB", case_no=case_no, error=str(e), exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"An error occurred while fetching PVB details: {str(e)}") from e
 
 
-@step(step_id="305", name="Process - Enter PVB Details", operation="process")
-def enter_details_process(db: Session, case_no: str, step_data: Dict[str, Any]):
-    """
-    Updates the PVB violation record with the detailed ticket information.
+# @step(step_id="160", name="Process - Enter PVB Details", operation="process")
+# def enter_details_process(db: Session, case_no: str, step_data: Dict[str, Any]):
+#     """
+#     Updates the PVB violation record with the detailed ticket information.
     
-    Expected step_data:
-        - plate: License plate number
-        - state: State code (e.g., "NY")
-        - type: Violation type code
-        - summons: Summons/ticket number
-        - issue_date: Date violation was issued (ISO format)
-        - issue_time: Time violation was issued (HHMM format, optional)
-        - fine: Base fine amount
-        - penalty: Penalty amount (optional)
-        - interest: Interest amount (optional)
-        - reduction: Reduction amount (optional)
-    """
-    try:
-        logger.info("Processing PVB details for case", case_no=case_no)
+#     Expected step_data:
+#         - plate: License plate number
+#         - state: State code (e.g., "NY")
+#         - type: Violation type code
+#         - summons: Summons/ticket number
+#         - issue_date: Date violation was issued (ISO format)
+#         - issue_time: Time violation was issued (HHMM format, optional)
+#         - fine: Base fine amount
+#         - penalty: Penalty amount (optional)
+#         - interest: Interest amount (optional)
+#         - reduction: Reduction amount (optional)
+#     """
+#     try:
+#         logger.info("Processing PVB details for case", case_no=case_no)
         
-        pvb_service = PVBService(db)
-        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
+#         pvb_service = PVBService(db)
+#         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
         
-        if not case_entity:
-            raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
+#         if not case_entity:
+#             raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
         
-        violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
-        if not violation:
-            raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
+#         violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
+#         if not violation:
+#             raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
         
-        # Validate required fields
-        required_fields = ["plate", "state", "type", "summons", "issue_date", "fine"]
-        missing_fields = [field for field in required_fields if not step_data.get(field)]
-        if missing_fields:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Missing required fields: {', '.join(missing_fields)}"
-            )
+#         # Validate required fields
+#         required_fields = ["plate", "state", "type", "summons", "issue_date", "fine"]
+#         missing_fields = [field for field in required_fields if not step_data.get(field)]
+#         if missing_fields:
+#             raise HTTPException(
+#                 status_code=400, 
+#                 detail=f"Missing required fields: {', '.join(missing_fields)}"
+#             )
         
-        # Parse issue_time if provided (format: HHMMX where X is A or P)
-        issue_time = None
-        if step_data.get("issue_time"):
-            try:
-                time_str = step_data["issue_time"]
-                if len(time_str) == 5:  # HHMMA or HHMMP
-                    meridiem = time_str[-1].upper()
-                    hour = int(time_str[:2])
-                    minute = int(time_str[2:4])
+#         # Parse issue_time if provided (format: HHMMX where X is A or P)
+#         issue_time = None
+#         if step_data.get("issue_time"):
+#             try:
+#                 time_str = step_data["issue_time"]
+#                 if len(time_str) == 5:  # HHMMA or HHMMP
+#                     meridiem = time_str[-1].upper()
+#                     hour = int(time_str[:2])
+#                     minute = int(time_str[2:4])
                     
-                    if meridiem == 'P' and hour != 12:
-                        hour += 12
-                    elif meridiem == 'A' and hour == 12:
-                        hour = 0
+#                     if meridiem == 'P' and hour != 12:
+#                         hour += 12
+#                     elif meridiem == 'A' and hour == 12:
+#                         hour = 0
                     
-                    issue_time = f"{hour:02d}:{minute:02d}:00"
-            except (ValueError, IndexError) as e:
-                logger.warning("Invalid time format for PVB", time_str=step_data.get("issue_time"), error=str(e))
+#                     issue_time = f"{hour:02d}:{minute:02d}:00"
+#             except (ValueError, IndexError) as e:
+#                 logger.warning("Invalid time format for PVB", time_str=step_data.get("issue_time"), error=str(e))
         
-        # Calculate amount due
-        fine = Decimal(str(step_data.get("fine", 0)))
-        penalty = Decimal(str(step_data.get("penalty", 0)))
-        interest = Decimal(str(step_data.get("interest", 0)))
-        reduction = Decimal(str(step_data.get("reduction", 0)))
-        amount_due = fine + penalty + interest - reduction
+#         # Calculate amount due
+#         fine = Decimal(str(step_data.get("fine", 0)))
+#         penalty = Decimal(str(step_data.get("penalty", 0)))
+#         interest = Decimal(str(step_data.get("interest", 0)))
+#         reduction = Decimal(str(step_data.get("reduction", 0)))
+#         amount_due = fine + penalty + interest - reduction
         
-        # Update violation record
-        update_data = {
-            "plate": step_data["plate"],
-            "state": step_data["state"],
-            "type": step_data["type"],
-            "summons": step_data["summons"],
-            "issue_date": step_data["issue_date"],
-            "issue_time": issue_time,
-            "fine": fine,
-            "penalty": penalty,
-            "interest": interest,
-            "reduction": reduction,
-            "amount_due": amount_due,
-            "updated_on": datetime.utcnow(),
-        }
+#         # Update violation record
+#         update_data = {
+#             "plate": step_data["plate"],
+#             "state": step_data["state"],
+#             "type": step_data["type"],
+#             "summons": step_data["summons"],
+#             "issue_date": step_data["issue_date"],
+#             "issue_time": issue_time,
+#             "fine": fine,
+#             "penalty": penalty,
+#             "interest": interest,
+#             "reduction": reduction,
+#             "amount_due": amount_due,
+#             "updated_on": datetime.utcnow(),
+#         }
         
-        pvb_service.repo.update_violation(violation.id, update_data)
+#         pvb_service.repo.update_violation(violation.id, update_data)
         
-        logger.info("PVB violation details updated successfully", violation_id=violation.id, summons=step_data["summons"])
+#         logger.info("PVB violation details updated successfully", violation_id=violation.id, summons=step_data["summons"])
         
-        return "Ok"
+#         return "Ok"
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error in enter_details_process for PVB", case_no=case_no, error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An error occurred while updating PVB details: {str(e)}") from e
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error("Error in enter_details_process for PVB", case_no=case_no, error=str(e), exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"An error occurred while updating PVB details: {str(e)}") from e
 
 
-@step(step_id="306", name="Fetch - Attach Proof", operation="fetch")
-def attach_proof_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
-    """
-    Fetches any existing proof documents for the PVB violation and returns
-    violation summary for confirmation.
-    """
-    try:
-        logger.info("Fetching PVB proof documents for case", case_no=case_no)
+# @step(step_id="161", name="Fetch - Attach Proof", operation="fetch")
+# def attach_proof_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
+#     """
+#     Fetches any existing proof documents for the PVB violation and returns
+#     violation summary for confirmation.
+#     """
+#     try:
+#         logger.info("Fetching PVB proof documents for case", case_no=case_no)
         
-        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
-        if not case_entity:
-            return {
-                "documents": [],
-                "violation_summary": None
-            }
+#         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
+#         if not case_entity:
+#             return {
+#                 "documents": [],
+#                 "violation_summary": None
+#             }
         
-        violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
-        if not violation:
-            return {
-                "documents": [],
-                "violation_summary": None
-            }
+#         violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
+#         if not violation:
+#             return {
+#                 "documents": [],
+#                 "violation_summary": None
+#             }
         
-        # Get uploaded documents
-        documents = upload_service.get_documents(
-            db,
-            object_type="pvb_violation",
-            object_id=case_entity.identifier_value,
-            multiple=True,
-        )
+#         # Get uploaded documents
+#         documents = upload_service.get_documents(
+#             db,
+#             object_type="pvb_violation",
+#             object_id=case_entity.identifier_value,
+#             multiple=True,
+#         )
         
-        # Prepare violation summary for confirmation
-        violation_summary = {
-            "summons": violation.summons,
-            "plate": violation.plate,
-            "state": violation.state,
-            "type": violation.type,
-            "issue_date": violation.issue_date.isoformat() if violation.issue_date else "",
-            "amount_due": float(violation.amount_due) if violation.amount_due else 0.00,
-            "driver": {
-                "full_name": violation.driver.full_name if violation.driver else "N/A",
-                "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver and violation.driver.tlc_license else "N/A",
-            },
-            "medallion": {
-                "medallion_number": violation.medallion.medallion_number if violation.medallion else "N/A",
-            },
-        }
+#         # Prepare violation summary for confirmation
+#         violation_summary = {
+#             "summons": violation.summons,
+#             "plate": violation.plate,
+#             "state": violation.state,
+#             "type": violation.type,
+#             "issue_date": violation.issue_date.isoformat() if violation.issue_date else "",
+#             "amount_due": float(violation.amount_due) if violation.amount_due else 0.00,
+#             "driver": {
+#                 "full_name": violation.driver.full_name if violation.driver else "N/A",
+#                 "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver and violation.driver.tlc_license else "N/A",
+#             },
+#             "medallion": {
+#                 "medallion_number": violation.medallion.medallion_number if violation.medallion else "N/A",
+#             },
+#         }
         
-        return {
-            "documents": documents or [],
-            "violation_summary": violation_summary
-        }
+#         return {
+#             "documents": documents or [],
+#             "violation_summary": violation_summary
+#         }
     
-    except Exception as e:
-        logger.error("Error in attach_proof_fetch for PVB", case_no=case_no, error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An error occurred while fetching proof documents: {str(e)}") from e
+#     except Exception as e:
+#         logger.error("Error in attach_proof_fetch for PVB", case_no=case_no, error=str(e), exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"An error occurred while fetching proof documents: {str(e)}") from e
 
 
-@step(step_id="306", name="Process - Attach Proof", operation="process")
-def attach_proof_process(db: Session, case_no: str, step_data: Dict[str, Any]):
-    """
-    Finalizes the manual PVB violation entry. It associates the uploaded proof,
-    marks the violation as ASSOCIATED, and triggers the ledger posting task.
+# @step(step_id="161", name="Process - Attach Proof", operation="process")
+# def attach_proof_process(db: Session, case_no: str, step_data: Dict[str, Any]):
+#     """
+#     Finalizes the manual PVB violation entry. It associates the uploaded proof,
+#     marks the violation as ASSOCIATED, and triggers the ledger posting task.
     
-    Expected step_data:
-        - document_id: ID of the uploaded proof document (optional but recommended)
-    """
-    try:
-        logger.info("Processing PVB proof attachment for case", case_no=case_no)
+#     Expected step_data:
+#         - document_id: ID of the uploaded proof document (optional but recommended)
+#     """
+#     try:
+#         logger.info("Processing PVB proof attachment for case", case_no=case_no)
         
-        pvb_service = PVBService(db)
-        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
+#         pvb_service = PVBService(db)
+#         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
         
-        if not case_entity:
-            raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
+#         if not case_entity:
+#             raise HTTPException(status_code=404, detail="No PVB violation record found for this case")
         
-        violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
-        if not violation:
-            raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
+#         violation = db.query(PVBViolation).filter(PVBViolation.id == int(case_entity.identifier_value)).first()
+#         if not violation:
+#             raise HTTPException(status_code=404, detail=f"Violation with ID {case_entity.identifier_value} not found")
         
-        # Link document to the violation if provided
-        document_id = step_data.get("document_id")
-        if document_id:
-            try:
-                upload_service.upsert_document(db, {
-                    "id": document_id,
-                    "object_type": "pvb_violation",
-                    "object_lookup_id": case_entity.identifier_value
-                })
-                logger.info("Linked proof document to PVB violation", violation_id=violation.id, document_id=document_id)
-            except Exception as e:
-                logger.warning("Failed to link document to PVB violation", error=str(e))
+#         # Link document to the violation if provided
+#         document_id = step_data.get("document_id")
+#         if document_id:
+#             try:
+#                 upload_service.upsert_document(db, {
+#                     "id": document_id,
+#                     "object_type": "pvb_violation",
+#                     "object_lookup_id": case_entity.identifier_value
+#                 })
+#                 logger.info("Linked proof document to PVB violation", violation_id=violation.id, document_id=document_id)
+#             except Exception as e:
+#                 logger.warning("Failed to link document to PVB violation", error=str(e))
         
-        # Finalize the violation status
-        pvb_service.repo.update_violation(
-            int(case_entity.identifier_value),
-            {
-                "status": PVBViolationStatus.ASSOCIATED,
-                "updated_on": datetime.utcnow()
-            }
-        )
+#         # Finalize the violation status
+#         pvb_service.repo.update_violation(
+#             int(case_entity.identifier_value),
+#             {
+#                 "status": PVBViolationStatus.ASSOCIATED,
+#                 "updated_on": datetime.utcnow()
+#             }
+#         )
         
-        # Trigger asynchronous ledger posting
-        post_pvb_violations_to_ledger_task.delay()
+#         # Trigger asynchronous ledger posting
+#         post_pvb_violations_to_ledger_task.delay()
         
-        # Create audit trail
-        case = bpm_service.get_cases(db, case_no=case_no)
-        audit_trail_service.create_audit_trail(
-            db,
-            description=f"Manual PVB violation created: Summons {violation.summons}",
-            case=case,
-            meta_data={
-                "pvb_id": violation.id,
-                "summons": violation.summons,
-                "driver_id": violation.driver_id,
-                "lease_id": violation.lease_id,
-                "amount_due": float(violation.amount_due),
-            },
-            audit_type=AuditTrailType.AUTOMATED,
-        )
+#         # Create audit trail
+#         case = bpm_service.get_cases(db, case_no=case_no)
+#         audit_trail_service.create_audit_trail(
+#             db,
+#             description=f"Manual PVB violation created: Summons {violation.summons}",
+#             case=case,
+#             meta_data={
+#                 "pvb_id": violation.id,
+#                 "summons": violation.summons,
+#                 "driver_id": violation.driver_id,
+#                 "lease_id": violation.lease_id,
+#                 "amount_due": float(violation.amount_due),
+#             },
+#             audit_type=AuditTrailType.AUTOMATED,
+#         )
         
-        logger.info("PVB violation finalized and queued for ledger posting", violation_id=violation.id, summons=violation.summons)
+#         logger.info("PVB violation finalized and queued for ledger posting", violation_id=violation.id, summons=violation.summons)
 
-        return "Ok"
+#         return "Ok"
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error in attach_proof_process for PVB", case_no=case_no, error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An error occurred while finalizing PVB violation: {str(e)}") from e
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error("Error in attach_proof_process for PVB", case_no=case_no, error=str(e), exc_info=True)
+#         raise HTTPException(status_code=500, detail=f"An error occurred while finalizing PVB violation: {str(e)}") from e

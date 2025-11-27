@@ -14,7 +14,7 @@ from app.entities.services import entity_service
 from app.utils.s3_utils import s3_utils
 from app.entities.models import Address, BankAccount
 from app.drivers.models import DMVLicense, Driver, TLCLicense
-from app.utils.general import get_safe_value
+from app.utils.general import get_safe_value , get_random_routing_number
 
 logger = get_logger(__name__)
 SUPERADMIN_USER_ID = 1
@@ -135,16 +135,33 @@ def parse_drivers(db: Session, df: pd.DataFrame):
 
             # Bank Account details
             if get_safe_value(row, "pay_to_mode") == "ACH":
-                bank_account = driver.driver_bank_account or BankAccount()
-                bank_account.bank_name = get_safe_value(row, "bank_name")
-                bank_account.bank_account_number = get_safe_value(row, "bank_account_number")
-                if not driver.driver_bank_account:
+                account_number = get_safe_value(row, "bank_account_number")
+                if not account_number:
+                    logger.warning("Skipping row with missing bank account number")
+                    continue
+
+                if isinstance(account_number, float):
+                    account_number = int(account_number)
+                # Convert to string and clean
+                account_number = str(account_number).strip()
+                account_number = "".join(filter(str.isdigit, account_number))
+
+                logger.info("Adding new bank account with number: %s", account_number)
+                bank_account = entity_service.get_bank_account(db=db, bank_account_number=account_number) if account_number else None
+                if not bank_account:
+                    bank_account = BankAccount(
+                        bank_account_number=account_number,
+                        bank_routing_number=get_random_routing_number(db),
+                        bank_account_type = "S",
+                        is_active=True,
+                        created_by=SUPERADMIN_USER_ID
+                    )
                     db.add(bank_account)
-                    driver.driver_bank_account = bank_account
-                    driver.pay_to_mode = "ACH"
                     created_bank_accounts += 1
                 else:
                     updated_bank_accounts += 1
+                driver.driver_bank_account = bank_account
+                driver.pay_to_mode = "ACH"
             else:
                 driver.driver_bank_account = None
                 driver.pay_to_mode = get_safe_value(row, "pay_to_mode")

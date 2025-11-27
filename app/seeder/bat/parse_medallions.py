@@ -82,7 +82,6 @@ def parse_medallions(db: Session, df: pd.DataFrame):
                 logger.info("Updating existing medallion: %s", medallion_numbers)
                 medallion.medallion_type = medallion_type
                 medallion.owner_type = medallion_owner_type
-                medallion.medallion_status = medallion_status
                 medallion.medallion_renewal_date = medallion_renewal_date
                 medallion.validity_start_date = validity_start_date
                 medallion.validity_end_date = validity_end_date

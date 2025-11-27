@@ -1,11 +1,14 @@
 # app/dtr/router.py
 
 import math
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+import json
+import decimal
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -20,6 +23,7 @@ from app.dtr.schemas import (
     DTRSummaryResponse
 )
 from app.dtr.models import DTRStatus, PaymentMethod
+from app.dtr.pdf_service import DTRPdfService
 from app.utils.logger import get_logger
 from app.utils.exporter_utils import ExporterFactory
 
@@ -177,8 +181,8 @@ def list_dtrs(
             receipt_number=receipt_number,
             status=status,
             payment_method=payment_method,
-            week_start=week_start,
-            week_end=week_end,
+            week_start_date_from=week_start,
+            week_end_date_to=week_end,
             medallion_number=medallion_number,
             tlc_license=tlc_license,
             driver_name=driver_name,
@@ -345,49 +349,110 @@ def get_summary_stats(
         raise HTTPException(status_code=500, detail="Failed to get summary stats") from e
 
 
-@router.get("/export")
+@router.get("/export/all")
 def export_dtrs(
     export_format: str = Query("excel", regex='^(excel|csv|pdf|json)$'),
-    week_start: Optional[date] = Query(None),
-    week_end: Optional[date] = Query(None),
+    receipt_number: Optional[str] = Query(None),
     status: Optional[DTRStatus] = Query(None),
+    payment_method: Optional[PaymentMethod] = Query(None),
+    week_start_date_from: Optional[date] = Query(None),
+    week_start_date_to: Optional[date] = Query(None),
+    week_end_date_from: Optional[date] = Query(None),
+    week_end_date_to: Optional[date] = Query(None),
+    ach_batch_number: Optional[str] = Query(None),
+    total_due_min: Optional[float] = Query(None, ge=0),
+    total_due_max: Optional[float] = Query(None, ge=0),
+    receipt_type: Optional[str] = Query(None),
+    medallion_number: Optional[str] = Query(None),
+    tlc_license: Optional[str] = Query(None),
+    driver_name: Optional[str] = Query(None),
+    plate_number: Optional[str] = Query(None),
+    check_number: Optional[str] = Query(None),
+    sort_by: str = Query('generation_date'),
+    sort_order: str = Query('desc', regex='^(asc|desc)$'),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Export DTRs in the requested format. Supported formats: excel, csv, pdf, json"""
+    """Export DTRs in the requested format with comprehensive filtering. Supported formats: excel, csv, pdf, json"""
     try:
         repo = DTRRepository(db)
 
         dtrs, _ = repo.list_with_filters(
             page=1,
             per_page=10000,  # Large limit for export
-            week_start=week_start,
-            week_end=week_end,
-            status=status
+            receipt_number=receipt_number,
+            status=status,
+            payment_method=payment_method,
+            week_start_date_from=week_start_date_from,
+            week_start_date_to=week_start_date_to,
+            week_end_date_from=week_end_date_from,
+            week_end_date_to=week_end_date_to,
+            ach_batch_number=ach_batch_number,
+            total_due_min=total_due_min,
+            total_due_max=total_due_max,
+            receipt_type=receipt_type,
+            medallion_number=medallion_number,
+            tlc_license=tlc_license,
+            driver_name=driver_name,
+            plate_number=plate_number,
+            check_number=check_number,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
 
-        # Prepare data for export (superset of fields)
+        # Prepare data for export: export ALL columns from the DTR table
+        from app.dtr.models import DTR as DTRModel
+
+        # Collect column names from the model table in defined order
+        columns = [c.name for c in DTRModel.__table__.columns]
+
+        def _format_value(v):
+            if v is None:
+                return ""
+            # Decimal -> float for CSV friendliness
+            if isinstance(v, decimal.Decimal):
+                return float(v)
+            # date/datetime -> ISO string
+            if isinstance(v, (date, datetime)):
+                return v.isoformat()
+            # Enums (SQLAlchemy Enum) often expose .value
+            if hasattr(v, 'value'):
+                return v.value
+            # JSON-like Python structures -> JSON string
+            if isinstance(v, (dict, list)):
+                try:
+                    return json.dumps(v, default=str)
+                except Exception:
+                    return str(v)
+            # Fallback to string
+            return str(v)
+
         data = []
         for dtr in dtrs:
-            data.append({
-                'Receipt Number': dtr.receipt_number,
-                'DTR Number': dtr.dtr_number,
-                'Week Start': dtr.week_start_date,
-                'Week End': dtr.week_end_date,
-                'Medallion': dtr.medallion.medallion_number if dtr.medallion else '',
-                'TLC License': dtr.primary_driver.tlc_license.tlc_license_number if dtr.primary_driver else '',
-                'Driver Name': f"{dtr.primary_driver.first_name} {dtr.primary_driver.last_name}" if dtr.primary_driver else '',
-                'Plate': (dtr.vehicle.get_active_plate_number() if dtr.vehicle and hasattr(dtr.vehicle, 'get_active_plate_number')
-                          else (dtr.vehicle.plate_number if dtr.vehicle and getattr(dtr.vehicle, 'plate_number', None) else '')),
-                'CC Earnings': float(dtr.credit_card_earnings) if getattr(dtr, 'credit_card_earnings', None) is not None else 0.0,
-                'Total Deductions': float(dtr.subtotal_deductions) if getattr(dtr, 'subtotal_deductions', None) is not None else 0.0,
-                'Net Earnings': float(dtr.net_earnings) if getattr(dtr, 'net_earnings', None) is not None else 0.0,
-                'Total Due': float(dtr.total_due_to_driver) if getattr(dtr, 'total_due_to_driver', None) is not None else 0.0,
-                'Status': dtr.status.value if dtr.status else '',
-                'Payment Method': dtr.payment_method.value if dtr.payment_method else '',
-                'Batch Number': dtr.ach_batch_number or '',
-                'Check Number': dtr.check_number or ''
-            })
+            # Preserve column order using dict comprehension
+            row = {col: _format_value(getattr(dtr, col, None)) for col in columns}
+
+            # Add a few helpful related fields (optional): driver name, medallion number, plate
+            # These are not table columns but are very useful in exports.
+            try:
+                row['driver_name'] = (f"{dtr.primary_driver.first_name} {dtr.primary_driver.last_name}" if getattr(dtr, 'primary_driver', None) else "")
+            except Exception:
+                row['driver_name'] = ""
+
+            try:
+                row['medallion_number'] = (dtr.medallion.medallion_number if getattr(dtr, 'medallion', None) else "")
+            except Exception:
+                row['medallion_number'] = ""
+
+            try:
+                if getattr(dtr, 'vehicle', None):
+                    row['plate_number'] = (dtr.vehicle.get_active_plate_number() if hasattr(dtr.vehicle, 'get_active_plate_number') else getattr(dtr.vehicle, 'plate_number', ""))
+                else:
+                    row['plate_number'] = ""
+            except Exception:
+                row['plate_number'] = ""
+
+            data.append(row)
 
         # Use ExporterFactory
         exporter = ExporterFactory.get_exporter(export_format, data)
@@ -420,3 +485,34 @@ def export_dtrs(
     except Exception as e:
         logger.error(f"Error exporting DTRs: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to export DTRs") from e
+        
+@router.get("/{dtr_id}/pdf", summary="Download DTR PDF")
+def download_dtr_pdf(
+    dtr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Generates and downloads the Driver Transaction Receipt (DTR) PDF.
+    """
+    try:
+        pdf_service = DTRPdfService(db)
+        pdf_content = pdf_service.generate_dtr_pdf(dtr_id=dtr_id)
+
+        # Determine content type based on Whether we generated PDF or fallback HTML
+        is_pdf = pdf_content.startswith(b'%PDF')
+        media_type = "application/pdf" if is_pdf else "text/html"
+        ext = "pdf" if is_pdf else "html"
+
+        filename = f"DTR_{dtr_id}_{date.today()}.{ext}"
+
+        return StreamingResponse(
+            BytesIO(pdf_content),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error generating DTR PDF: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate DTR PDF") from e

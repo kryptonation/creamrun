@@ -1,7 +1,8 @@
 ### app/repairs/services.py
 
-from datetime import datetime, timedelta , date
+from datetime import datetime, timedelta , date , timezone
 from decimal import Decimal
+from typing import Optional , List , Tuple
 
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.bpm.services import bpm_service
 from app.core.db import SessionLocal
 from app.ledger.models import PostingCategory
 from app.ledger.services import LedgerService
+from app.ledger.repository import LedgerRepository
 from app.repairs.exceptions import (
     InvalidRepairOperationError,
     PaymentScheduleGenerationError,
@@ -22,6 +24,7 @@ from app.repairs.models import (
 )
 from app.repairs.repository import RepairRepository
 from app.utils.logger import get_logger
+from app.loans.schemas import PostInstallmentResponse , InstallmentPostingResult
 
 logger = get_logger(__name__)
 
@@ -149,58 +152,152 @@ class RepairService:
         except Exception as e:
             logger.error(f"Error generating payment schedule for {invoice.repair_id}: {e}", exc_info=True)
             raise PaymentScheduleGenerationError(f"Could not generate payment schedule: {e}")
-
-    def post_due_installments_to_ledger(self):
-        """
-        Finds all due repair installments and posts them as obligations to the ledger.
-        This is designed to be called by a scheduled Celery task.
-        """
-        logger.info("Starting task to post due repair installments to ledger.")
-        db = SessionLocal()
-        ledger_service = LedgerService(db)
-        repo = RepairRepository(db)
         
-        posted_count, failed_count = 0, 0
+    def closed_repair(self):
         try:
-            # Post for today's date to catch all due installments
-            installments_to_post = repo.get_due_installments_to_post(datetime.utcnow().date())
+            repairs = self.db.query(RepairInvoice).filter(RepairInvoice.status == RepairInvoiceStatus.OPEN).all()
+            for repair in repairs:
+                installments = self.db.query(RepairInstallment).filter(RepairInstallment.invoice_id == repair.id).all()
+                if all(inst.status == RepairInstallmentStatus.POSTED for inst in installments):
+                    repair.status = RepairInvoiceStatus.CLOSED
+            
+            self.db.commit()
+            logger.info(f"Closed {len(repairs)} repairs.")
+        except Exception as e:
+            logger.error(f"Error closing repairs: {e}", exc_info=True)
+            raise
 
-            if not installments_to_post:
-                logger.info("No due repair installments to post.")
-                return {"posted": 0, "failed": 0}
+    def post_due_installments_to_ledger(
+        self ,
+        installment_ids:Optional[list[str]]= None,
+        post_all_due:bool = False
+        )->Tuple[List[InstallmentPostingResult], int, int]:
+        """Post loan installments to the ledger either by specific IDs or all due installments."""
+
+        logger.info("Starting task to post due repair installments to ledger.")
+
+        if not installment_ids and not post_all_due:
+            raise ValueError("Either provide installment_ids or set post_all_due=True")
+        
+        db = SessionLocal()
+        
+        ledger_repo = LedgerRepository(self.db)
+        ledger_service = LedgerService(ledger_repo)
+        repo = RepairRepository(self.db)
+        
+        results = []
+        posted_count,failed_count = 0, 0
+        try:
+
+            if post_all_due:
+                # Post for today's date to catch all due installments
+                installments_to_post = repo.get_due_installments_to_post(datetime.utcnow().date())
+                logger.info(f"Found {len(installments_to_post)} due installments to post")
+            else:
+                installments_to_post = []
+                for installment_id in installment_ids:
+                    installment = repo.get_installment_by_installment_id(installment_id)
+                    if installment:
+                        installments_to_post.append(installment)
+                    else:
+                        results.append(InstallmentPostingResult(
+                        installment_id=installment_id,
+                        success=False,
+                        error_message=f"Installment {installment_id} not found"
+                        ))
+                        failed_count += 1
+
 
             for installment in installments_to_post:
                 try:
-                    ledger_service.create_obligation(
-                        category=PostingCategory.REPAIR,
-                        amount=installment.principal_amount,
-                        reference_id=installment.installment_id,
-                        driver_id=installment.invoice.driver_id,
-                        lease_id=installment.invoice.lease_id,
-                        vehicle_id=installment.invoice.vehicle_id,
-                        medallion_id=installment.invoice.medallion_id,
-                    )
-                    
-                    repo.update_installment(installment.id, {
-                        "status": RepairInstallmentStatus.POSTED,
-                        "posted_on": datetime.utcnow()
-                    })
-                    posted_count += 1
-                except Exception as e:
-                    failed_count += 1
-                    reason = f"Ledger service error: {str(e)}"
-                    repo.update_installment(installment.id, {"status": RepairInstallmentStatus.POSTED, "failure_reason": reason})
-                    logger.error(f"Failed to post installment {installment.installment_id} to ledger: {e}", exc_info=True)
+                    # Validate installment can be posted
+                    if installment.status != RepairInstallmentStatus.SCHEDULED:
+                        results.append(InstallmentPostingResult(
+                            installment_id=installment.installment_id,
+                            success=False,
+                            error_message=f"Installment status is {installment.status.value}, must be SCHEDULES"
+                        ))
+                        failed_count += 1
+                        continue
 
-            db.commit()
-            logger.info(f"Repair installment posting task finished. Posted: {posted_count}, Failed: {failed_count}")
-            return {"posted": posted_count, "failed": failed_count}
+                    if installment.invoice.status != RepairInvoiceStatus.OPEN:
+                        results.append(InstallmentPostingResult(
+                            installment_id=installment.installment_id,
+                            success=False,
+                            error_message=f"Parent invoice status is {installment.invoice.status.value}, must be OPEN"
+                        ))
+                        failed_count += 1
+                        continue
+
+                    if installment.week_start_date > datetime.utcnow().date():
+                        results.append(InstallmentPostingResult(
+                            installment_id=installment.installment_id,
+                            success=False,
+                            error_message=f"Installment date {installment.week_start_date} is in the future"
+                        ))
+                        failed_count += 1
+                        continue
+
+                    ledger_posting = ledger_service.create_obligation(
+                                    category=PostingCategory.REPAIR,
+                                    amount=installment.principal_amount,
+                                    reference_id=installment.installment_id,
+                                    driver_id=installment.invoice.driver_id,
+                                    lease_id=installment.invoice.lease_id,
+                                    vehicle_id=installment.invoice.vehicle_id,
+                                    medallion_id=installment.invoice.medallion_id,
+                                )
+                    
+                    posted_on = datetime.now(timezone.utc)
+                    self.repo.update_installment(installment.id, {
+                        "status": RepairInstallmentStatus.POSTED,
+                        "posted_on": posted_on,
+                        "ledger_posting_ref": ledger_posting.id
+                    })
+
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment.installment_id,
+                        success=True,
+                        ledger_posting_ref=ledger_posting.id,
+                        posted_on=posted_on
+                    ))
+                    posted_count += 1
+
+                    logger.info(
+                        f"Successfully posted installment {installment.installment_id} "
+                        f"to ledger with posting ID {ledger_posting.id}"
+                    )
+                except Exception as e:
+                    results.append(InstallmentPostingResult(
+                        installment_id=installment.installment_id,
+                        success=False,
+                        error_message=f"Error posting installment to ledger: {e}"
+                    ))
+                    failed_count += 1
+                    logger.error(f"Error posting installment to ledger: {e}", exc_info=True)
+
+
+            if posted_count > 0:
+                try:
+                    self.db.commit()
+                    logger.info(
+                        f"Committed {posted_count} installment postings to database"
+                    )
+                except Exception as e:
+                    self.db.rollback()
+                    logger.error(f"Failed to commit installment postings: {e}", exc_info=True)
+                    raise
+
+            self.closed_repair()
+
+            return results , posted_count , failed_count
+        
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             logger.error(f"Fatal error in post_due_installments_to_ledger: {e}", exc_info=True)
             raise
         finally:
-            db.close()
+            self.db.close()
 
     def get_repair_invoice(self,
                            lookup_id: int = None,

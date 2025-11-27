@@ -7,7 +7,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.repairs.models import RepairInvoiceStatus, WorkshopType, RepairInstallmentStatus
-
+from app.leases.schemas import LeaseType
 
 class RepairInvoiceListResponse(BaseModel):
     """
@@ -16,11 +16,11 @@ class RepairInvoiceListResponse(BaseModel):
     repair_id: str
     invoice_number: str
     invoice_date: date = Field(..., alias="invoice_date")
-    status: RepairInvoiceStatus
+    status: str
     driver_name: Optional[str] = None
     medallion_no: Optional[str] = None
     lease_type: Optional[str] = None # Will be populated in the router from lease
-    workshop: WorkshopType = Field(..., alias="workshop_type")
+    workshop: str = Field(..., alias="workshop_type")
     amount: Decimal = Field(..., alias="total_amount")
 
     class Config:
@@ -37,6 +37,18 @@ class PaginatedRepairInvoiceResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+    status_list : List[RepairInvoiceStatus] = Field(
+        default_factory=lambda: list(RepairInvoiceStatus)
+    )
+    lease_type_list : List[LeaseType] = Field(
+        default_factory=lambda: list(LeaseType)
+    )
+    workshop_type_list : List[WorkshopType] = Field(
+        default_factory=lambda: list(WorkshopType)
+    )
+    installment_status_list : List[RepairInstallmentStatus] = Field(
+        default_factory=lambda: list(RepairInstallmentStatus)
+    )
 
 
 class RepairInstallmentResponse(BaseModel):
@@ -95,6 +107,7 @@ class RepairInstallmentListResponse(BaseModel):
     week_start_date: date
     week_end_date: date
     installment: Decimal = Field(..., alias="principal_amount")
+    balance: Decimal
     status: RepairInstallmentStatus
     posted_date: Optional[date] = Field(None, alias="posted_on")
     ledger_posting_ref: Optional[str] = None

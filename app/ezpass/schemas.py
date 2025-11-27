@@ -13,7 +13,7 @@ class EZPassTransactionResponse(BaseModel):
     """
     Response schema for a single EZPass transaction, designed to match the UI grid.
     """
-    id: int
+    id: Optional[int] = None
     transaction_id: Optional[str] = None
     entry_plaza: Optional[str] = None
     exit_plaza: Optional[str] = None
@@ -25,7 +25,7 @@ class EZPassTransactionResponse(BaseModel):
     posting_date: Optional[datetime] = None
     status: str = None
     total_amount: Decimal = Field(..., alias="amount")
-    vin: str = None
+    vin: Optional[str] = None
     ezpass_class: Optional[str] = None
     
     # Extra fields for detailed view or potential future columns

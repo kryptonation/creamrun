@@ -169,7 +169,7 @@ def format_medallon_owner(medalion_owner):
     owner_details = {
         "id": medalion_owner.id,
         "is_mailing_address_same": medalion_owner.is_mailing_address_same,
-        "medallions": [{"medallion_number": medallion.medallion_number} for medallion in medalion_owner.medallions] if medalion_owner.medallions else []
+        "medallions": [{"medallion_number": medallion.medallion_number} for medallion in medalion_owner.medallions if medallion.medallion_number] if medalion_owner.medallions else []
     }
 
     if medalion_owner.medallion_owner_type == "I" and medalion_owner.individual:

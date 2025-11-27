@@ -3,10 +3,8 @@
 from datetime import date, datetime , time
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, update
+from sqlalchemy import update , or_ , func
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.sql import func , or_
-
 from app.drivers.models import Driver
 from app.ezpass.models import (
     EZPassImport,

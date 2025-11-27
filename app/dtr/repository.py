@@ -4,12 +4,12 @@ from datetime import date
 from typing import List, Optional, Tuple, Dict, Any
 from decimal import Decimal
 
-from sqlalchemy import and_, or_, desc, asc, func
+from sqlalchemy import and_, or_, desc, asc, func, case
 from sqlalchemy.orm import Session, joinedload
 
 from app.dtr.models import DTR, DTRStatus, PaymentMethod
-from app.drivers.models import Driver
-from app.vehicles.models import Vehicle
+from app.drivers.models import Driver, TLCLicense
+from app.vehicles.models import Vehicle, VehicleRegistration
 from app.medallions.models import Medallion
 from app.utils.logger import get_logger
 
@@ -69,13 +69,18 @@ class DTRRepository:
         receipt_number: Optional[str] = None,
         status: Optional[DTRStatus] = None,
         payment_method: Optional[PaymentMethod] = None,
-        week_start: Optional[date] = None,
-        week_end: Optional[date] = None,
+        week_start_date_from: Optional[date] = None,
+        week_start_date_to: Optional[date] = None,
+        week_end_date_from: Optional[date] = None,
+        week_end_date_to: Optional[date] = None,
+        ach_batch_number: Optional[str] = None,
+        total_due_min: Optional[float] = None,
+        total_due_max: Optional[float] = None,
+        receipt_type: Optional[str] = None,
         medallion_number: Optional[str] = None,
         tlc_license: Optional[str] = None,
         driver_name: Optional[str] = None,
         plate_number: Optional[str] = None,
-        ach_batch_number: Optional[str] = None,
         check_number: Optional[str] = None,
         sort_by: str = 'generation_date',
         sort_order: str = 'desc'
@@ -102,41 +107,80 @@ class DTRRepository:
         if payment_method:
             query = query.filter(DTR.payment_method == payment_method)
         
-        if week_start:
-            query = query.filter(DTR.week_start_date >= week_start)
+        # Date range filters for week_start_date
+        if week_start_date_from:
+            query = query.filter(DTR.week_start_date >= week_start_date_from)
         
-        if week_end:
-            query = query.filter(DTR.week_end_date <= week_end)
+        if week_start_date_to:
+            query = query.filter(DTR.week_start_date <= week_start_date_to)
+        
+        # Date range filters for week_end_date
+        if week_end_date_from:
+            query = query.filter(DTR.week_end_date >= week_end_date_from)
+        
+        if week_end_date_to:
+            query = query.filter(DTR.week_end_date <= week_end_date_to)
         
         if ach_batch_number:
             query = query.filter(DTR.ach_batch_number == ach_batch_number)
+        
+        # Total due to driver range filters
+        if total_due_min is not None:
+            query = query.filter(DTR.total_due_to_driver >= total_due_min)
+        
+        if total_due_max is not None:
+            query = query.filter(DTR.total_due_to_driver <= total_due_max)
+        
+        # Receipt type filter (currently only "DTR" is supported)
+        if receipt_type:
+            if receipt_type != "DTR":
+                # Return empty result if invalid receipt type
+                return [], 0
         
         if check_number:
             query = query.filter(DTR.check_number.ilike(f'%{check_number}%'))
         
         # Join filters
         if medallion_number:
-            query = query.join(DTR.medallion).filter(
-                Medallion.medallion_number.ilike(f'%{medallion_number}%')
-            )
+            med_vals = [m.strip() for m in medallion_number.split(',') if m.strip()]
+            if med_vals:
+                query = query.join(DTR.medallion).filter(
+                    or_(*[Medallion.medallion_number.ilike(f'%{m}%') for m in med_vals])
+                )
         
         if tlc_license:
-            query = query.join(DTR.primary_driver).filter(
-                Driver.tlc_license.ilike(f'%{tlc_license}%')
-            )
+            tlc_vals = [t.strip() for t in tlc_license.split(',') if t.strip()]
+            if tlc_vals:
+                query = query.join(DTR.primary_driver).join(
+                    TLCLicense, Driver.tlc_license_number_id == TLCLicense.id, isouter=True
+                ).filter(
+                    or_(*[TLCLicense.tlc_license_number.ilike(f'%{t}%') for t in tlc_vals])
+                )
         
         if driver_name:
-            query = query.join(DTR.primary_driver).filter(
-                or_(
-                    Driver.first_name.ilike(f'%{driver_name}%'),
-                    Driver.last_name.ilike(f'%{driver_name}%')
-                )
-            )
+            name_vals = [n.strip() for n in driver_name.split(',') if n.strip()]
+            if name_vals:
+                exprs = []
+                for n in name_vals:
+                    like = f'%{n}%'
+                    exprs.extend([
+                        Driver.first_name.ilike(like),
+                        Driver.last_name.ilike(like),
+                        func.concat(Driver.first_name, ' ', Driver.last_name).ilike(like),
+                        func.concat(Driver.last_name, ' ', Driver.first_name).ilike(like)
+                    ])
+
+                query = query.join(DTR.primary_driver).filter(or_(*exprs))
         
         if plate_number:
-            query = query.join(DTR.vehicle).filter(
-                Vehicle.plate_number.ilike(f'%{plate_number}%')
-            )
+            plate_vals = [p.strip() for p in plate_number.split(',') if p.strip()]
+            if plate_vals:
+                query = query.join(DTR.vehicle).join(
+                    VehicleRegistration,
+                    VehicleRegistration.vehicle_id == Vehicle.id
+                ).filter(
+                    or_(*[VehicleRegistration.plate_number.ilike(f'%{p}%') for p in plate_vals])
+                )
         
         # Get total count before pagination
         total = query.count()
@@ -233,16 +277,10 @@ class DTRRepository:
             func.count(DTR.id).label('total_count'),
             func.sum(DTR.total_due_to_driver).label('total_amount'),
             func.sum(
-                func.case(
-                    (DTR.status == DTRStatus.PAID, DTR.total_due_to_driver),
-                    else_=Decimal('0.00')
-                )
+                case((DTR.status == DTRStatus.PAID, DTR.total_due_to_driver), else_=Decimal('0.00'))
             ).label('paid_amount'),
             func.sum(
-                func.case(
-                    (DTR.status != DTRStatus.PAID, DTR.total_due_to_driver),
-                    else_=Decimal('0.00')
-                )
+                case((DTR.status != DTRStatus.PAID, DTR.total_due_to_driver), else_=Decimal('0.00'))
             ).label('unpaid_amount')
         )
         

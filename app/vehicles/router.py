@@ -29,8 +29,7 @@ from app.uploads.services import upload_service
 from app.users.models import User
 from app.users.utils import get_current_user
 from app.core.dependencies import get_db_with_current_user
-from app.utils.exporter.excel_exporter import ExcelExporter
-from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.exporter_utils import ExporterFactory
 from app.utils.logger import get_logger
 from app.vehicles.schemas import (
     DeliveryData,
@@ -175,75 +174,75 @@ def change_delivery_status(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/export/vehicle_owner", summary="export vehicle owner Data")
+@router.get("/export/vehicle_owner", summary="Export Vehicle Owner Data")
 def export_vehicle_owner(
-    db: Session = Depends(get_db),
-    format: str = Query("excel", enum=["excel", "pdf"]),
+    export_format: str = Query("excel", enum=["excel", "pdf"], alias="format"),
+    sort_by: Optional[str] = Query("created_on"),
+    sort_order: str = Query("desc"),
     entity_name: Optional[str] = Query(None),
     owner_id: Optional[int] = Query(None),
     entity_status: Optional[str] = Query(None),
     ein: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(10000, ge=1, le=1000000),
-    sort_by: str = "created_on",
-    sort_order: str = "desc",
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
 ):
-    """Export vehicle owner data"""
+    """
+    Exports filtered vehicle owner data to the specified format (Excel or PDF).
+    """
     try:
-        owners, total_count = vehicle_service.get_vehicle_entity(
+        owners, _ = vehicle_service.get_vehicle_entity(
             db=db,
             entity_name=entity_name,
             ein=ein,
             entity_status=entity_status,
             owner_id=owner_id,
-            page=page,
-            per_page=per_page,
+            page=1,
+            per_page=10000,
             sort_by=sort_by,
             sort_order=sort_order,
             multiple=True,
         )
-        results = [
+
+        if not owners:
+            raise ValueError("No vehicle owner data available for export with the given filters.")
+
+        export_data = [
             {
-                "Entity Name": owner.entity_name,
-                "EIN": owner.ein,
-                "Entity Status": owner.entity_status,
-                "Owner ID": owner.owner_id,
-                "Vehicles": ", ".join(
-                    [f"({vehicle.vin})" for vehicle in owner.vehicles]
-                ),
-                "Created On": owner.created_on,
-                "Updated On": owner.updated_on,
+                "Entity Name": owner.entity_name if owner.entity_name else "",
+                "EIN": owner.ein if owner.ein else "",
+                "Entity Status": owner.entity_status if owner.entity_status else "",
+                "Owner ID": owner.owner_id if owner.owner_id else "",
+                "Vehicles": ", ".join([f"({vehicle.vin})" for vehicle in owner.vehicles]),
+                "Created On": owner.created_on or "",
+                "Updated On": owner.updated_on or "",
             }
             for owner in owners
         ]
 
-        file = None
-        media_type = None
-        headers = None
+        filename = f"vehicle_owners_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
-        if format == "excel":
-            excel_exporter = ExcelExporter(results)
-            file: BytesIO = excel_exporter.export()
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            headers = {
-                "Content-Disposition": "attachment; filename=vehicle_owners_export.xlsx"
-            }
-        elif format == "pdf":
-            pdf_exporter = PDFExporter(results)
-            file: BytesIO = pdf_exporter.export()
-            media_type = "application/pdf"
-            headers = {
-                "Content-Disposition": "attachment; filename=vehicle_owners_export.pdf"
-            }
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format")
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
 
-        return StreamingResponse(file, media_type=media_type, headers=headers)
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
+
+        headers = {"Content-Disposition": f"attachment; filename={filename}"}
+        return StreamingResponse(file_content, media_type=media_type, headers=headers)
+
+    except ValueError as e:
+        logger.warning("Business logic error during vehicle owner export: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     except Exception as e:
-        logger.error("Error exporting vehicle owner data: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Error exporting vehicle owner data: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred during the export process.",
+        ) from e
 
 
 @router.put("/change_ownership/{vin}", summary="change ownership of vehicle")
@@ -911,71 +910,42 @@ def list_vehicles_deprecation(
 
 @router.get("/vehicles/export", summary="Export Vehicles Search Results")
 def export_vehicles(
+    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
+    sort_by: Optional[str] = Query(None),
+    sort_order: str = Query("asc"),
+    vin: Optional[str] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    from_make_year: Optional[int] = Query(None, ge=1900, le=2100),
+    to_make_year: Optional[int] = Query(None, ge=1900, le=2100),
+    vehicle_type: Optional[str] = Query(None),
+    color: Optional[str] = Query(None),
+    entity_name: Optional[str] = Query(None),
+    vehicle_status: Optional[str] = Query(None),
+    registration_expiry_from: Optional[date] = Query(None),
+    registration_expiry_to: Optional[date] = Query(None),
+    has_documents: Optional[bool] = Query(None),
+    has_medallion: Optional[bool] = Query(None),
+    has_driver: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
-    format: Optional[str] = Query("excel", enum=["excel", "pdf"]),
-    vin: Optional[str] = Query(None, description="Filter by VIN (comma-separated)"),
-    make: Optional[str] = Query(None, description="Filter by make/brand"),
-    model: Optional[str] = Query(None, description="Filter by model"),
-    from_make_year: Optional[int] = Query(
-        None, ge=1900, le=2100, description="Filter by year from"
-    ),
-    to_make_year: Optional[int] = Query(
-        None, ge=1900, le=2100, description="Filter by year to"
-    ),
-    vehicle_type: Optional[str] = Query(None, description="Filter by vehicle type"),
-    color: Optional[str] = Query(None, description="Filter by color"),
-    entity_name: Optional[str] = Query(
-        None, description="Filter by entity name (comma-separated)"
-    ),
-    vehicle_status: Optional[str] = Query(None, description="Filter by vehicle status"),
-    registration_expiry_from: Optional[date] = Query(
-        None, description="Filter by registration expiry date from"
-    ),
-    registration_expiry_to: Optional[date] = Query(
-        None, description="Filter by registration expiry date to"
-    ),
-    has_documents: Optional[bool] = Query(
-        None, description="Filter by document existence"
-    ),
-    has_medallion: Optional[bool] = Query(
-        None, description="Filter by medallion association"
-    ),
-    has_driver: Optional[bool] = Query(
-        None, description="Filter by driver association"
-    ),
-    sort_by: Optional[str] = Query(None, description="Sort by field name"),
-    sort_order: Optional[str] = Query(
-        "asc", enum=["asc", "desc"], description="Sort order"
-    ),
-    logged_in_user: User = Depends(get_current_user),
+    _current_user: User = Depends(get_current_user),
 ):
-    """Exports the filtered vehicle list to a CSV file."""
+    """
+    Exports filtered vehicles data to the specified format (Excel or PDF).
+    """
     try:
-        # Retrieve filtered vehicles (same logic as list_vehicles)
         query = list_vehicles(
-            db,
-            1,
-            1000,
-            vin,
-            make,
-            model,
-            from_make_year,
-            to_make_year,
-            vehicle_type,
-            color,
-            entity_name,
-            vehicle_status,
-            registration_expiry_from,
-            registration_expiry_to,
-            has_documents,
-            has_medallion,
-            has_driver,
-            sort_by,
-            sort_order,
+            db, 1, 10000, vin, make, model, from_make_year, to_make_year,
+            vehicle_type, color, entity_name, vehicle_status,
+            registration_expiry_from, registration_expiry_to,
+            has_documents, has_medallion, has_driver, sort_by, sort_order,
         )
         vehicles = query["items"]
 
-        vehicle_list = [
+        if not vehicles:
+            raise ValueError("No vehicles data available for export with the given filters.")
+
+        export_data = [
             {
                 "VIN": vehicle["vin"],
                 "Make": vehicle["make"],
@@ -991,7 +961,7 @@ def export_vehicles(
                 "Vehicle Hackup Cost": vehicle["vehicle_hack_up_cost"],
                 "Vehicle True Cost": vehicle["vehicle_true_cost"],
                 "Vehicle Lifetime Cap": vehicle["vehicle_lifetime_cap"],
-                "Recoverable Base" : vehicle["recoverable_base"],
+                "Recoverable Base": vehicle["recoverable_base"],
                 "Deliver Date": vehicle["expected_delivery_date"],
                 "Medallion Owner": vehicle["medallion_owner"],
                 "Vehicle Status": vehicle["vehicle_status"],
@@ -1003,33 +973,29 @@ def export_vehicles(
             for vehicle in vehicles
         ]
 
-        file = None
-        media_type = None
-        headers = None
+        filename = f"vehicles_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
-        if format == "excel":
-            excel_exporter = ExcelExporter(vehicle_list)
-            file: BytesIO = excel_exporter.export()
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            headers = {
-                "Content-Disposition": "attachment; filename=vehicle_export.xlsx"
-            }
-        elif format == "pdf":
-            pdf_exporter = PDFExporter(vehicle_list)
-            file: BytesIO = pdf_exporter.export()
-            media_type = "application/pdf"
-            headers = {"Content-Disposition": "attachment; filename=vehicle_export.pdf"}
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format")
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
 
-        return StreamingResponse(file, media_type=media_type, headers=headers)
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
+
+        headers = {"Content-Disposition": f"attachment; filename={filename}"}
+        return StreamingResponse(file_content, media_type=media_type, headers=headers)
+
+    except ValueError as e:
+        logger.warning("Business logic error during vehicles export: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
-        logger.error("Error exporting vehicles: %s", str(e))
+        logger.error("Error exporting vehicles: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500, detail="Error generating CSV export"
+            status_code=500,
+            detail="An error occurred during the export process.",
         ) from e
 
 
@@ -1111,10 +1077,11 @@ def list_vehicle_inspections(
         ) from e
 
 
-@router.get("/vehicle-inspections/export", summary="Export Vehicle Inspection records")
+@router.get("/vehicle-inspections/export", summary="Export Vehicle Inspection Records")
 def export_vehicle_inspections(
-    db: Session = Depends(get_db),
-    format: Optional[str] = Query("excel", enum=["excel", "pdf"]),
+    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
+    sort_by: Optional[str] = Query(None),
+    sort_order: str = Query("asc"),
     inspection_id: Optional[int] = Query(None),
     vin_numbers: Optional[str] = Query(None),
     inspection_type: Optional[str] = Query(None),
@@ -1123,13 +1090,12 @@ def export_vehicle_inspections(
     result: Optional[str] = Query(None),
     next_inspection_due_from: Optional[date] = Query(None),
     next_inspection_due_to: Optional[date] = Query(None),
-    sort_by: Optional[str] = Query(None),
-    sort_order: Optional[str] = Query("asc"),
-    page: int = Query(1, gt=0),
-    per_page: int = Query(1000, gt=0),
-    logged_in_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
 ):
-    """Exports the filtered vehicle inspection list to a CSV file."""
+    """
+    Exports filtered vehicle inspection records to the specified format (Excel or PDF).
+    """
     try:
         filters = {
             "inspection_id": inspection_id,
@@ -1143,57 +1109,53 @@ def export_vehicle_inspections(
         }
 
         query = build_inspection_query(db, filters, sort_by, sort_order)
-        total_items = get_inspection_total_items(db, query)
-        inspections = get_inspection_paginated_results(query, page, per_page)
+        inspections = get_inspection_paginated_results(query, 1, 10000)
 
-        # items = [i.to_dict() for i in inspections]
+        if not inspections:
+            raise ValueError("No vehicle inspection data available for export with the given filters.")
 
-        items = [
+        export_data = [
             {
                 "ID": inspection.id,
-                "Inspection Type": inspection.vehicle.vehicle_type,
-                "Mile Run": inspection.mile_run,
-                "medallion_number": inspection.vehicle.medallion.medallion_number,
-                "Inspection Date": inspection.inspection_date,
-                "Inspection Time": inspection.inspection_time,
-                "Odometer Reading Date": inspection.odometer_reading_date,
-                "Odometer Reading": inspection.odometer_reading,
-                "Logged Date": inspection.logged_date,
-                "Logged Time": inspection.logged_time,
-                "Result": inspection.result,
-                "Inspection Fee": inspection.inspection_fee,
-                "Next Inspection Due Date": inspection.next_inspection_due_date,
+                "Inspection Type": inspection.vehicle.vehicle_type if inspection.vehicle and inspection.vehicle.vehicle_type else "",
+                "Mile Run": inspection.mile_run if inspection.mile_run else "",
+                "medallion_number": inspection.vehicle.medallion.medallion_number if inspection.vehicle and inspection.vehicle.medallion else "",
+                "Inspection Date": inspection.inspection_date if inspection.inspection_date else "",
+                "Inspection Time": inspection.inspection_time if inspection.inspection_time else "",
+                "Odometer Reading Date": inspection.odometer_reading_date if inspection.odometer_reading_date else "",
+                "Odometer Reading": inspection.odometer_reading if inspection.odometer_reading else "",
+                "Logged Date": inspection.logged_date if inspection.logged_date else "",
+                "Logged Time": inspection.logged_time if inspection.logged_time else "",
+                "Result": inspection.result if inspection.result else "",
+                "Inspection Fee": inspection.inspection_fee if inspection.inspection_fee else "",
+                "Next Inspection Due Date": inspection.next_inspection_due_date if inspection.next_inspection_due_date else "",
             }
             for inspection in inspections
         ]
 
-        file = None
-        media_type = None
-        headers = None
-        if format == "excel":
-            excel_exporter = ExcelExporter(items)
-            file: BytesIO = excel_exporter.export()
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            headers = {
-                "Content-Disposition": "attachment; filename=vehicle_inspection_export.xlsx"
-            }
-        elif format == "pdf":
-            pdf_exporter = PDFExporter(items)
-            file: BytesIO = pdf_exporter.export()
-            media_type = "application/pdf"
-            headers = {
-                "Content-Disposition": "attachment; filename=vehicle_inspection_export.pdf"
-            }
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format")
+        filename = f"vehicle_inspections_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
-        return StreamingResponse(file, media_type=media_type, headers=headers)
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
+
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
+
+        headers = {"Content-Disposition": f"attachment; filename={filename}"}
+        return StreamingResponse(file_content, media_type=media_type, headers=headers)
+
+    except ValueError as e:
+        logger.warning("Business logic error during vehicle inspections export: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     except Exception as e:
-        logger.error("Error exporting vehicle inspections: %s", str(e))
+        logger.error("Error exporting vehicle inspections: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500, detail="Error exporting vehicle inspections"
+            status_code=500,
+            detail="An error occurred during the export process.",
         ) from e
 
 

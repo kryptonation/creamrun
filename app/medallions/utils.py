@@ -31,8 +31,8 @@ def format_medallion_owner_response(db , medallion_owner):
     documents = upload_service.get_documents(db=db , object_id=medallion_owner.id , object_type="medallion_owner" , multiple=True) or []
     base_data = {
         "medallion_owner_id": medallion_owner.id,
-        "contact_number": medallion_owner.primary_phone,
-        "email_address": medallion_owner.primary_email_address,
+        "contact_number": medallion_owner.primary_phone if medallion_owner.primary_phone else "",
+        "email_address": medallion_owner.primary_email_address if medallion_owner.primary_email_address else "",
         "created_on": medallion_owner.created_on,
         "additional_info": {
             "medallions": [{
@@ -52,9 +52,9 @@ def format_medallion_owner_response(db , medallion_owner):
             "entity_type": "individual",
             "entity_name": individual.full_name,
             "ssn": f"XXX-XX-{individual.masked_ssn[-4:]}" if individual.masked_ssn else "",
-            "ein": None,
+            "ein": "",
             "owner_name": individual.full_name,
-            "address": individual.primary_address or None,
+            "address": individual.primary_address.address_line_1 if individual and individual.primary_address else "",
             **base_data
         }
     elif medallion_owner.corporation:
@@ -64,14 +64,14 @@ def format_medallion_owner_response(db , medallion_owner):
         owner = {
             "entity_type": "corporation",
             "entity_name": corporation.name,
-            "ssn": None,
+            "ssn": "",
             "ein": corporation.ein,
             "owner_name": corporation.name,
-            "address": corporation.primary_address or None,
+            "address": corporation.primary_address.address_line_1 if corporation and corporation.primary_address else "",
             "is_holding_entity": corporation.is_holding_entity,
             "is_llc": corporation.is_llc,
-            "parent_corporation_id": corporation.linked_pad_owner.id if corporation.linked_pad_owner else None,
-            "parent_corporation_name": corporation.linked_pad_owner.name if corporation.linked_pad_owner else None, 
+            "parent_corporation_id": corporation.linked_pad_owner.id if corporation.linked_pad_owner else "",
+            "parent_corporation_name": corporation.linked_pad_owner.name if corporation.linked_pad_owner else "", 
             **base_data
         }
 

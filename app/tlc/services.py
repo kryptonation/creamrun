@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.bpm.services import bpm_service
 from app.ledger.models import PostingCategory
 from app.ledger.services import LedgerService
+from app.ledger.repository import LedgerRepository
 from app.tlc.exceptions import (
     InvalidTLCActionError,
     TLCValidationError,
@@ -31,7 +32,8 @@ class TLCService:
     def __init__(self, db: Session):
         self.db = db
         self.repo = TLCRepository(db)
-        self.ledger_service = LedgerService(db)
+        ledger_repo = LedgerRepository(db)
+        self.ledger_service = LedgerService(ledger_repo)
 
     def create_manual_violation(self, case_no: str, violation_data: dict, user_id: int) -> TLCViolation:
         """
@@ -54,7 +56,7 @@ class TLCService:
                 summons_no=summons,
                 plate=violation_data["plate"],
                 state=violation_data["state"],
-                violation_type=TLCViolationType(violation_data["type"]),
+                violation_type=TLCViolationType(violation_data["violation_type"]),
                 issue_date=violation_data["issue_date"],
                 issue_time=violation_data.get("issue_time"),
                 description=violation_data.get("description"),
@@ -65,6 +67,9 @@ class TLCService:
                 driver_id=violation_data["driver_id"],
                 lease_id=violation_data["lease_id"],
                 medallion_id=violation_data["medallion_id"],
+                vehicle_id=violation_data["vehicle_id"],
+                due_date=violation_data["due_date"],
+                note=violation_data.get("note"),
                 attachment_document_id=violation_data["attachment_document_id"],
                 status=TLCViolationStatus.PENDING,
                 created_by=user_id,
@@ -158,15 +163,17 @@ class TLCService:
             
             # The balance object has a corresponding posting via its reference_id.
             # We need to find that posting to get its ID.
-            posting = self.ledger_service.repo.get_posting_by_id(balance.reference_id)
-
+            posting = self.ledger_service.repo.get_posting_by_reference_id(violation.summons_no)
 
             violation.status = TLCViolationStatus.POSTED
             violation.posting_date = datetime.now(timezone.utc)
             violation.original_posting_id = posting.id if posting else None
-            
+
             if is_update:
                 violation.reversal_posting_id = None # Clear reversal ID on successful reposting
+
+            self.db.add(violation)
+            self.db.flush()
 
             logger.info(f"Posted summons {violation.summons_no} to ledger. Posting ID: {violation.original_posting_id}")
 

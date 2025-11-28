@@ -75,37 +75,37 @@ def list_interim_payments(
     """
     try:
         # Return stub data for now
-        return create_stub_interim_payments_response(page=page, per_page=per_page)
+        # return create_stub_interim_payments_response(page=page, per_page=per_page)
         
         # TODO: Restore original implementation once dependencies are fixed
-        # payments, total_items = payment_service.repo.list_payments(
-        #     page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
-        #     payment_id=payment_id, driver_name=driver_name, tlc_license=tlc_license,
-        #     lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date
-        # )
-        #
-        # # Flatten the detailed allocation data for the list view
-        # response_items = []
-        # for payment in payments:
-        #     if payment.allocations:
-        #         for alloc in payment.allocations:
-        #             response_items.append(InterimPaymentResponse(
-        #                 payment_id_display=payment.payment_id,
-        #                 tlc_license=payment.driver.tlc_license.tlc_license_number if payment.driver and payment.driver.tlc_license else "N/A",
-        #                 lease_id=payment.lease.lease_id,
-        #                 category=alloc['category'],
-        #                 reference_id=alloc['reference_id'],
-        #                 amount=alloc['amount'],
-        #                 payment_date=payment.payment_date,
-        #                 payment_method=payment.payment_method,
-        #             ))
-        # 
-        # total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
-        #
-        # return PaginatedInterimPaymentResponse(
-        #     items=response_items, total_items=total_items, page=page,
-        #     per_page=per_page, total_pages=total_pages
-        # )
+        payments, total_items = payment_service.repo.list_payments(
+            page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            payment_id=payment_id, driver_name=driver_name, tlc_license=tlc_license,
+            lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date
+        )
+        
+        # Flatten the detailed allocation data for the list view
+        response_items = []
+        for payment in payments:
+            if payment.allocations:
+                for alloc in payment.allocations:
+                    response_items.append(InterimPaymentResponse(
+                        payment_id_display=payment.payment_id,
+                        tlc_license=payment.driver.tlc_license.tlc_license_number if payment.driver and payment.driver.tlc_license else "N/A",
+                        lease_id=payment.lease.lease_id,
+                        category=alloc['category'],
+                        reference_id=alloc['reference_id'],
+                        amount=alloc['amount'],
+                        payment_date=payment.payment_date,
+                        payment_method=payment.payment_method,
+                    ))
+        
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+        
+        return PaginatedInterimPaymentResponse(
+            items=response_items, total_items=total_items, page=page,
+            per_page=per_page, total_pages=total_pages
+        )
     except Exception as e:
         logger.error("Error fetching interim payments: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching interim payments.") from e

@@ -31,16 +31,16 @@ app.config_from_object("app.worker.config")
 # Auto discover tasks from different modules
 # This will look for tasks.py files in specified modules/packages
 app.autodiscover_tasks([
-    # "app.worker",
-    # "app.curb",
+    "app.worker",
+    "app.curb",
     "app.pvb",
     "app.ezpass",
-    # "app.loans",
-    # "app.repairs",
-    # "app.tlc",
-    # "app.ledger",
-    # "app.driver_payments",
-    # "app.leases",
+    "app.loans",
+    "app.repairs",
+    "app.tlc",
+    "app.ledger",
+    "app.driver_payments",
+    "app.leases",
 ])
 
 if __name__ == "__main__":

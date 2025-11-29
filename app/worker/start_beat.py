@@ -8,8 +8,12 @@ according to the schedule defined in config.py
 """
 
 # Local imports
-from app.worker.app import app
 from app.core.config import settings
+from app.utils.logger import get_logger
+from app.worker.app import app
+
+logger = get_logger(__name__)
+
 
 def start_beat():
     """Start the celery beat scheduler."""
@@ -18,23 +22,24 @@ def start_beat():
     argv = [
         "beat",
         "--loglevel=info",
-        "--scheduler=celery.beat:PersistentScheduler", # Use persistent scheduler for scheduled tasks
-        "--schedule=/tmp/celerybeat-schedule", # Schedule file location
-        "--pidfile=/tmp/celerybeat.pid", # PID file location
+        "--scheduler=celery.beat:PersistentScheduler",  # Use persistent scheduler for scheduled tasks
+        "--schedule=/tmp/celerybeat-schedule",  # Schedule file location
+        "--pidfile=/tmp/celerybeat.pid",  # PID file location
     ]
 
-    print("Starting Celery Beat Scheduler ...")
-    print(f"Redis URL: redis://{settings.redis_host}:{settings.redis_port}/0")
-    print("Scheduled tasks:")
+    logger.info("Starting Celery Beat Scheduler ...")
+    logger.info(f"Redis URL: redis://{settings.redis_host}:{settings.redis_port}/0")
+    logger.info("Scheduled tasks:")
 
     # Display the configured schedules
     for task_name, task_config in app.conf.beat_schedule.items():
         schedule = task_config["schedule"]
         task = task_config["task"]
-        print(f"- {task_name}: {task} -> {schedule}")
+        logger.info(f"- {task_name}: {task} -> {schedule}")
 
     # Start the beat scheduler
     app.start(argv)
+
 
 if __name__ == "__main__":
     start_beat()

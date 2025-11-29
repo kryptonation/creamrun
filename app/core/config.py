@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     curb_merchant: str = None
     curb_username: str = None
     curb_password: str = None
+    curb_s3_folder: str = None  # S3 folder path for CURB raw data
+    curb_results_s3_folder: str = None  # S3 folder path for CURB task results
+    curb_import_window_minutes: int = (
+        None  # Time window in minutes for CURB data import
+    )
 
     secret_key: str = None
     algorithm: str = None

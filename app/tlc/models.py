@@ -26,7 +26,6 @@ class TLCViolationType(str, PyEnum):
     FI = "FI" # Failure to Inspect Vehicle
     FN = "FN" # Failure to Comply with Notice
     RF = "RF" # Reinspection Fee
-    EA = "EA"
 
 
 class TLCDisposition(str, PyEnum):
@@ -64,15 +63,12 @@ class TLCViolation(Base, AuditMixin):
     service_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     total_payable: Mapped[Decimal] = mapped_column(Numeric(10, 2), comment="Calculated as Amount + Service Fee.")
     disposition: Mapped[TLCDisposition] = mapped_column(Enum(TLCDisposition), default=TLCDisposition.PAID)
-    due_date: Mapped[date] = mapped_column(Date)
-    note: Mapped[Optional[str]] = mapped_column(Text)
     
     # --- Entity Links ---
     driver_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("drivers.id"), index=True, nullable=True)
-    medallion_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("medallions.id"), index=True , nullable=True)
-    lease_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("leases.id"), index=True , nullable=True)
-    vehicle_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("vehicles.id"), index=True , nullable=True)
-    attachment_document_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("document.id"), comment="FK to the uploaded ticket scan." , nullable=True)
+    medallion_id: Mapped[int] = mapped_column(Integer, ForeignKey("medallions.id"), index=True)
+    lease_id: Mapped[int] = mapped_column(Integer, ForeignKey("leases.id"), index=True)
+    attachment_document_id: Mapped[int] = mapped_column(Integer, ForeignKey("document.id"), comment="FK to the uploaded ticket scan.")
 
     # --- Ledger Integration ---
     status: Mapped[TLCViolationStatus] = mapped_column(Enum(TLCViolationStatus), default=TLCViolationStatus.PENDING)
@@ -86,7 +82,6 @@ class TLCViolation(Base, AuditMixin):
     driver: Mapped[Optional["Driver"]] = relationship()
     medallion: Mapped["Medallion"] = relationship()
     lease: Mapped["Lease"] = relationship()
-    vehicle: Mapped["Vehicle"] = relationship()
     attachment: Mapped["Document"] = relationship()
 
     def to_dict(self):
@@ -102,14 +97,9 @@ class TLCViolation(Base, AuditMixin):
             "service_fee": float(self.service_fee),
             "total_payable": float(self.total_payable),
             "disposition": self.disposition.value,
-            "due_date": self.due_date.isoformat() if self.due_date else None,
-            "note": self.note,
             "driver_id": self.driver_id,
             "medallion_id": self.medallion_id,
             "lease_id": self.lease_id,
-            "vehicle_id": self.vehicle_id,
-            "plate": self.plate,
-            "state": self.state,
             "attachment_document_id": self.attachment_document_id,
             "status": self.status.value,
         }

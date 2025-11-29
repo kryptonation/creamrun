@@ -23,7 +23,8 @@ from app.uploads.services import upload_service
 from app.bpm_flows.newmed.utils import format_medallion_basic_details
 from app.medallions.utils import format_medallion_owner_response , get_medallions_list_owner
 from app.medallions.search_service import medallion_search_service
-from app.utils.exporter_utils import ExporterFactory
+from app.utils.exporter.excel_exporter import ExcelExporter
+from app.utils.exporter.pdf_exporter import PDFExporter
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Medallions"])
@@ -60,58 +61,56 @@ def owner_listing_v2(
         logger.error("Error in owner_listing_v2: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
     
-@router.get("/owners/export", summary="Export Medallion Owners Data")
+@router.get("/owners/export", summary="Export medallion owners to CSV")
 def export_medallion_owners(
-    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
-    sort_by: Optional[str] = Query("medallion_owner_name"),
-    sort_order: str = Query("asc"),
-    medallion_owner_name: Optional[str] = Query(None),
-    ein: Optional[str] = Query(None),
-    ssn: Optional[str] = Query(None),
-    contact_number: Optional[str] = Query(None),
-    email: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    format: Optional[str] = Query("excel", enum=["excel", "pdf"]),
+    medallion_owner_name: Optional[str] = Query(None, description="Filter by medallion owner name"),
+    ein: Optional[str] = Query(None, description="Filter by EIN"),
+    ssn: Optional[str] = Query(None, description="Filter by SSN"),
+    contact_number: Optional[str] = Query(None, description="Filter by contact number"),
+    email: Optional[str] = Query(None, description="Filter by email"),
+    sort_by: Optional[str] = Query("medallion_owner_name", description="Field to sort by"),
+    sort_order: Optional[str] = Query("asc", description="Sort order", enum=["asc", "desc"]),
+    # logged_in_user: User = Depends(get_current_user)
+    
 ):
-    """
-    Exports filtered medallion owners data to the specified format (Excel or PDF).
-    """
+    """Exports medallion owners based on applied filters as a CSV file."""
+
     try:
+        # Get medallion owners based on the filters
         results = medallion_service.search_medallion_owners(
-            db=db, medallion_owner_name=medallion_owner_name, ssn=ssn, ein=ein,
-            contact_number=contact_number, email=email,
+            db=db, medallion_owner_name=medallion_owner_name, ssn=ssn, ein=ein, contact_number=contact_number, email=email,
             page=1, per_page=1000, sort_by=sort_by, sort_order=sort_order
         )
 
-        if not results.get("items"):
-            raise ValueError("No medallion owners data available for export with the given filters.")
+        file = None
+        media_type = None
+        headers = None
 
-        export_data = medallion_service.flatten_medallion_owner_records(results["items"])
+        data = medallion_service.flatten_medallion_owner_records(results["items"])
 
-        filename = f"medallion_owners_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
-
-        exporter = ExporterFactory.get_exporter(export_format, export_data)
-        file_content = exporter.export()
-
-        media_types = {
-            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pdf": "application/pdf"
-        }
-        media_type = media_types.get(export_format, "application/octet-stream")
-
-        headers = {"Content-Disposition": f"attachment; filename={filename}"}
-        return StreamingResponse(file_content, media_type=media_type, headers=headers)
-
-    except ValueError as e:
-        logger.warning("Business logic error during medallion owners export: %s", e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
+        if format == "excel":
+            excel_exporter = ExcelExporter(data)
+            file: BytesIO = excel_exporter.export()
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            headers = {"Content-Disposition": "attachment; filename=medallion_owners_export.xlsx"}
+        elif format == "pdf":
+            pdf_exporter = PDFExporter(data)
+            file: BytesIO = pdf_exporter.export()
+            media_type = "application/pdf"
+            headers = {"Content-Disposition": "attachment; filename=medallion_owners_export.pdf"}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid format")
+        
+        return StreamingResponse(
+            file,
+            media_type=media_type,
+            headers=headers
+        )
     except Exception as e:
-        logger.error("Error exporting medallion owners: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred during the export process.",
-        ) from e
+        logger.error("Error exporting medallion owners: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Error exporting medallion owners") from e
 
 @router.get("/medallions")
 def search_medallions(
@@ -315,11 +314,11 @@ def get_medallions_with_documents(
         raise HTTPException(status_code=500, detail=str(e)) from e
     
 
-@router.get("/medallions/export", summary="Export Medallions Data")
+@router.get("/medallions/export", summary="Export medallion data to CSV", tags=["Medallions"])
 def export_medallions(
-    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
-    sort_by: Optional[str] = Query("created_on"),
-    sort_order: str = Query("asc"),
+    db: Session = Depends(get_db),
+
+    format: Optional[str] = Query("excel", enum=["excel", "pdf"]),
     medallion_number: Optional[str] = Query(None),
     medallion_status: Optional[str] = Query(None),
     medallion_type: Optional[str] = Query(None),
@@ -330,52 +329,46 @@ def export_medallions(
     lease_expiry_to: Optional[date] = Query(None),
     has_vehicle: Optional[bool] = Query(None),
     in_storage: Optional[bool] = Query(None),
-    db: Session = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    sort_by: Optional[str] = Query("created_on"),
+    sort_order: Optional[str] = Query("asc", enum=["asc", "desc"]),
+    logged_in_user: User = Depends(get_current_user)
 ):
-    """
-    Exports filtered medallions data to the specified format (Excel or PDF).
-    """
+    """Exports medallions based on applied filters as a CSV file."""
+    
     try:
+        # Get medallions based on the filters
         results = medallion_search_service.search_medallions(
-            db=db, page=1, per_page=1000,
-            medallion_number=medallion_number, medallion_status=medallion_status,
-            medallion_type=medallion_type, medallion_owner=medallion_owner,
-            renewal_date_from=renewal_date_from, renewal_date_to=renewal_date_to,
-            lease_expiry_from=lease_expiry_from, lease_expiry_to=lease_expiry_to,
-            has_vehicle=has_vehicle, in_storage=in_storage,
-            sort_by=sort_by, sort_order=sort_order
+            db=db, page=1, per_page=1000, medallion_number=medallion_number, medallion_status=medallion_status, medallion_type=medallion_type, medallion_owner=medallion_owner,
+            renewal_date_from=renewal_date_from,renewal_date_to=renewal_date_to,lease_expiry_from=lease_expiry_from,lease_expiry_to=lease_expiry_to,has_vehicle=has_vehicle,
+            in_storage=in_storage,sort_by=sort_by,
+            sort_order=sort_order
         )
 
-        if not results.get("medallions"):
-            raise ValueError("No medallions data available for export with the given filters.")
+        file = None
+        media_type = None
+        headers = None
 
-        export_data = results["medallions"]
-
-        filename = f"medallions_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
-
-        exporter = ExporterFactory.get_exporter(export_format, export_data)
-        file_content = exporter.export()
-
-        media_types = {
-            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pdf": "application/pdf"
-        }
-        media_type = media_types.get(export_format, "application/octet-stream")
-
-        headers = {"Content-Disposition": f"attachment; filename={filename}"}
-        return StreamingResponse(file_content, media_type=media_type, headers=headers)
-
-    except ValueError as e:
-        logger.warning("Business logic error during medallions export: %s", e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
+        if format == "excel":
+            excel_exporter = ExcelExporter(results["medallions"])
+            file: BytesIO = excel_exporter.export()
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            headers = {"Content-Disposition": "attachment; filename=medallions_export.xlsx"}
+        elif format == "pdf":
+            pdf_exporter = PDFExporter(results["medallions"])
+            file: BytesIO = pdf_exporter.export()
+            media_type = "application/pdf"
+            headers = {"Content-Disposition": "attachment; filename=medallions_export.pdf"}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid format")
+        
+        return StreamingResponse(
+            file,
+            media_type=media_type,
+            headers=headers
+        )
     except Exception as e:
-        logger.error("Error exporting medallions: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred during the export process.",
-        ) from e
+        logger.error("Error exporting medallions: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Error exporting medallion list") from e
     
 @router.get("/medallions/view", summary="Get detailed view of related entities")
 def detailed_object_view(

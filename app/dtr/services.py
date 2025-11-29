@@ -380,8 +380,8 @@ class DTRService:
             .filter(
                 and_(
                     Trip.driver_id.in_(driver_ids),
-                    Trip.start_time >= start_dt,
-                    Trip.start_time <= end_dt,
+                    Trip.transaction_date >= start_dt,
+                    Trip.transaction_date <= end_dt,
                     Trip.payment_type == PaymentType.CREDIT_CARD,
                 )
             )
@@ -411,40 +411,40 @@ class DTRService:
         mta = self.db.query(func.coalesce(func.sum(Trip.surcharge), 0)).filter(
             and_(
                 Trip.driver_id.in_(driver_ids),
-                Trip.start_time >= start_dt,
-                Trip.end_time <= end_dt,
+                Trip.transaction_date >= start_dt,
+                Trip.transaction_date <= end_dt,
             )
         ).scalar() or Decimal('0.00')
 
         tif = self.db.query(func.coalesce(func.sum(Trip.improvement_surcharge), 0)).filter(
             and_(
                 Trip.driver_id.in_(driver_ids),
-                Trip.start_time >= start_dt,
-                Trip.end_time <= end_dt,
+                Trip.transaction_date >= start_dt,
+                Trip.transaction_date <= end_dt,
             )
         ).scalar() or Decimal('0.00')
 
         congestion = self.db.query(func.coalesce(func.sum(Trip.congestion_fee), 0)).filter(
             and_(
                 Trip.driver_id.in_(driver_ids),
-                Trip.start_time >= start_dt,
-                Trip.end_time <= end_dt,
+                Trip.transaction_date >= start_dt,
+                Trip.transaction_date <= end_dt,
             )
         ).scalar() or Decimal('0.00')
 
         cbdt = self.db.query(func.coalesce(func.sum(Trip.cbdt_fee), 0)).filter(
             and_(
                 Trip.driver_id.in_(driver_ids),
-                Trip.start_time >= start_dt,
-                Trip.end_time <= end_dt,
+                Trip.transaction_date >= start_dt,
+                Trip.transaction_date <= end_dt,
             )
         ).scalar() or Decimal('0.00')
 
         airport = self.db.query(func.coalesce(func.sum(Trip.airport_fee), 0)).filter(
             and_(
                 Trip.driver_id.in_(driver_ids),
-                Trip.start_time >= start_dt,
-                Trip.end_time <= end_dt,
+                Trip.transaction_date >= start_dt,
+                Trip.transaction_date <= end_dt,
             )
         ).scalar() or Decimal('0.00')
 

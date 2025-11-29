@@ -20,7 +20,8 @@ from app.ezpass.services import EZPassService
 from app.ezpass.stubs import create_stub_ezpass_response
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter_utils import ExporterFactory
+from app.utils.exporter.excel_exporter import ExcelExporter
+from app.utils.exporter.pdf_exporter import PDFExporter
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -155,36 +156,40 @@ def list_ezpass_transactions(
 
 @router.get("/export", summary="Export EZPass Transaction Data")
 def export_ezpass_transactions(
-    export_format: str = Query("excel", enum=["excel", "pdf"], alias="format"),
-    sort_by: Optional[str] = Query("transaction_date"),
-    sort_order: str = Query("desc"),
-    from_transaction_date: Optional[date] = Query(None),
-    to_transaction_date: Optional[date] = Query(None),
-    from_transaction_time: Optional[time] = Query(None),
-    to_transaction_time: Optional[time] = Query(None),
-    from_posting_date: Optional[date] = Query(None),
-    to_posting_date: Optional[date] = Query(None),
-    from_amount: Optional[float] = Query(None),
-    to_amount: Optional[float] = Query(None),
-    transaction_id: Optional[str] = Query(None),
-    entry_plaza: Optional[str] = Query(None),
-    exit_plaza: Optional[str] = Query(None),
-    ezpass_class: Optional[str] = Query(None),
-    vin: Optional[str] = Query(None),
-    agency: Optional[str] = Query(None),
-    medallion_no: Optional[str] = Query(None),
-    driver_id: Optional[str] = Query(None),
-    plate_number: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    format: str = Query("excel", enum=["excel", "pdf"]),
+    # Pass through all filters from the list endpoint
+    sort_by: Optional[str] = Query("transaction_date", description="Field to sort by."),
+    sort_order: str = Query("desc", enum=["asc", "desc"]),
+    from_transaction_date: Optional[date] = Query(None, description="Filter by a specific from transaction date."),
+    to_transaction_date: Optional[date] = Query(None , description="Filter by a specific to transaction date."),
+    from_transaction_time: Optional[time] = Query(None, description="Filter by a specific from transaction time."),
+    to_transaction_time: Optional[time] = Query(None, description="Filter by a specific to transaction time."),
+    from_posting_date: Optional[date] = Query(None, description="Filter by a specific from posting date."),
+    to_posting_date: Optional[date] = Query(None, description="Filter by a specific to posting date."),
+    from_amount: Optional[float] = Query(None, description="Filter by a specific from amount."),
+    to_amount:Optional[float] = Query(None, description="Filter by a specific to amount."),
+    transaction_id: Optional[str] = Query(None, description="Filter by transaction ID."),
+    entry_plaza: Optional[str] = Query(None, description="Filter by entry plaza."),
+    exit_plaza: Optional[str] = Query(None, description="Filter by exit plaza."),
+    ezpass_class: Optional[str] = Query(None, description="Filter by EZPass Class."),
+    vin: Optional[str] = Query(None, description="Filter by VIN."),
+    agency: Optional[str] = Query(None, description="Filter by Agency."),
+    medallion_no: Optional[str] = Query(None, description="Filter by Medallion Number."),
+    driver_id: Optional[str] = Query(None, description="Filter by Driver ID."),
+    plate_number: Optional[str] = Query(None, description="Filter by Plate Number."),
+    satus: Optional[str] = Query(None, description="Filter by transaction status."),
     ezpass_service: EZPassService = Depends(get_ezpass_service),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Exports filtered EZPass transaction data to the specified format (Excel or PDF).
     """
     try:
         transactions, _ = ezpass_service.repo.list_transactions(
-            page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
+            page=1,
+            per_page=10000,  # A large number to fetch all records for export
+            sort_by=sort_by,
+            sort_order=sort_order,
             from_transaction_date=from_transaction_date,
             to_transaction_date=to_transaction_date,
             from_transaction_time=from_transaction_time,
@@ -202,12 +207,16 @@ def export_ezpass_transactions(
             medallion_no=medallion_no,
             driver_id=driver_id,
             plate_number=plate_number,
-            status=status,
+            status=satus,
         )
 
         if not transactions:
-            raise ValueError("No EZPass data available for export with the given filters.")
+            raise HTTPException(
+                status_code=fast_status.HTTP_404_NOT_FOUND,
+                detail="No EZPass data available for export with the given filters.",
+            )
 
+        # Convert SQLAlchemy models to dictionaries for the exporter
         export_data = [
             EZPassTransactionResponse(
                 transaction_id=t.transaction_id,
@@ -229,27 +238,26 @@ def export_ezpass_transactions(
             for t in transactions
         ]
 
-        filename = f"ezpass_transactions_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
+        filename = f"ezpass_transactions_{date.today()}.{'xlsx' if format == 'excel' else 'pdf'}"
+        
+        file_content: BytesIO
+        media_type: str
 
-        exporter = ExporterFactory.get_exporter(export_format, export_data)
-        file_content = exporter.export()
-
-        media_types = {
-            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pdf": "application/pdf"
-        }
-        media_type = media_types.get(export_format, "application/octet-stream")
-
+        if format == "excel":
+            exporter = ExcelExporter(export_data)
+            file_content = exporter.export()
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else: # PDF
+            exporter = PDFExporter(export_data)
+            file_content = exporter.export()
+            media_type = "application/pdf"
+        
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)
-
-    except EZPassError as e:
-        logger.warning("Business logic error during EZPass export: %s", e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error("Error exporting EZPass data: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500,
+            status_code=fast_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during the export process.",
-        ) from e
+        )

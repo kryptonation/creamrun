@@ -1775,7 +1775,7 @@ def upgrade() -> None:
     sa.Column('summons_no', sa.String(length=255), nullable=False),
     sa.Column('issue_date', sa.Date(), nullable=False),
     sa.Column('issue_time', sa.Time(), nullable=True),
-    sa.Column('violation_type', sa.Enum('FI', 'FN', 'RF' , "EA", name='tlcviolationtype'), nullable=False),
+    sa.Column('violation_type', sa.Enum('FI', 'FN', 'RF', name='tlcviolationtype'), nullable=False),
     sa.Column('description', sa.Text(), nullable=True, comment='Required only if type is FN.'),
     sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Base ticket amount.'),
     sa.Column('service_fee', sa.Numeric(precision=10, scale=2), nullable=False),

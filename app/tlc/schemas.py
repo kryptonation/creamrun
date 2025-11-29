@@ -6,39 +6,24 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.tlc.models import TLCDisposition, TLCViolationType , TLCViolationStatus
-from app.leases.schemas import LeaseType
+from app.tlc.models import TLCDisposition, TLCViolationType
 
 
 class TLCViolationListResponse(BaseModel):
     """
     Response schema for a single TLC violation in a list, matching the UI grid.
     """
-    id: int
     plate: str
     state: str
     type: TLCViolationType
     summons: str = Field(..., alias="summons_no")
     issue_date: date
     issue_time: Optional[time] = None
-    due_date: Optional[date] = None
-    description : Optional[str] = None
-    penalty_amount: Optional[Decimal] = 0
-    service_fee : Optional[Decimal] = 0
-    total_payable : Optional[Decimal] = 0
-    disposition : Optional[TLCDisposition] = None
-    note : Optional[str] = None
     
     # Fields populated after association
     driver_id: Optional[str] = None
     medallion_no: Optional[str] = None
-    driver_name: Optional[str] = None
-    vin: Optional[str] = None
-    lease_id : Optional[str] = None
-    lease_type : Optional[str] = None
-    driver_email : Optional[str] = None
-    driver_phone: Optional[str] = None
-    document : Optional[dict] = {}
+
     class Config:
         from_attributes = True
         populate_by_name = True
@@ -53,18 +38,7 @@ class PaginatedTLCViolationResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
-    types : List[TLCViolationType] = Field(
-        default_factory=lambda: list(TLCViolationType)
-    )
-    dispositions : List[TLCDisposition] = Field(
-        default_factory=lambda: list(TLCDisposition)
-    )
-    lease_types : List[LeaseType] = Field(
-        default_factory=lambda: list(LeaseType)
-    )
-    statuses : List[TLCViolationStatus] = Field(
-        default_factory=lambda: list(TLCViolationStatus)
-    )
+
 
 class TLCViolationCreateRequest(BaseModel):
     """

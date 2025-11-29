@@ -166,7 +166,7 @@ def process_edit_vehicle_inspection_expenses_and_compliance(db, case_no, step_da
             audit_trail_service.create_audit_trail(
                 db=db,
                 case=case,
-                description=f'Edit Vehicle Inspctions expenses and compliance processed for vehicle {expense.vehicle.vin if expense.vehicle else "N/A"}',
+                description=f"Edit Vehicle Inspctions expenses and compliance processed for vehicle {expense.vehicle.vin if expense.vehicle else "N/A"}",
                 meta_data={"vehicle_id":expense.vehicle_id}
             )
 

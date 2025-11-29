@@ -5,7 +5,7 @@ from typing import List
 
 # Third party imports
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.sql import or_, func , and_, exists, not_ , select 
+from sqlalchemy.sql import or_, func , and_, exists, not_ 
 from sqlalchemy import desc
 
 # Local imports
@@ -18,7 +18,6 @@ from app.vehicles.models import Vehicle
 from app.medallions.models import Medallion
 from app.utils.logger import get_logger
 from app.utils.general import format_us_phone_number
-from app.utils.general import apply_multi_filter
 
 logger = get_logger(__name__)
 
@@ -123,16 +122,18 @@ def build_driver_query(
     sort_order: str,
 ):
     """Build a query to search for drivers"""
-    query = db.query(Driver).filter(Driver.driver_status != DriverStatus.IN_PROGRESS)
-    joined_medallion = False
-    joined_vehicle = False
-    joined_vehicle_registration = False
-    joined_lease_driver = False
-    joined_lease = False
-    joined_driver = False
-    joined_tlc_license = False
-    joined_dmv_license = False
-    joined_lease_configuration = False
+    query = db.query(Driver).options(
+        joinedload(Driver.tlc_license),
+        joinedload(Driver.dmv_license),
+        joinedload(Driver.lease_drivers).joinedload(LeaseDriver.lease), 
+        joinedload(Driver.primary_driver_address),
+        joinedload(Driver.secondary_driver_address),
+        joinedload(Driver.driver_bank_account)
+    ).outerjoin(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id
+    ).outerjoin(DMVLicense, Driver.dmv_license_number_id == DMVLicense.id
+    ).filter(
+        Driver.driver_status.notin_([DriverStatus.IN_PROGRESS])
+    )
 
     matched_filters = []
 
@@ -142,55 +143,43 @@ def build_driver_query(
         query = query.filter(Driver.is_archived.is_(False))
 
     if ids := filters.get("driver_lookup_id"):
-        query = apply_multi_filter(query, Driver.driver_id, ids)
+        driver_ids = [i.strip() for i in ids.split(",")]
+        query = query.filter(or_(*[Driver.driver_id.like(f"%{i}%") for i in driver_ids]))
         matched_filters.append("driver_lookup_id")
 
     if nums := filters.get("tlc_license_number"):
-        if not joined_tlc_license:
-            query = query.join(TLCLicense , TLCLicense.id == Driver.tlc_license_number_id)
-            joined_tlc_license = True
-        query = apply_multi_filter(query, TLCLicense.tlc_license_number, nums)
+        tlc_nums = [n.strip() for n in nums.split(",")]
+        query = query.filter(or_(*[TLCLicense.tlc_license_number.like(f"%{n}%") for n in tlc_nums]))
         matched_filters.append("tlc_license_number")
 
     if nums := filters.get("dmv_license_number"):
-        if not joined_dmv_license:
-            query = query.join(DMVLicense , DMVLicense.id == Driver.dmv_license_number_id)
-            joined_dmv_license = True
-        query = apply_multi_filter(query, DMVLicense.dmv_license_number, nums)
+        dmv_nums = [n.strip() for n in nums.split(",")]
+        query = query.filter(or_(*[DMVLicense.dmv_license_number.like(f"%{n}%") for n in dmv_nums]))
         matched_filters.append("dmv_license_number")
 
     if ssn := filters.get("ssn"):
-        query = apply_multi_filter(query, Driver.ssn, ssn)
+        query = query.filter(Driver.ssn.like(f"%{ssn}"))
         matched_filters.append("ssn")
     if vin := filters.get("vin"):
-        if not joined_lease_driver:
-            query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-            joined_lease_driver = True
-        if not joined_lease:
-            query = query.join(Lease, Lease.id == LeaseDriver.lease_id)
-            joined_lease = True
-        if not joined_vehicle:
-            query = query.join(Vehicle, Vehicle.id == Lease.vehicle_id)
-            joined_vehicle = True
-        query = apply_multi_filter(query, Vehicle.vin, vin)
+        query = (
+            query
+            .join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
+            .join(Lease, Lease.id == LeaseDriver.lease_id)
+            .join(Vehicle, Lease.vehicle_id == Vehicle.id)
+            .filter(Vehicle.vin.ilike(f"%{vin}%"))
+        )
         matched_filters.append("vin")
-
     if medallion_number := filters.get("medallion_number"):
-        if not joined_lease_driver:
-            query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-            joined_lease_driver = True
-        if not joined_lease:
-            query = query.join(Lease, Lease.id == LeaseDriver.lease_id)
-            joined_lease = True
-        if not joined_medallion:
-            query = query.join(Medallion, Medallion.id == Lease.medallion_id)
-            joined_medallion = True
-    
-        query = apply_multi_filter(query, Medallion.medallion_number, medallion_number)
+        query = (
+        query
+        .join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
+        .join(Lease, Lease.id == LeaseDriver.lease_id)
+        .join(Medallion, Lease.medallion_id == Medallion.id)
+        .filter(Medallion.medallion_number.ilike(f"%{medallion_number}%"))
+    )
         matched_filters.append("medallion_number")
-
     if driver_name := filters.get("driver_name"):
-        query = apply_multi_filter(query, Driver.full_name, driver_name)
+        query = query.filter(Driver.full_name.ilike(f"%{driver_name}%"))
         matched_filters.append("driver_name")
 
     for field, key in [
@@ -202,24 +191,12 @@ def build_driver_query(
             matched_filters.append(key)
 
     if d := filters.get("tlc_license_expiry_from"):
-        if not joined_tlc_license:
-            query = query.join(TLCLicense, TLCLicense.id == Driver.tlc_license_number_id)
-            joined_tlc_license = True
         query = query.filter(TLCLicense.tlc_license_expiry_date >= d)
     if d := filters.get("tlc_license_expiry_to"):
-        if not joined_tlc_license:
-            query = query.join(TLCLicense, TLCLicense.id == Driver.tlc_license_number_id)
-            joined_tlc_license = True
         query = query.filter(TLCLicense.tlc_license_expiry_date <= d)
     if d := filters.get("dmv_license_expiry_from"):
-        if not joined_dmv_license:
-            query = query.join(DMVLicense, DMVLicense.id == Driver.dmv_license_number_id)
-            joined_dmv_license = True
         query = query.filter(DMVLicense.dmv_license_expiry_date >= d)
     if d := filters.get("dmv_license_expiry_to"):
-        if not joined_dmv_license:
-            query = query.join(DMVLicense, DMVLicense.id == Driver.dmv_license_number_id)
-            joined_dmv_license = True
         query = query.filter(DMVLicense.dmv_license_expiry_date <= d)
 
     if has_documents := filters.get("has_documents") is not None:
@@ -230,57 +207,29 @@ def build_driver_query(
         query = query.filter(doc_exists_clause if has_documents else not_(doc_exists_clause))
         matched_filters.append("has_documents")
 
-    if (has_vehicle:= filters.get("has_vehicle")) is not None:
-            if not joined_lease_driver:
-                query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-                joined_lease_driver = True
-            if not joined_lease:
-                query = query.join(Lease, Lease.id == LeaseDriver.lease_id)
-                joined_lease = True
-            if has_vehicle:
-                query = query.filter(
-                    and_(
-                        LeaseDriver.is_active == True,
-                        Lease.vehicle_id.isnot(None)
-                    )
-                )
-            else:
-                query = query.filter(
-                    or_(
-                        LeaseDriver.is_active == False,
-                        Lease.vehicle_id.is_(None)
-                    )
-                )
-            matched_filters.append("has_vehicle")
+    if has_vehicle:= filters.get("has_vehicle") is not None:
+        if has_vehicle:
+            query = query.filter(Driver.lease_drivers.any(LeaseDriver.lease.has(Lease.vehicle_id != None)))
+        else:
+            query = query.filter(Driver.lease_drivers.any(LeaseDriver.is_active == False))
+        matched_filters.append("has_vehicle")
 
-    if (has_active_lease := filters.get("has_active_lease")) is not None:
-        if not joined_lease_driver:
-                query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-                joined_lease_driver = True
-        if not joined_lease:
-            query = query.join(Lease, Lease.id == LeaseDriver.lease_id)
-            joined_lease = True
-        query= query.filter(LeaseDriver.is_active == has_active_lease , Lease.is_active == has_active_lease)
+    if has_active_lease := filters.get("has_active_lease") is not None:
+        query=query.filter(Driver.lease_drivers.any(LeaseDriver.is_active == True) if has_vehicle else Driver.lease_drivers.any(LeaseDriver.is_active == False))
         matched_filters.append("has_active_lease")
         
-    if (val := filters.get("is_additional_driver")) is not None:
-        if not joined_lease_driver:
-                query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-                joined_lease_driver = True
-        query = query.filter(LeaseDriver.is_additional_driver == val)
-        matched_filters.append("is_additional_driver")
+        
+    if val := filters.get("is_additional_driver"):
+        if val is not None:
+            query = query.filter(Driver.lease_drivers.any(LeaseDriver.is_additional_driver == val))
+            matched_filters.append("is_additional_driver")
 
-    if (val := filters.get("is_drive_locked")) is not None:
+    if val := filters.get("is_drive_locked"):
         query = query.filter(Driver.drive_locked == val)
         matched_filters.append("is_drive_locked")
 
     if val := filters.get("lease_type"):
-        if not joined_lease_driver:
-                query = query.join(LeaseDriver, LeaseDriver.driver_id == Driver.driver_id)
-                joined_lease_driver = True
-        if not joined_lease:
-            query = query.join(Lease, Lease.id == LeaseDriver.lease_id)
-            joined_lease = True
+        query = query.join(LeaseDriver).join(Lease)
         query = query.filter(Lease.lease_type == val)
         matched_filters.append("lease_type")
 
@@ -288,43 +237,18 @@ def build_driver_query(
         "first_name": Driver.first_name,
         "last_name": Driver.last_name,
         "driver_type": Driver.driver_type,
+        "tlc_license_number": TLCLicense.tlc_license_number,
+        "dmv_license_number": DMVLicense.dmv_license_number,
+        "tlc_license_expriy": TLCLicense.tlc_license_expiry_date,
+        "dmv_license_expriy": DMVLicense.dmv_license_expiry_date,
         "driver_status": Driver.driver_status,
         "created_on": Driver.created_on,
     }
 
-    tlc_sort_maping = {
-        "tlc_license_number": TLCLicense.tlc_license_number,
-        "tlc_license_expriy": TLCLicense.tlc_license_expiry_date,
-    }
-
-    dmv_sort_maping = {
-        "dmv_license_number": DMVLicense.dmv_license_number,
-        "dmv_license_expriy": DMVLicense.dmv_license_expiry_date,
-    }
-
-    if sort_by and sort_order:
-
-        sort_column = None
-        
-        if sort_by in sort_mapping:
-            sort_column = sort_mapping[sort_by]
-
-        elif sort_by in tlc_sort_maping:
-            if not joined_tlc_license:
-                query = query.join(TLCLicense, TLCLicense.id == Driver.tlc_license_number_id)
-                joined_tlc_license = True
-            sort_column = tlc_sort_maping[sort_by]
-
-        elif sort_by in dmv_sort_maping:
-            if not joined_dmv_license:
-                query = query.join(DMVLicense, DMVLicense.id == Driver.dmv_license_number_id)
-                joined_dmv_license = True
-            sort_column = dmv_sort_maping[sort_by]
-
-        if sort_column:
-            query = query.order_by(sort_column.desc() if sort_order == "desc" else sort_column.asc())
-        else:
-            query = query.order_by(Driver.created_on.desc())
+    if sort_by in sort_mapping:
+        sort_col = sort_mapping[sort_by]
+        logger.info(f"sorting Columnn is {sort_col}")
+        query = query.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
     else:
         query = query.order_by(Driver.updated_on.desc(),Driver.created_on.desc())
 

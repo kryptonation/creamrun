@@ -220,9 +220,7 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
             )
         
         # Get total outstanding for this lease
-        from app.ledger.repository import LedgerRepository
-        repo = LedgerRepository(db)
-        ledger_service = LedgerService(repo)
+        ledger_service = LedgerService(db)
         open_balances = ledger_service.repo.get_open_balances_for_driver(
             driver_id=driver.driver_id,
             lease_id=lease.lease_id
@@ -261,17 +259,13 @@ def create_interim_payment_record(db: Session, case_no: str, step_data: Dict[str
                     "total_outstanding": round(total_outstanding, 2)
                 }
             
-        interim_payment_service = InterimPaymentService(db)
-        payment_id = interim_payment_service._generate_next_payment_id()
         # Create new interim payment entry with ALL payment details
         new_interim_payment = InterimPayment(
-            payment_id=payment_id,
-            case_no=case_no,
-            driver_id=driver.id,
-            lease_id=lease.id,
+            driver_id=driver.driver_id,
+            lease_id=lease.lease_id,
             payment_date=payment_date,
             payment_method=payment_method_enum,
-            total_amount=payment_amount,
+            total_payment=payment_amount,
             notes=notes,
             allocations=[],
             created_by=db.info.get("current_user_id", 1)
@@ -370,11 +364,10 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
         case_entity = bpm_service.get_case_entity(db, case_no=case_no)
         
         if not case_entity:
-            # raise HTTPException(
-            #     status_code=404, 
-            #     detail="No interim payment entry found. Please complete Step 1 first."
-            # )
-            return {}
+            raise HTTPException(
+                status_code=404, 
+                detail="No interim payment entry found. Please complete Step 1 first."
+            )
         
         # Retrieve the interim payment record
         interim_payment_service = InterimPaymentService(db)
@@ -398,14 +391,14 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
         )
         
         # Retrieve driver and lease objects for response
-        driver = driver_service.get_drivers(db, id=selected_driver_id)
+        driver = driver_service.get_drivers(db, driver_id=selected_driver_id)
         if not driver:
             raise HTTPException(
                 status_code=404, 
                 detail=f"Driver {selected_driver_id} not found"
             )
         
-        lease = lease_service.get_lease(db, lookup_id=str(selected_lease_id))
+        lease = lease_service.get_lease(db, lease_id=selected_lease_id)
         if not lease:
             raise HTTPException(
                 status_code=404, 
@@ -414,9 +407,7 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
         
         # Fetch open balances for THIS SPECIFIC LEASE ONLY
         # This prevents showing obligations from other leases the driver may have
-        from app.ledger.repository import LedgerRepository
-        repo = LedgerRepository(db)
-        ledger_service = LedgerService(repo)
+        ledger_service = LedgerService(db)
         open_balances = ledger_service.repo.get_open_balances_for_driver(
             driver_id=selected_driver_id,
             lease_id=selected_lease_id  # Filter by lease_id
@@ -634,10 +625,7 @@ async def process_payment_allocation(db: Session, case_no: str, step_data: Dict[
             for alloc in formatted_allocations
         }
         
-        
-        from app.ledger.repository import LedgerRepository
-        repo = LedgerRepository(db)
-        ledger_service = LedgerService(repo)
+        ledger_service = LedgerService(db)
         ledger_service.apply_interim_payment(
             payment_amount=payment_amount,
             allocations=allocation_dict,

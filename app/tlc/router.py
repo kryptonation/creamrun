@@ -1,7 +1,7 @@
 ### app/tlc/router.py
 
 import math
-from datetime import date , time
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.bpm.services import bpm_service
 from app.core.db import get_db
 from app.core.dependencies import get_db_with_current_user
-from app.tlc.exceptions import TLCError, TLCViolationNotFoundError
+from app.tlc.exceptions import TLCViolationNotFoundError
 from app.tlc.schemas import (
     PaginatedTLCViolationResponse,
     TLCViolationListResponse,
@@ -20,7 +20,8 @@ from app.tlc.services import TLCService
 from app.tlc.stubs import create_stub_tlc_response
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter_utils import ExporterFactory
+from app.utils.exporter.excel_exporter import ExcelExporter
+from app.utils.exporter.pdf_exporter import PDFExporter
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,29 +44,9 @@ def list_tlc_violations(
     state: Optional[str] = Query(None, description="Filter by state."),
     type: Optional[str] = Query(None, description="Filter by violation type (FI, FN, RF)."),
     summons: Optional[str] = Query(None, description="Filter by summons number."),
-    from_issue_date: Optional[date] = Query(None, description="Filter by issue date."),
-    to_issue_date: Optional[date] = Query(None, description="Filter by to issue date."),
-    from_issue_time: Optional[time] = Query(None, description="Filter by issue time."),
-    to_issue_time: Optional[time] = Query(None, description="Filter by to issue time."),
-    from_due_date: Optional[date] = Query(None, description="Filter by from due date."),
-    to_due_date: Optional[date] = Query(None, description="Filter by to due date."),
-    from_penalty_amount: Optional[float] = Query(None, description="Filter by from penalty amount."),
-    to_penalty_amount: Optional[float] = Query(None, description="Filter by to penalty amount."),
-    from_service_fee: Optional[float] = Query(None, description="Filter by from service fee."),
-    to_service_fee: Optional[float] = Query(None, description="Filter by to service fee."),
-    from_total_payable: Optional[float] = Query(None, description="Filter by from total payable."),
-    to_total_payable: Optional[float] = Query(None, description="Filter by to total payable."),
-    disposition: Optional[str] = Query(None , description="Filter by disposition."),
-    status: Optional[str] = Query(None, description="Filter by status."),
-    description: Optional[str] = Query(None, description="Filter by description."),
+    issue_date: Optional[date] = Query(None, description="Filter by issue date."),
     driver_id: Optional[str] = Query(None, description="Filter by Driver ID."),
     medallion_no: Optional[str] = Query(None, description="Filter by Medallion Number."),
-    driver_name: Optional[str] = Query(None, description="Filter by Driver Name."),
-    driver_email: Optional[str] = Query(None, description="Filter by Driver Email."),
-    lease_id: Optional[str] = Query(None, description="Filter by Lease ID."),
-    lease_type: Optional[str] = Query(None, description="Filter by Lease Type."),
-    vin: Optional[str] = Query(None, description="Filter by VIN."),
-    note: Optional[str] = Query(None, description="Filter by Note."),
     tlc_service: TLCService = Depends(get_tlc_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -86,60 +67,24 @@ def list_tlc_violations(
             state=state,
             type=type,
             summons=summons,
-            from_issue_date=from_issue_date,
-            to_issue_date=to_issue_date,
-            from_issue_time=from_issue_time,
-            to_issue_time=to_issue_time,
-            from_due_date=from_due_date,
-            to_due_date=to_due_date,
-            from_penalty_amount=from_penalty_amount,
-            to_penalty_amount=to_penalty_amount,
-            from_service_fee=from_service_fee,
-            to_service_fee=to_service_fee,
-            from_total_payable=from_total_payable,
-            to_total_payable=to_total_payable,
-            disposition=disposition,
-            status=status,
-            description=description,
+            issue_date=issue_date,
             driver_id=driver_id,
             medallion_no=medallion_no,
-            driver_name=driver_name,
-            driver_email=driver_email,
-            lease_id=lease_id,
-            lease_type=lease_type,
-            vin=vin,
-            note=note
         )
 
         response_items = []
         for violation in violations:
             response_items.append(
                 TLCViolationListResponse(
-                    id=violation.id,
                     plate=violation.plate if hasattr(violation, 'plate') else "N/A",
                     state=violation.state if hasattr(violation, 'state') else "NY",
                     type=violation.violation_type,
                     summons_no=violation.summons_no,
                     issue_date=violation.issue_date,
                     issue_time=violation.issue_time,
-                    due_date = violation.due_date,
-                    description = violation.description if violation.description else "",
-                    penalty_amount=violation.amount or 0.0,
-                    service_fee=violation.service_fee or 0.0,
-                    total_payable=violation.total_payable or 0.0,
-                    disposition=violation.disposition,
-                    status=violation.status,
-                    driver_id=violation.driver.driver_id if violation.driver and violation.driver.driver_id else "N/A",
-                    medallion_no=violation.medallion.medallion_number if violation.medallion and violation.medallion.medallion_number else "N/A",
-                    driver_name = violation.driver.full_name if violation.driver and violation.driver.full_name else "N/A",
-                    driver_email = violation.driver.email_address if violation.driver and violation.driver.email_address else "N/A",
-                    driver_phone = violation.driver.phone_number_1 if violation.driver and violation.driver.phone_number_1 else "N/A",
-                    lease_id = violation.lease.lease_id if violation.lease and violation.lease.lease_id else "N/A",
-                    lease_type = violation.lease.lease_type if violation.lease and violation.lease.lease_type else "N/A",
-                    vin = violation.vehicle.vin if violation.vehicle and violation.vehicle.vin else "N/A",
-                    note = violation.note if violation.note else "",
-                    document = violation.attachment.to_dict() if violation.attachment else {},
-                ).model_dump()
+                    driver_id=violation.driver.driver_id if violation.driver else None,
+                    medallion_no=violation.medallion.medallion_number if violation.medallion else None,
+                )
             )
         
         total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
@@ -202,26 +147,18 @@ def get_tlc_violation_details(
             "driver_id": violation.driver.driver_id if violation.driver else None,
             "full_name": violation.driver.full_name if violation.driver else None,
             "tlc_license": violation.driver.tlc_license.tlc_license_number if violation.driver and violation.driver.tlc_license else None,
-            "driver_email" : violation.driver.email_address if violation.driver and violation.driver.email_address else "N/A",
-            "driver_phone" : violation.driver.phone_number_1 if violation.driver and violation.driver.phone_number_1 else "N/A"
         }
         
         lease_details = {
             "lease_id": violation.lease.lease_id if violation.lease else None,
-            "lease_type": violation.lease.lease_type if violation.lease else None
+            "lease_type": violation.lease.lease_type if violation.lease else None,
         }
         
         medallion_details = {
-            "medallion_no": violation.medallion.medallion_number if violation.medallion else None
+            "medallion_no": violation.medallion.medallion_number if violation.medallion else None,
         }
-        
-        vehicle_details = {
-            "vin": violation.vehicle.vin if violation.vehicle else None
-        }
-
 
         return {
-            "id" : violation.id,
             "summons_no": violation.summons_no,
             "violation_type": violation.violation_type,
             "issue_date": violation.issue_date,
@@ -235,12 +172,8 @@ def get_tlc_violation_details(
             "driver_details": driver_details,
             "lease_details": lease_details,
             "medallion_details": medallion_details,
-            "vehicle_details": vehicle_details,
             "original_posting_id": violation.original_posting_id,
             "reversal_posting_id": violation.reversal_posting_id,
-            "due_date": violation.due_date,
-            "note": violation.note,
-            "document": violation.attachment.to_dict() if violation.attachment else {},
             "created_on": violation.created_on,
         }
     except TLCViolationNotFoundError as e:
@@ -253,64 +186,46 @@ def get_tlc_violation_details(
         ) from e
 
 
-@router.get("/list/export", summary="Export TLC Violations Data")
+@router.get("/export", summary="Export TLC Violations Data")
 def export_tlc_violations(
-    export_format: str = Query("excel", enum=["excel", "pdf" , "csv"], alias="format"),
+    format: str = Query("excel", enum=["excel", "pdf"]),
     sort_by: Optional[str] = Query("issue_date"),
     sort_order: str = Query("desc"),
     plate: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     type: Optional[str] = Query(None),
     summons: Optional[str] = Query(None),
-    from_issue_date: Optional[date] = Query(None),
-    to_issue_date: Optional[date] = Query(None),
-    from_issue_time: Optional[time] = Query(None),
-    to_issue_time: Optional[time] = Query(None),
-    from_due_date: Optional[date] = Query(None),
-    to_due_date: Optional[date] = Query(None),
-    from_penalty_amount: Optional[float] = Query(None),
-    to_penalty_amount: Optional[float] = Query(None),
-    from_service_fee: Optional[float] = Query(None),
-    to_service_fee: Optional[float] = Query(None),
-    from_total_payable: Optional[float] = Query(None),
-    to_total_payable: Optional[float] = Query(None),
-    disposition: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    description: Optional[str] = Query(None),
+    issue_date: Optional[date] = Query(None),
     driver_id: Optional[str] = Query(None),
     medallion_no: Optional[str] = Query(None),
-    driver_name: Optional[str] = Query(None),
-    driver_email: Optional[str] = Query(None),
-    lease_id: Optional[str] = Query(None),
-    lease_type: Optional[str] = Query(None),
-    vin: Optional[str] = Query(None),
-    note: Optional[str] = Query(None),
     tlc_service: TLCService = Depends(get_tlc_service),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Exports filtered TLC violation data to the specified format (Excel or PDF or CSV).
+    Exports filtered TLC violation data to the specified format (Excel or PDF).
     """
     try:
         violations, _ = tlc_service.repo.list_violations(
-            page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
-            plate=plate, state=state, type=type, summons=summons,
-            from_issue_date=from_issue_date, to_issue_date=to_issue_date,
-            from_issue_time=from_issue_time, to_issue_time=to_issue_time,
-            from_due_date=from_due_date, to_due_date=to_due_date,
-            from_penalty_amount=from_penalty_amount, to_penalty_amount=to_penalty_amount,
-            from_service_fee=from_service_fee, to_service_fee=to_service_fee,
-            from_total_payable=from_total_payable, to_total_payable=to_total_payable,
-            disposition=disposition, status=status, description=description,
-            driver_id=driver_id, medallion_no=medallion_no,
-            driver_name=driver_name, driver_email=driver_email,
-            lease_id=lease_id, lease_type=lease_type,
-            vin=vin, note=note,
+            page=1, 
+            per_page=10000, 
+            sort_by=sort_by, 
+            sort_order=sort_order,
+            plate=plate,
+            state=state,
+            type=type,
+            summons=summons,
+            issue_date=issue_date,
+            driver_id=driver_id,
+            medallion_no=medallion_no,
         )
 
         if not violations:
-            raise ValueError("No TLC violation data available for export with the given filters.")
+            raise HTTPException(
+                status_code=404, 
+                detail="No TLC violation data available for export with the given filters."
+            )
 
+        # Prepare export data
         export_data = []
         for violation in violations:
             export_data.append({
@@ -320,43 +235,32 @@ def export_tlc_violations(
                 "Type": violation.violation_type.value,
                 "Issue Date": violation.issue_date.strftime("%Y-%m-%d"),
                 "Issue Time": violation.issue_time.strftime("%H:%M") if violation.issue_time else "",
-                "Driver ID": violation.driver.driver_id if violation.driver and violation.driver.driver_id else "N/A",
-                "Medallion": violation.medallion.medallion_number if violation.medallion and violation.medallion.medallion_number else "N/A",
-                "Amount": float(violation.amount) if violation.amount else 0.0,
-                "Service Fee": float(violation.service_fee) if violation.service_fee else 0.0,
-                "Total": float(violation.total_payable) if violation.total_payable else 0.0,
-                "Disposition": violation.disposition.value if violation.disposition else "N/A",
-                "Status": violation.status.value if violation.status else "N/A",
-                "Description": violation.description if violation.description else "N/A",
-                "Driver Name": violation.driver.full_name if violation.driver and violation.driver.full_name else "N/A",
-                "Driver Email": violation.driver.email_address if violation.driver and violation.driver.email_address else "N/A",
-                "Lease ID": violation.lease.lease_id if violation.lease and violation.lease.lease_id else "N/A",
-                "Lease Type": violation.lease.lease_type if violation.lease and violation.lease.lease_type else "N/A",
-                "Vin": violation.vehicle.vin if violation.vehicle and violation.vehicle.vin else "N/A",
-                "Note": violation.note if violation.note else "",
+                "Driver ID": violation.driver.driver_id if violation.driver else "",
+                "Medallion": violation.medallion.medallion_number if violation.medallion else "",
+                "Amount": float(violation.amount),
+                "Service Fee": float(violation.service_fee),
+                "Total": float(violation.total_payable),
+                "Disposition": violation.disposition.value,
+                "Status": violation.status.value,
             })
         
-        filename = f"tlc_violations_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
-
-        exporter = ExporterFactory.get_exporter(export_format, export_data)
-        file_content = exporter.export()
-
-        media_types = {
-            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "pdf": "application/pdf"
-        }
-        media_type = media_types.get(export_format, "application/octet-stream")
-
+        filename = f"tlc_violations_{date.today()}.{'xlsx' if format == 'excel' else 'pdf'}"
+        
+        if format == "excel":
+            exporter = ExcelExporter(export_data)
+            file_content = exporter.export()
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        else:  # PDF
+            exporter = PDFExporter(export_data)
+            file_content = exporter.export()
+            media_type = "application/pdf"
+        
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)
-
-    except TLCError as e:
-        logger.warning("Business logic error during TLC export: %s", e)
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error("Error exporting TLC violation data: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail="An error occurred during the export process.",
+            status_code=500, 
+            detail="An error occurred during the export process."
         ) from e

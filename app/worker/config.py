@@ -74,83 +74,72 @@ result_backend_transport_options = {
 # Beat schedule configuration
 # This defines when periodic tasks should run
 beat_schedule = {
-    # --- CURB Fetch, Upload to S3, and Process Pipeline (Every 2 Minutes) ---
+    # --- CURB Fetch, Upload to S3, and Process Pipeline (Every 3 hours) ---
     "curb-fetch-upload-and-process": {
         "task": "curb.fetch_and_process_chained",
-        "schedule": 9.0,  # Runs every 2 minutes (120 seconds)
+        "schedule": crontab(minute=0, hour="*/3"), # Runs every 3 hours at minute 0
         "options": {"timezone": "America/New_York"},
     },
-    # "curb-test-job": {
-    #     "task": "curb.test_job",
-    #     "schedule": crontab(minute="*"),  # runs every minute
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- CURB Data Import Task (Daily) ---
-    # "curb-fetch-and-import": {
-    #     "task": "curb.fetch_and_import_curb_trips_task",
-    #     "schedule": crontab(hour=2, minute=0),  # Runs daily at 2:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
     # # --- CURB Earnings Posting Task (Weekly) ---
-    # # IMPORTANT: This must run BEFORE the DTR generation task.
-    # "curb-post-earnings-to-ledger": {
-    #     "task": "curb.post_earnings_to_ledger_task",
-    #     "schedule": crontab(
-    #         hour=4, minute=0, day_of_week="sun"
-    #     ),  # Runs every Sunday at 4:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- Lease Fees Posting Task (Weekly) ---
-    # "post-weekly-lease-fees": {
-    #     "task": "leases.post_weekly_lease_fees",
-    #     "schedule": crontab(
-    #         hour=5, minute=0, day_of_week="sun"
-    #     ),  # Runs every Sunday at 5:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- Loan Installments Task (Weekly) ---
-    # "post-due-loan-installments": {
-    #     "task": "loans.post_due_installments",
-    #     "schedule": crontab(
-    #         hour=5, minute=15, day_of_week="sun"
-    #     ),  # Runs every Sunday at 5:15 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- Repair Installments Task (Weekly) ---
-    # "post-due-repair-installments": {
-    #     "task": "repairs.post_due_installments",
-    #     "schedule": crontab(
-    #         hour=5, minute=30, day_of_week="sun"
-    #     ),  # Runs every Sunday at 5:30 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- DTR Generation Task (Weekly) ---
-    # # IMPORTANT: This must run AFTER all other financial tasks.
-    # "generate-weekly-dtrs": {
-    #     "task": "driver_payments.generate_weekly_dtrs",
-    #     "schedule": crontab(
-    #         hour=6, minute=0, day_of_week="sun"
-    #     ),  # Runs every Sunday at 6:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- BPM SLA Processing Task (Daily) ---
-    # "process-case-sla": {
-    #     "task": "bpm.sla.process_case_sla",
-    #     "schedule": crontab(hour=1, minute=0),  # Runs daily at 1:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- PVB Association Task (Daily) ---
-    # "associate-pvb-violations": {
-    #     "task": "pvb.associate_violations",
-    #     "schedule": crontab(hour=3, minute=0),  # Runs daily at 3:00 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
-    # # --- EZPass Association Task (Daily) ---
-    # "associate-ezpass-transactions": {
-    #     "task": "ezpass.associate_transactions",
-    #     "schedule": crontab(hour=3, minute=30),  # Runs daily at 3:30 AM
-    #     "options": {"timezone": "America/New_York"},
-    # },
+    # IMPORTANT: This must run BEFORE the DTR generation task.
+    "curb-post-earnings-to-ledger": {
+        "task": "curb.post_earnings_to_ledger_task",
+        "schedule": crontab(
+            hour=4, minute=0, day_of_week="sun"
+        ),  # Runs every Sunday at 4:00 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- Lease Fees Posting Task (Weekly) ---
+    "post-weekly-lease-fees": {
+        "task": "leases.post_weekly_lease_fees",
+        "schedule": crontab(
+            hour=5, minute=0, day_of_week="sun"
+        ),  # Runs every Sunday at 5:00 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- Loan Installments Task (Weekly) ---
+    "post-due-loan-installments": {
+        "task": "loans.post_due_installments",
+        "schedule": crontab(
+            hour=5, minute=15, day_of_week="sun"
+        ),  # Runs every Sunday at 5:15 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- Repair Installments Task (Weekly) ---
+    "post-due-repair-installments": {
+        "task": "repairs.post_due_installments",
+        "schedule": crontab(
+            hour=5, minute=30, day_of_week="sun"
+        ),  # Runs every Sunday at 5:30 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- DTR Generation Task (Weekly) ---
+    # IMPORTANT: This must run AFTER all other financial tasks.
+    "generate-weekly-dtrs": {
+        "task": "driver_payments.generate_weekly_dtrs",
+        "schedule": crontab(
+            hour=6, minute=0, day_of_week="sun"
+        ),  # Runs every Sunday at 6:00 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- BPM SLA Processing Task (Daily) ---
+    "process-case-sla": {
+        "task": "bpm.sla.process_case_sla",
+        "schedule": crontab(hour=1, minute=0),  # Runs daily at 1:00 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- PVB Association Task (Daily) ---
+    "associate-pvb-violations": {
+        "task": "pvb.associate_violations",
+        "schedule": crontab(hour=3, minute=0),  # Runs daily at 3:00 AM
+        "options": {"timezone": "America/New_York"},
+    },
+    # --- EZPass Association Task (Daily) ---
+    "associate-ezpass-transactions": {
+        "task": "ezpass.associate_transactions",
+        "schedule": crontab(hour=3, minute=30),  # Runs daily at 3:30 AM
+        "options": {"timezone": "America/New_York"},
+    },
 }
 
 # Worker configuration

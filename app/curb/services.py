@@ -405,9 +405,19 @@ class CurbService:
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
         medallion_no: Optional[str] = None,
+        auto_map: bool = True,
     ) -> Dict:
         """
-        Fetches CURB data based on active medallions, stores it raw, and reconciles.
+        Import workflow: Fetch -> Store -> Reconcile -> Map (optional).
+
+        Args:
+            from_date: Start date for the import range
+            to_date: End date for the import range
+            medallion_no: Comma-separated medallion numbers (or None for all active)
+            auto_map: If True, automatically map trips after reconciliation
+
+        Returns:
+            Comprehensive statistics about import, reconciliation, and mapping
         """
         try:
             # Step 1: Determine medallions to query
@@ -513,7 +523,28 @@ class CurbService:
                 else:
                     reconciled_count = self._reconcile_locally(unreconciled_trips)
 
-            return {
+            # --- Automatically Map Reconciled Trips (if enabled)
+            mapping_results = None
+            if auto_map and reconciled_count > 0:
+                logger.info(
+                    "Auto-mapping enabled. Proceeding to map reconciled trips",
+                    reconciled_count=reconciled_count
+                )
+                try:
+                    mapping_results = self.map_reconciled_trips()
+                    logger.info(
+                        "Auto mapping completed: Trips mapped",
+                        success=mapping_results["successfully_mapped"],
+                        failures=mapping_results["mapping_failures"]
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Auto mapping failed: Trips remain in RECONCILED status.",
+                        exc_info=True, error=e
+                    )
+
+            # Build comprehensive response
+            result = {
                 "medallions_queried": len(medallion_numbers),
                 "date_range": {"from": from_date_str, "to": to_date_str},
                 "records_fetched": len(final_trip_list),
@@ -523,6 +554,23 @@ class CurbService:
                 "reconciliation_id": reconciliation_id,
                 "api_errors": api_errors,
             }
+
+            # Add mapping results if auto-mapping was performed
+            if mapping_results:
+                result["auto_mapping"] = {
+                    "enabled": True,
+                    "total_trips_found": mapping_results["total_trips_found"],
+                    "successfully_mapped": mapping_results["successfully_mapped"],
+                    "mapping_failures": mapping_results["mapping_failures"],
+                    "mapping_errors": mapping_results["errors"]
+                }
+            else:
+                result["auto_mapping"] = {
+                    "enabled": auto_map,
+                    "note": "No trips were mapped" if auto_map else "Auto-mapping disabled"
+                }
+
+            return result
 
         except Exception as e:
             self.db.rollback()
@@ -1000,6 +1048,9 @@ class CurbService:
                 else:
                     reconciled_count = self._reconcile_locally(unreconciled_trips)
 
+            
+            # --- Map all reconciled trips
+            self.map_reconciled_trips()
             datetime_format = (
                 f"{settings.common_date_format} {settings.common_time_format}"
             )

@@ -10,15 +10,6 @@ By importing them here, we provide a single, clear entry point for Celery's
 autodiscovery mechanism as configured in `app/core/celery_app.py`.
 """
 
-# Local imports
-# from app.curb.services import (
-#     fetch_and_import_curb_trips_task,
-#     post_earnings_to_ledger_task,
-#     import_driver_data_task,
-#     import_medallion_data_task,
-#     import_filtered_data_task,
-# )
-
 from app.curb.import_raw_curb_data import (
     import_raw_curb_data_task,
     import_and_process_from_s3_task,
@@ -31,11 +22,6 @@ from app.curb.import_raw_curb_data import (
 # This keeps the task logic co-located with the service that performs the work.
 
 __all__ = [
-    # "fetch_and_import_curb_trips_task",
-    # "post_earnings_to_ledger_task",
-    # "import_driver_data_task",
-    # "import_medallion_data_task",
-    # "import_filtered_data_task",
     "import_raw_curb_data_task",
     "import_and_process_from_s3_task",
     "fetch_and_process_chained",

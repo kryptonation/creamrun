@@ -3,7 +3,7 @@
 from datetime import date, datetime , time
 from typing import List, Optional, Tuple
 
-from sqlalchemy import update , or_ , func
+from sqlalchemy import update , or_ , func, asc, desc
 from sqlalchemy.orm import Session, joinedload
 from app.drivers.models import Driver
 from app.ezpass.models import (
@@ -55,27 +55,51 @@ class EZPassRepository:
         self.db.execute(stmt)
 
     def bulk_insert_transactions(self, transactions_data: List[dict]):
-        """Performs a bulk insert of new EZPassTransaction records."""
+        """
+        Performs a bulk insert of new EZPassTransaction records with individual error handling.
+        Returns the number of successfully inserted transactions.
+        """
         if not transactions_data:
-            return
+            return 0
         
-        # Check for duplicates before inserting
-        incoming_txn_ids = {t['transaction_id'] for t in transactions_data}
-        existing_txn_ids = {
-            res[0] for res in self.db.query(EZPassTransaction.transaction_id)
-            .filter(EZPassTransaction.transaction_id.in_(incoming_txn_ids))
-        }
+        successful_count = 0
         
-        new_transactions = [
-            EZPassTransaction(**data)
-            for data in transactions_data
-            if data['transaction_id'] not in existing_txn_ids
-        ]
-
-        if new_transactions:
-            self.db.add_all(new_transactions)
+        # Process each transaction individually to handle constraint violations
+        for transaction_data in transactions_data:
+            try:
+                # Use a savepoint for each transaction
+                savepoint = self.db.begin_nested()
+                
+                # Check if transaction already exists
+                existing = self.db.query(EZPassTransaction).filter(
+                    EZPassTransaction.transaction_id == transaction_data['transaction_id']
+                ).first()
+                
+                if existing:
+                    savepoint.rollback()
+                    logger.debug(f"Skipping duplicate transaction: {transaction_data['transaction_id']}")
+                    continue
+                
+                # Create new transaction
+                new_transaction = EZPassTransaction(**transaction_data)
+                self.db.add(new_transaction)
+                
+                # Flush to trigger any constraint violations
+                self.db.flush()
+                
+                # Commit the savepoint if successful
+                savepoint.commit()
+                successful_count += 1
+                
+            except Exception as e:
+                # Rollback only this savepoint, not the entire session
+                savepoint.rollback()
+                logger.debug(f"Failed to insert transaction {transaction_data.get('transaction_id', 'unknown')}: {e}")
+                # Don't re-raise - let the caller handle the error tracking
+                continue
         
-        logger.info(f"Prepared {len(new_transactions)} new transactions for insertion. Skipped {len(existing_txn_ids)} duplicates.")
+        logger.info(f"Successfully inserted {successful_count} out of {len(transactions_data)} transactions.")
+        return successful_count
 
 
     def get_transactions_by_status(
@@ -240,3 +264,102 @@ class EZPassRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+    
+    def get_transaction_by_id(self, transaction_id: int) -> Optional[EZPassTransaction]:
+        """Retrieves a single EZPass transaction by its internal ID."""
+        return (
+            self.db.query(EZPassTransaction)
+            .options(
+                joinedload(EZPassTransaction.driver),
+                joinedload(EZPassTransaction.medallion),
+                joinedload(EZPassTransaction.vehicle),
+            )
+            .filter(EZPassTransaction.id == transaction_id)
+            .first()
+        )
+    
+    def list_import_logs(
+        self,
+        page: int = 1,
+        per_page: int = 10,
+        sort_by: str = "import_timestamp",
+        sort_order: str = "desc",
+        from_log_date: Optional[date] = None,
+        to_log_date: Optional[date] = None,
+        log_type: Optional[str] = None,
+        log_status: Optional[str] = None,
+        file_name: Optional[str] = None,
+    ) -> tuple[List[EZPassImport], int]:
+        """
+        List EZPass import logs with filtering, sorting, and pagination.
+        
+        Date Range Filter:
+        - from_log_date: Start date (inclusive)
+        - to_log_date: End date (inclusive)
+        
+        Returns:
+            Tuple of (import_logs, total_count)
+        """
+        from app.ezpass.models import EZPassImport, EZPassImportStatus
+        
+        query = self.db.query(EZPassImport)
+        
+        # Apply date range filter
+        if from_log_date:
+            query = query.filter(
+                EZPassImport.import_timestamp >= datetime.combine(from_log_date, datetime.min.time())
+            )
+        
+        if to_log_date:
+            query = query.filter(
+                EZPassImport.import_timestamp <= datetime.combine(to_log_date, datetime.max.time())
+            )
+        
+        # Apply file name filter
+        if file_name:
+            query = query.filter(EZPassImport.file_name.ilike(f"%{file_name}%"))
+        
+        # Apply log status filter
+        # Map UI values to DB enum values
+        if log_status:
+            status_mapping = {
+                "Success": EZPassImportStatus.COMPLETED,
+                "Partial Success": EZPassImportStatus.COMPLETED,  # Will filter in Python
+                "Failure": EZPassImportStatus.FAILED,
+                "Pending": EZPassImportStatus.PENDING,
+                "Processing": EZPassImportStatus.PROCESSING,
+            }
+            if log_status in status_mapping:
+                db_status = status_mapping[log_status]
+                query = query.filter(EZPassImport.status == db_status)
+        
+        # Note: log_type filter not applied since all records are "Import" type currently
+        # Can be extended when association/posting logs are added
+        
+        # Get total count before pagination
+        total_items = query.count()
+        
+        # Apply sorting
+        sort_column = getattr(EZPassImport, sort_by, EZPassImport.import_timestamp)
+        if sort_order == "asc":
+            query = query.order_by(asc(sort_column))
+        else:
+            query = query.order_by(desc(sort_column))
+        
+        # Apply pagination
+        offset = (page - 1) * per_page
+        query = query.offset(offset).limit(per_page)
+        
+        # Execute query
+        import_logs = query.all()
+        
+        # Post-process for "Partial Success" filtering
+        if log_status == "Partial Success":
+            import_logs = [
+                log for log in import_logs 
+                if log.status == EZPassImportStatus.COMPLETED 
+                and log.failed_records > 0
+            ]
+            total_items = len(import_logs)  # Recalculate total after filtering
+        
+        return import_logs, total_items

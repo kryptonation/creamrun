@@ -24,6 +24,11 @@ from app.curb.import_raw_curb_data import (
     import_and_process_from_s3_task,
     fetch_and_process_chained,
     test_import,
+    map_reconciled_trips_task,
+)
+
+from app.curb.services import (
+    post_earnings_to_ledger_task,
 )
 
 # The tasks are defined in the services module using the @app.task decorator.
@@ -31,13 +36,10 @@ from app.curb.import_raw_curb_data import (
 # This keeps the task logic co-located with the service that performs the work.
 
 __all__ = [
-    # "fetch_and_import_curb_trips_task",
-    # "post_earnings_to_ledger_task",
-    # "import_driver_data_task",
-    # "import_medallion_data_task",
-    # "import_filtered_data_task",
     "import_raw_curb_data_task",
     "import_and_process_from_s3_task",
     "fetch_and_process_chained",
     "test_import",
+    "map_reconciled_trips_task",
+    "post_earnings_to_ledger_task",
 ]

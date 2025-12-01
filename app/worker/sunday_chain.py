@@ -21,6 +21,7 @@ from app.leases.tasks import post_weekly_lease_fees_task
 from app.loans.tasks import post_due_loan_installments_task
 from app.repairs.tasks import post_due_repair_installments_task
 from app.driver_payments.tasks import generate_weekly_dtrs_task
+from app.ezpass.tasks import post_ezpass_tolls_to_ledger_task
 
 logger = get_logger(__name__)
 
@@ -52,11 +53,12 @@ def sunday_financial_processing_chain():
     # .si() creates signature immutable - ignores previous task result
     workflow = chain(
         post_earnings_to_ledger_task.s(),       # Step 1: CURB earnings
-        post_weekly_lease_fees_task.si(),       # Step 2: Lease fee
-        post_due_loan_installments_task.si(),   # Step 3: Loan installments
-        post_due_repair_installments_task.si(), # Step 4: Repair installments
-        generate_weekly_dtrs_task.si(),         # Step 5: DTR Generation
-        log_chain_completion.si(),              # Step 6: Log completion 
+        post_ezpass_tolls_to_ledger_task.si(),  # Step 2: EZPass tolls
+        post_weekly_lease_fees_task.si(),       # Step 3: Lease fee
+        post_due_loan_installments_task.si(),   # Step 4: Loan installments
+        post_due_repair_installments_task.si(), # Step 5: Repair installments
+        generate_weekly_dtrs_task.si(),         # Step 6: DTR Generation
+        log_chain_completion.si(),              # Step 7: Log completion 
     )
 
     # Execute the chain

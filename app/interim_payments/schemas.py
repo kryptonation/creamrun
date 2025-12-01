@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -65,3 +65,5 @@ class PaginatedInterimPaymentResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+    available_categories: List[str] = []
+    available_payment_methods: List[str] = []

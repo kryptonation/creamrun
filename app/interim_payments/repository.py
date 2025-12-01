@@ -62,6 +62,14 @@ class InterimPaymentRepository:
         lease_id: Optional[str] = None,
         medallion_no: Optional[str] = None,
         payment_date: Optional[date] = None,
+        # New filters
+        category: Optional[str] = None,
+        reference_id: Optional[str] = None,
+        amount_from: Optional[float] = None,
+        amount_to: Optional[float] = None,
+        payment_date_from: Optional[date] = None,
+        payment_date_to: Optional[date] = None,
+        payment_method: Optional[str] = None,
     ) -> Tuple[List[InterimPayment], int]:
         """
         Retrieves a paginated, sorted, and filtered list of Interim Payments.
@@ -94,8 +102,34 @@ class InterimPaymentRepository:
             start_of_day = datetime.combine(payment_date, datetime.min.time())
             end_of_day = datetime.combine(payment_date, datetime.max.time())
             query = query.filter(InterimPayment.payment_date.between(start_of_day, end_of_day))
+        
+        # New filter implementations
+        if payment_method:
+            query = query.filter(InterimPayment.payment_method == payment_method)
+            
+        if payment_date_from:
+            start_of_day = datetime.combine(payment_date_from, datetime.min.time())
+            query = query.filter(InterimPayment.payment_date >= start_of_day)
+            
+        if payment_date_to:
+            end_of_day = datetime.combine(payment_date_to, datetime.max.time())
+            query = query.filter(InterimPayment.payment_date <= end_of_day)
+            
+        # JSON allocation filters
+        if category:
+            query = query.filter(func.json_extract(InterimPayment.allocations, '$[*].category').like(f'%"{category}"%'))
+            
+        if reference_id:
+            query = query.filter(func.json_extract(InterimPayment.allocations, '$[*].reference_id').like(f'%"{reference_id}"%'))
+            
+        if amount_from is not None:
+            query = query.filter(func.json_extract(InterimPayment.allocations, '$[*].amount') >= amount_from)
+            
+        if amount_to is not None:
+            query = query.filter(func.json_extract(InterimPayment.allocations, '$[*].amount') <= amount_to)
 
-        total_items = query.with_entities(func.count(InterimPayment.id)).scalar()
+        # Get total count before applying pagination  
+        total_items = query.count()
 
         # Apply sorting
         sort_column_map = {
@@ -117,3 +151,22 @@ class InterimPaymentRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+
+    def get_available_categories(self) -> List[str]:
+        """
+        Retrieves a list of unique categories from all allocations.
+        """
+        # Query all payments with non-null allocations
+        payments = self.db.query(InterimPayment).filter(
+            InterimPayment.allocations.isnot(None),
+            InterimPayment.allocations != '[]'
+        ).all()
+        
+        categories = set()
+        for payment in payments:
+            if payment.allocations:
+                for allocation in payment.allocations:
+                    if 'category' in allocation:
+                        categories.add(allocation['category'])
+        
+        return sorted(list(categories))

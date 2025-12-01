@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from io import BytesIO
 
 import requests
@@ -25,6 +25,7 @@ from app.leases.services import lease_service
 from app.medallions.services import medallion_service
 from app.ledger.services import LedgerService
 from app.ledger.repository import LedgerRepository
+from app.worker.app import app
 from app.utils.s3_utils import s3_utils
 from app.utils.logger import get_logger
 
@@ -879,7 +880,107 @@ class CurbService:
         return {"transactions": transactions_files, "trips": trips_files}
 
 
+# --- Celery Tasks ---
 
+@app.task(
+    bind=True,
+    name="curb.post_earnings_to_ledger",
+    max_retries=3,
+    default_retry_delay=60,
+)
+def post_earnings_to_ledger_task(
+    self,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    lease_id: Optional[int] = None,
+    driver_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Celery task to post MAPPED credit card earnings to the centralized ledger.
 
-            
+    This task is designed to run as part of the Sunday financial processing chain.
+    It finds all MAPPED credit card trips for the specified period and posts them
+    as earnings (CREDIT entries) to the ledger, applying them against open balances.
+
+    Args:
+        start_date: Start date in YYYY-MM-DD format (defaults to previous Sunday)
+        end_date: End date in YYYY-MM-DD format (defaults to previous Saturday)
+        lease_id: Optional filter for specific lease
+        driver_id: Optional filter for specific driver
+
+    Returns:
+        Dictionary with posting results including:
+        - drivers_processed: Number of unique drivers processed
+        - trips_posted: Number of trips successfully posted
+        - total_amount_posted: Total dollar amount posted to ledger
+        - errors: List of any posting errors
+
+    Example:
+        {
+            "drivers_processed": 25,
+            "trips_posted": 150,
+            "total_amount_posted": 12500.75,
+            "errors": []
+        }
+    """
+    from app.core.db import SessionLocal
+    from datetime import datetime, timedelta
+
+    logger.info("*" * 80)
+    logger.info("Starting CURB earnings posting task")
+
+    db = None
+    try:
+        # Initialize database session and service
+        db = SessionLocal()
+        curb_service = CurbService(db)
+
+        # Calculate date range if not provided (previous Sunday to Saturday)
+        if not start_date or not end_date:
+            now = datetime.now()
+            # Find last Sunday (week starts on Sunday)
+            days_since_sunday = (now.weekday() + 1) % 7  # Monday=0 becomes 1, Sunday=6 becomes 0
+            last_sunday = now - timedelta(days=days_since_sunday + 7)  # Go back to previous Sunday
+            last_saturday = last_sunday + timedelta(days=6)  # End of that week
+
+            if not start_date:
+                start_date = last_sunday.strftime("%Y-%m-%d")
+            if not end_date:
+                end_date = last_saturday.strftime("%Y-%m-%d")
+
+        # Convert string dates to date objects
+        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+        logger.info(f"Posting earnings for period: {start_date_obj} to {end_date_obj}")
+        if lease_id:
+            logger.info(f"Filtering by lease ID: {lease_id}")
+        if driver_id:
+            logger.info(f"Filtering by driver ID: {driver_id}")
+
+        # Post earnings to ledger
+        result = curb_service.post_mapped_earnings_to_ledger(
+            start_date=start_date_obj,
+            end_date=end_date_obj,
+            lease_id=lease_id,
+            driver_id=driver_id
+        )
+
+        logger.info(
+            f"Earnings posting completed: {result.get('drivers_processed', 0)} drivers processed, "
+            f"${result.get('total_amount_posted', 0.0)} posted to ledger"
+        )
+
+        logger.info("*" * 80)
+        return result
+
+    except Exception as e:
+        logger.error(f"Earnings posting task failed: {str(e)}", exc_info=True)
+        if db:
+            db.rollback()
+        raise self.retry(exc=e, countdown=60)
+
+    finally:
+        if db:
+            db.close()
 

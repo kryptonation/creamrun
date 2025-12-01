@@ -17,6 +17,7 @@ from app.interim_payments.schemas import (
     InterimPaymentResponse,
     PaginatedInterimPaymentResponse,
 )
+from app.interim_payments.models import PaymentMethod
 from app.interim_payments.services import InterimPaymentService
 from app.interim_payments.stubs import create_stub_interim_payments_response
 from app.users.models import User
@@ -67,6 +68,14 @@ def list_interim_payments(
     lease_id: Optional[str] = Query(None),
     medallion_no: Optional[str] = Query(None),
     payment_date: Optional[date] = Query(None),
+    # New filters
+    category: Optional[str] = Query(None, description="Filter by allocation category"),
+    reference_id: Optional[str] = Query(None, description="Filter by allocation reference ID"),
+    amount_from: Optional[float] = Query(None, ge=0, description="Filter by minimum amount"),
+    amount_to: Optional[float] = Query(None, ge=0, description="Filter by maximum amount"),
+    payment_date_from: Optional[date] = Query(None, description="Filter by payment date from"),
+    payment_date_to: Optional[date] = Query(None, description="Filter by payment date to"),
+    payment_method: Optional[str] = Query(None, description="Filter by payment method"),
     payment_service: InterimPaymentService = Depends(get_interim_payment_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -77,12 +86,20 @@ def list_interim_payments(
         # Return stub data for now
         # return create_stub_interim_payments_response(page=page, per_page=per_page)
         
-        # TODO: Restore original implementation once dependencies are fixed
         payments, total_items = payment_service.repo.list_payments(
             page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
             payment_id=payment_id, driver_name=driver_name, tlc_license=tlc_license,
-            lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date
+            lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date,
+            # New filters
+            category=category, reference_id=reference_id,
+            amount_from=amount_from, amount_to=amount_to,
+            payment_date_from=payment_date_from, payment_date_to=payment_date_to,
+            payment_method=payment_method
         )
+        
+        # Get available values for dropdowns
+        available_categories = payment_service.repo.get_available_categories()
+        available_payment_methods = [method.value for method in PaymentMethod]
         
         # Flatten the detailed allocation data for the list view
         response_items = []
@@ -104,7 +121,9 @@ def list_interim_payments(
         
         return PaginatedInterimPaymentResponse(
             items=response_items, total_items=total_items, page=page,
-            per_page=per_page, total_pages=total_pages
+            per_page=per_page, total_pages=total_pages,
+            available_categories=available_categories,
+            available_payment_methods=available_payment_methods
         )
     except Exception as e:
         logger.error("Error fetching interim payments: %s", e, exc_info=True)
@@ -113,7 +132,7 @@ def list_interim_payments(
 
 @router.get("/export", summary="Export Interim Payments Data")
 def export_interim_payments(
-    format: str = Query("excel", enum=["excel", "pdf"]),
+    export_format: str = Query("excel", enum=["excel", "pdf"]),
     # Pass through all filters from the list endpoint
     sort_by: Optional[str] = Query("payment_date"),
     sort_order: str = Query("desc"),
@@ -123,6 +142,14 @@ def export_interim_payments(
     lease_id: Optional[str] = Query(None),
     medallion_no: Optional[str] = Query(None),
     payment_date: Optional[date] = Query(None),
+    # New filters
+    category: Optional[str] = Query(None, description="Filter by allocation category"),
+    reference_id: Optional[str] = Query(None, description="Filter by allocation reference ID"),
+    amount_from: Optional[float] = Query(None, ge=0, description="Filter by minimum amount"),
+    amount_to: Optional[float] = Query(None, ge=0, description="Filter by maximum amount"),
+    payment_date_from: Optional[date] = Query(None, description="Filter by payment date from"),
+    payment_date_to: Optional[date] = Query(None, description="Filter by payment date to"),
+    payment_method: Optional[str] = Query(None, description="Filter by payment method"),
     payment_service: InterimPaymentService = Depends(get_interim_payment_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -133,7 +160,12 @@ def export_interim_payments(
         payments, _ = payment_service.repo.list_payments(
             page=1, per_page=10000, sort_by=sort_by, sort_order=sort_order,
             payment_id=payment_id, driver_name=driver_name, tlc_license=tlc_license,
-            lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date
+            lease_id=lease_id, medallion_no=medallion_no, payment_date=payment_date,
+            # New filters
+            category=category, reference_id=reference_id,
+            amount_from=amount_from, amount_to=amount_to,
+            payment_date_from=payment_date_from, payment_date_to=payment_date_to,
+            payment_method=payment_method
         )
 
         if not payments:
@@ -155,9 +187,9 @@ def export_interim_payments(
                         "Payment Method": payment.payment_method.value,
                     })
         
-        filename = f"interim_payments_{date.today()}.{'xlsx' if format == 'excel' else 'pdf'}"
+        filename = f"interim_payments_{date.today()}.{'xlsx' if export_format == 'excel' else 'pdf'}"
         
-        if format == "excel":
+        if export_format == "excel":
             exporter = ExcelExporter(export_data)
             file_content = exporter.export()
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

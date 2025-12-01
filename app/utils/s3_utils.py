@@ -112,10 +112,10 @@ class S3Utils:
     def delete_file(self, key: str) -> bool:
         """
         Delete a file from S3
-
+        
         Args:
             key: S3 key (path) of the file to delete
-
+            
         Returns:
             bool: True if deletion was successful, False otherwise
         """
@@ -128,31 +128,6 @@ class S3Utils:
         except ClientError as e:
             print(f"Error deleting file from S3: {e}")
             return False
-
-    def list_files(self, prefix: str = "") -> list[str]:
-        """
-        List all files in S3 under a given prefix
-
-        Args:
-            prefix: S3 prefix (folder path) to list files from
-
-        Returns:
-            list: List of S3 keys (file paths)
-        """
-        try:
-            file_keys = []
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
-
-            for page in pages:
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        file_keys.append(obj['Key'])
-
-            return file_keys
-        except ClientError as e:
-            logger.error(f"Error listing files from S3: {e}", exc_info=True)
-            return []
         
     def get_file_metadata(self, key: str) -> Optional[Dict[str, Any]]:
         """
@@ -211,6 +186,31 @@ class S3Utils:
         except Exception as e:
             logger.error(f"An unexpected error occurred in get_file_metadata for key {key}: {e}", exc_info=True)
             return None
+        
+    def list_files(self, prefix: str = "") -> list[str]:
+        """
+        List all files in S3 under a given prefix
+
+        Args:
+            prefix: S3 prefix (folder path) to list files from
+
+        Returns:
+            list: List of S3 keys (file paths)
+        """
+        try:
+            file_keys = []
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
+
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        file_keys.append(obj['Key'])
+
+            return file_keys
+        except ClientError as e:
+            logger.error(f"Error listing files from S3: {e}", exc_info=True)
+            return []
         
 
 s3_utils = S3Utils()

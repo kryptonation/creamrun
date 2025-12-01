@@ -19,8 +19,7 @@ from app.tlc.models import TLCViolation , TLCViolationType
 from app.uploads.services import upload_service
 from app.utils.logger import get_logger
 from app.medallions.utils import format_medallion_response
-
-
+from app.bpm_flows.new_tlc.utils import format_tlc_violation
 logger = get_logger(__name__)
 
 ENTITY_MAPPER = {
@@ -28,21 +27,51 @@ ENTITY_MAPPER = {
     "TLC_IDENTIFIER": "id",
 }
 
-@step(step_id="222", name="Fetch - Choose Driver", operation="fetch")
+@step(step_id="223", name="Fetch - Choose Driver", operation="fetch")
 def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
     """
     Fetches driver and associated active lease information for the TLC violation workflow.
     """
     try:
-        if not case_params:
-            return {"search_results": []}
-        
+        violation = None
+        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["TLC"])
+
+        if case_params and case_params.get("object_name") == "tlc_violation":
+            violation = db.query(TLCViolation).filter_by(id=int(case_params.get("object_lookup"))).first()
+        if case_entity:
+            violation = db.query(TLCViolation).filter_by(id=int(case_entity.identifier_value)).first()
+
+        if not violation:
+            return {}
+
+
+        violation_data = format_tlc_violation(db , violation)
+
+        violation_tyeps = {
+            TLCViolationType.FI.value : "Failure to Inspect Vehicle",
+            TLCViolationType.FN.value : "Failure to Comply with Notice",
+            TLCViolationType.RF.value : "Reinspection Fee",
+            TLCViolationType.EA.value : [
+                "Meter Mile Run",
+                "Defective Light",
+                "Dirty Cab",
+                "Air Bag Light",
+                "Windshield"
+            ]
+        }
+
+        if not case_entity:
+            bpm_service.create_case_entity(
+                db, case_no, ENTITY_MAPPER["TLC"], ENTITY_MAPPER["TLC_IDENTIFIER"], str(violation.id)
+            )
+          
         driver_name = case_params.get("driver_name")
         tlc_license_no = case_params.get("tlc_license_no")
         medallion_no = case_params.get("medallion_no")
+        
 
         if not any([medallion_no, tlc_license_no, driver_name]):
-            return {"search_results": []}
+            return {"search_results": [] , "tlc_violation": violation_data  , "violation_types": violation_tyeps}
 
         driver = None
         active_leases = []
@@ -89,10 +118,12 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
                 )
 
         if not driver:
-            logger.info("No driver found for PVB case", case_no=case_no)
+            logger.info("No driver found for TLC case", case_no=case_no)
             return {
                 "driver": None,
-                "leases": []
+                "leases": [],
+                "tlc_violation": violation_data,
+                "violation_types": violation_tyeps
             }
         
         if active_leases and active_leases[0]:
@@ -115,7 +146,9 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
                     "phone": driver.phone_number_1 or "N/A",
                     "email": driver.email_address or "N/A",
                 },
-                "leases": []
+                "leases": [],
+                "tlc_violation": violation_data,
+                "violation_types": violation_tyeps
             }
         
         # Format lease data for UI
@@ -151,29 +184,17 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
         tlc_ticket = upload_service.get_documents(
             db=db,
             object_type="tlc",
-            object_id=case_no,
+            object_id=violation.id,
             document_type="tlc_ticket"
-        )
+        )    
         
-        logger.info("Successfully fetched driver and lease details for PVB", case_no=case_no, driver_id=driver.id)
-
-        violation_tyeps = {
-            TLCViolationType.FI.value : "Failure to Inspect Vehicle",
-            TLCViolationType.FN.value : "Failure to Comply with Notice",
-            TLCViolationType.RF.value : "Reinspection Fee",
-            TLCViolationType.EA.value : [
-                "Meter Mile Run",
-                "Defective Light",
-                "Dirty Cab",
-                "Air Bag Light",
-                "Windshield"
-            ]
-        }
+        logger.info("Successfully fetched driver and lease details for TLC case", case_no=case_no, driver_id=driver.id)
         
         return {
             "driver": driver_data,
             "leases": formatted_leases,
             "tlc_ticket": tlc_ticket,
+            "tlc_violation": violation_data,
             "violation_types": violation_tyeps
         }
         
@@ -181,7 +202,7 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
         logger.error("Error in TLC choose_driver_fetch: %s", e, exc_info=True)
         raise
 
-@step(step_id="222", name="Process - Choose Driver", operation="process")
+@step(step_id="223", name="Process - Choose Driver", operation="process")
 def choose_driver_process(db: Session, case_no: str, step_data: dict):
      """
     Creates a preliminary TLC Ticket violation record and associates it with the selected driver and lease.
@@ -260,13 +281,6 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
         
         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["TLC"])
 
-        tlc_ticket = upload_service.get_documents(
-            db=db,
-            object_type="tlc",
-            object_id=case_no,
-            document_type="tlc_ticket"
-        )
-
         tlc_service = TLCService(db)
 
         if case_entity:
@@ -301,49 +315,26 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
                 "issue_date": step_data.get("issue_date"),
                 "issue_time": datetime.now().time(),
                 "plate": vehicle_plate_no,
-                "state": "NY",
                 "violation_type": step_data.get("ticket_type"),
                 "description": step_data.get("description"),
                 "amount": Decimal(step_data.get("penalty_amount")),
                 "disposition": step_data.get("disposition"),
                 "due_date": step_data.get("due_date"),
-                "note": step_data.get("note"),
-                "attachment_document_id": tlc_ticket.get("document_id") or None
+                "note": step_data.get("note")
             }
             violation = tlc_service.create_manual_violation(case_no, tlc_data , 1)
             logger.info("TLC violation created successfully.")
-
-        if tlc_ticket and tlc_ticket.get("document_path"):
-            upload_service.update_document(
-                    db=db , 
-                    document_dict={"document_id": tlc_ticket.get("document_id")},
-                    document_path=tlc_ticket.get("document_path"),
-                    object_id= violation.id,
-                    object_type="tlc",
-                    document_type="tlc_ticket",
-                    new_filename=tlc_ticket.get("document_name"),
-                    file_size_kb=tlc_ticket.get("document_size"),
-                    original_extension=tlc_ticket.get("document_format"),
-                    document_date=datetime.now().strftime('%Y-%m-%d'),
-                    notes=tlc_ticket.get("document_notes")
-                )
-            logger.info("TLC ticket document updated successfully.")
-
-        if not case_entity:
-            bpm_service.create_case_entity(
-                db, case_no, ENTITY_MAPPER["TLC"], ENTITY_MAPPER["TLC_IDENTIFIER"], str(violation.id)
-            )
 
         case = bpm_service.get_cases(db=db , case_no= case_no)
         if case:
             audit_trail_service.create_audit_trail(
                 db=db,
                 case=case,
-                description=f"TLC violation created for case {case_no}",
+                description=f"TLC violation updated for case {case_no}",
                 meta_data={"driver_id": driver_id, "lease_id": lease_id, "vehicle_id": vehicle_id, "medallion_id": medallion_id}
             )
 
-        logger.info("TLC violation created successfully.")
+        logger.info("TLC violation updated successfully.")
         return "Ok"
      except Exception as e:
         logger.error("Error in TLC choose_driver_process: %s", e, exc_info=True)

@@ -46,10 +46,6 @@ def import_curb_data(
         None,
         description="A specific medallion number or a comma-separated list. If omitted, all active medallions are used.",
     ),
-    auto_map: bool = Query(
-        True,
-        description="If True, automatically map reconciled trips to internal entities (driver, lease, medallion)"
-    ),
     curb_service: CurbService = Depends(get_curb_service),
     _current_user: User = Depends(get_current_user),
 ):
@@ -60,15 +56,12 @@ def import_curb_data(
     - **medallion_no (optional)**: Provide a single medallion or a comma-separated list to limit the import. If not provided, the system will fetch data for ALL medallions currently marked as 'Active'.
     - **from_date (optional)**: The start of the date range to query. Defaults to yesterday.
     - **to_date (optional)**: The end of the date range to query. Defaults to today.
-    - **auto_map** (optional): Enable automatic mapping after reconiliation. Defaults to True.
-      Set to False if you want to manually trigger mapping later via /curb/map-trips endpoint.
     """
     try:
         result = curb_service.import_and_reconcile_data(
             from_date=from_date,
             to_date=to_date,
             medallion_no=medallion_no,
-            auto_map=auto_map
         )
         return JSONResponse(content=result, status_code=status.HTTP_200_OK)
     except CurbError as e:

@@ -1,5 +1,5 @@
 from app.core.db import SessionLocal
-from app.core.celery_app import app
+from app.worker.app import app
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)

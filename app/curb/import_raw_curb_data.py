@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.core.celery_app import app
+from app.worker.app import app
 from app.core.config import settings
 from app.curb.services import CurbApiService
 from app.utils.logger import get_logger
@@ -111,7 +111,7 @@ def fetch_and_upload_transactions(
         trans_count = count_records_in_xml(trans_xml, "tran")
 
         # Upload to S3
-        trans_filename = f"{folder_path}transactions_{job_id}.xml"
+        trans_filename = f"{folder_path}/transactions_{job_id}.xml"
         xml_bytes = BytesIO(trans_xml.encode("utf-8"))
 
         success = s3_utils.upload_file(
@@ -196,7 +196,7 @@ def fetch_and_upload_trips(
         trips_count = count_records_in_xml(trips_xml, "trip")
 
         # Upload to S3
-        trips_filename = f"{folder_path}trips_{job_id}.xml"
+        trips_filename = f"{folder_path}/trips_{job_id}.xml"
         xml_bytes = BytesIO(trips_xml.encode("utf-8"))
 
         success = s3_utils.upload_file(
@@ -309,8 +309,20 @@ def import_and_process_from_s3_task(
 
     db = None
     try:
-        # Parse datetime strings
+        # Parse datetime strings - handle cases where time might be missing or have trailing spaces
         datetime_format = f"{settings.common_date_format} {settings.common_time_format}"
+        
+        # Clean up datetime strings (strip spaces)
+        start_datetime = start_datetime.strip()
+        end_datetime = end_datetime.strip()
+        
+        # If time component is missing, add default time
+        # Check if the string contains time (has a space followed by time pattern)
+        if ' ' not in start_datetime:
+            start_datetime += " 00:00:00"
+        if ' ' not in end_datetime:
+            end_datetime += " 23:59:59"
+
         start_dt = datetime.strptime(start_datetime, datetime_format)
         end_dt = datetime.strptime(end_datetime, datetime_format)
 
@@ -355,19 +367,102 @@ def import_and_process_from_s3_task(
             db.close()
 
 
+@app.task(
+    bind=True,
+    name="curb.map_reconciled_trips",
+    max_retries=3,
+    default_retry_delay=60,
+)
+def map_reconciled_trips_task(self) -> Dict[str, Any]:
+    """
+    Celery task to map reconciled CURB trips to internal entities.
+
+    This task:
+    1. Finds all RECONCILED (but not yet mapped) trips
+    2. Associates them with internal Driver, Medallion, Vehicle, and Lease records
+    3. Updates trip status to MAPPED on success
+
+    Returns:
+        Dictionary with mapping summary including:
+        - total_trips_to_map: Number of reconciled trips found
+        - successfully_mapped: Number of trips successfully mapped
+        - mapping_failures: Number of trips that failed mapping
+        - errors: List of mapping errors
+
+    Example:
+        {
+            "total_trips_to_map": 150,
+            "successfully_mapped": 145,
+            "mapping_failures": 5,
+            "errors": [
+                {"curb_trip_id": "ABC123", "error": "Driver not found for TLC License: L123456"},
+                ...
+            ]
+        }
+    """
+    from app.core.db import SessionLocal
+    from app.curb.services import CurbService
+
+    logger.info("*" * 80)
+    logger.info("Starting CURB trip mapping task")
+
+    db = None
+    try:
+        # Initialize database session and service
+        db = SessionLocal()
+        curb_service = CurbService(db)
+
+        # Map reconciled trips to internal entities
+        result = curb_service.map_reconciled_trips()
+
+        logger.info(
+            f"Trip mapping completed: {result.get('total_trips_to_map', 0)} trips to map, "
+            f"{result.get('successfully_mapped', 0)} mapped successfully, "
+            f"{result.get('mapping_failures', 0)} failed"
+        )
+
+        # Save task result to S3 results folder
+        if settings.curb_results_s3_folder:
+            # Create folder path using current timestamp
+            now = datetime.now()
+            folder_date = now.strftime(settings.common_date_format).replace("/", "-")
+            folder_time = now.strftime(settings.common_time_format).replace(":", "-")
+
+            task_id = f"map_trips_{now.strftime('%Y%m%d_%H%M%S')}"
+            result_filename = f"{settings.curb_results_s3_folder}/{folder_date}/{folder_time}/{task_id}_mapping_result.json"
+
+            upload_metadata_to_s3(result, result_filename)
+            logger.info(f"Saved mapping result to {result_filename}")
+
+        logger.info("*" * 80)
+        return result
+
+    except Exception as e:
+        logger.error(f"Trip mapping task failed: {str(e)}", exc_info=True)
+        if db:
+            db.rollback()
+        raise self.retry(exc=e, countdown=60)
+
+    finally:
+        if db:
+            db.close()
+
+
 @app.task(name="curb.fetch_and_process_chained")
 def fetch_and_process_chained(
     start_datetime: Optional[str] = None, end_datetime: Optional[str] = None
 ):
     """
-    Chains the fetch/upload and process tasks using Celery chain.
+    Chains the fetch/upload, process, and mapping tasks using Celery chain.
 
     This task is called from Celery Beat and will:
     1. Fetch from CURB API and upload to S3
     2. Then import from S3 and process into database
+    3. Then map reconciled trips to internal entities (drivers, medallions, vehicles, leases)
 
-    The chain ensures step 2 only runs after step 1 completes successfully.
+    The chain ensures each step only runs after the previous step completes successfully.
     The start_datetime and end_datetime from step 1 are passed to step 2.
+    Step 3 (mapping) processes all reconciled trips regardless of datetime range.
 
     Args:
         start_datetime: Start datetime in "common_date_format common_time_format"
@@ -397,12 +492,13 @@ def fetch_and_process_chained(
             start_datetime = start_datetime_obj.strftime(datetime_format)
 
     logger.info(
-        f"Starting chained fetch and process pipeline: {start_datetime} to {end_datetime}"
+        f"Starting chained fetch, process, and mapping pipeline: {start_datetime} to {end_datetime}"
     )
 
-    # Create chain: upload to S3, then process from S3
+    # Create chain: upload to S3, then process from S3, then map reconciled trips
     # .si() creates a signature immutable - it ignores the previous task's result
-    # Both tasks receive the same start_datetime and end_datetime explicitly
+    # Both fetch and process tasks receive the same start_datetime and end_datetime explicitly
+    # The mapping task doesn't need datetime parameters as it processes all reconciled trips
     workflow = chain(
         import_raw_curb_data_task.si(
             start_datetime=start_datetime, end_datetime=end_datetime
@@ -410,6 +506,7 @@ def fetch_and_process_chained(
         import_and_process_from_s3_task.si(
             start_datetime=start_datetime, end_datetime=end_datetime
         ),
+        map_reconciled_trips_task.si(),
     )
 
     return workflow.apply_async()
@@ -499,7 +596,7 @@ def import_raw_curb_data_task(
         }
     """
     job_start_time = time.time()
-    job_id = f"curb_import_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{self.request.id[:8]}"
+    job_id = f"curb_import_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{self.request.id[:8]}"
 
     logger.info("*" * 80)
     logger.info(f"Starting CURB raw data import job: {job_id}")

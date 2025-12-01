@@ -153,7 +153,7 @@ class LedgerService:
                 created_postings.append(credit_posting)
 
                 # Update balance
-                new_balance_amount = balance.balance - allocation_amount
+                new_balance_amount = Decimal(balance.balance) - Decimal(allocation_amount)
                 new_status = BalanceStatus.CLOSED if new_balance_amount <= 0 else BalanceStatus.OPEN
                 self.repo.update_balance(balance, new_balance_amount, new_status)
 

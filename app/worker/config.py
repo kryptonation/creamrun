@@ -74,70 +74,49 @@ result_backend_transport_options = {
 # Beat schedule configuration
 # This defines when periodic tasks should run
 beat_schedule = {
-    # --- CURB Fetch, Upload to S3, and Process Pipeline (Every 3 hours) ---
+    # --- CURB Fetch, Upload to S3, and Process Pipeline (Every 2 Minutes) ---
     "curb-fetch-upload-and-process": {
         "task": "curb.fetch_and_process_chained",
-        "schedule": crontab(minute=0, hour="*/3"), # Runs every 3 hours at minute 0
+        "schedule": 10800,  # Runs every 3 hours (10800 seconds)
         "options": {"timezone": "America/New_York"},
     },
-    # # --- CURB Earnings Posting Task (Weekly) ---
-    # IMPORTANT: This must run BEFORE the DTR generation task.
-    "curb-post-earnings-to-ledger": {
-        "task": "curb.post_earnings_to_ledger_task",
+    # ========================================================================
+    # SUNDAY MORNING FINANCIAL PROCESSING CHAIN (REPLACES 5 INDIVIDUAL TASKS)
+    # ========================================================================
+    # This single chain orchestrates all Sunday morning financial tasks
+    # to run sequentially, ensuring proper execution order and data integrity.
+    #
+    # Chain sequence:
+    #   1. Post CURB earnings to ledger
+    #   2. Post lease fees to ledger
+    #   3. Post loan installments to ledger
+    #   4. Post repair installments to ledger
+    #   5. Generate DTRs for all active leases
+    #
+    # IMPORTANT: Each task waits for the previous task to complete.
+    # ========================================================================
+    "sunday-financial-chain": {
+        "task": "worker.sunday_financial_chain",
         "schedule": crontab(
             hour=4, minute=0, day_of_week="sun"
         ),  # Runs every Sunday at 4:00 AM
         "options": {"timezone": "America/New_York"},
     },
-    # --- Lease Fees Posting Task (Weekly) ---
-    "post-weekly-lease-fees": {
-        "task": "leases.post_weekly_lease_fees",
-        "schedule": crontab(
-            hour=5, minute=0, day_of_week="sun"
-        ),  # Runs every Sunday at 5:00 AM
-        "options": {"timezone": "America/New_York"},
-    },
-    # --- Loan Installments Task (Weekly) ---
-    "post-due-loan-installments": {
-        "task": "loans.post_due_installments",
-        "schedule": crontab(
-            hour=5, minute=15, day_of_week="sun"
-        ),  # Runs every Sunday at 5:15 AM
-        "options": {"timezone": "America/New_York"},
-    },
-    # --- Repair Installments Task (Weekly) ---
-    "post-due-repair-installments": {
-        "task": "repairs.post_due_installments",
-        "schedule": crontab(
-            hour=5, minute=30, day_of_week="sun"
-        ),  # Runs every Sunday at 5:30 AM
-        "options": {"timezone": "America/New_York"},
-    },
-    # --- DTR Generation Task (Weekly) ---
-    # IMPORTANT: This must run AFTER all other financial tasks.
-    "generate-weekly-dtrs": {
-        "task": "driver_payments.generate_weekly_dtrs",
-        "schedule": crontab(
-            hour=6, minute=0, day_of_week="sun"
-        ),  # Runs every Sunday at 6:00 AM
-        "options": {"timezone": "America/New_York"},
-    },
+    
+    # ========================================================================
+    # REMOVED INDIVIDUAL TASKS (Now part of the chain above):
+    # ========================================================================
+    # - curb-post-earnings-to-ledger (was 4:00 AM)
+    # - post-weekly-lease-fees (was 5:00 AM)
+    # - post-due-loan-installments (was 5:15 AM)
+    # - post-due-repair-installments (was 5:30 AM)
+    # - generate-weekly-dtrs (was 6:00 AM)
+    # ========================================================================
+    
     # --- BPM SLA Processing Task (Daily) ---
     "process-case-sla": {
         "task": "bpm.sla.process_case_sla",
         "schedule": crontab(hour=1, minute=0),  # Runs daily at 1:00 AM
-        "options": {"timezone": "America/New_York"},
-    },
-    # --- PVB Association Task (Daily) ---
-    "associate-pvb-violations": {
-        "task": "pvb.associate_violations",
-        "schedule": crontab(hour=3, minute=0),  # Runs daily at 3:00 AM
-        "options": {"timezone": "America/New_York"},
-    },
-    # --- EZPass Association Task (Daily) ---
-    "associate-ezpass-transactions": {
-        "task": "ezpass.associate_transactions",
-        "schedule": crontab(hour=3, minute=30),  # Runs daily at 3:30 AM
         "options": {"timezone": "America/New_York"},
     },
 }

@@ -54,6 +54,18 @@ class LedgerRepository:
         if not posting:
             raise PostingNotFoundError(posting_id=posting_id)
         return posting
+    
+    def get_posting_by_reference_id(self, reference_id: str) -> LedgerPosting:
+        """
+        Fetches a single ledger posting by its reference_id.
+        Raises PostingNotFoundError if not found.
+        """
+        stmt = select(LedgerPosting).where(LedgerPosting.reference_id == reference_id)
+        result = self.db.execute(stmt)
+        posting = result.scalar_one_or_none()
+        if not posting:
+            raise PostingNotFoundError(reference_id=reference_id)
+        return posting
 
     def update_posting_status(
         self, posting: LedgerPosting, status: PostingStatus

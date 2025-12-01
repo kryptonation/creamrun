@@ -16,6 +16,7 @@ from app.misc_expenses.repository import MiscellaneousExpenseRepository
 from app.misc_expenses.schemas import MiscellaneousExpenseCreate
 from app.ledger.models import PostingCategory
 from app.ledger.services import LedgerService
+from app.ledger.repository import LedgerRepository
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,7 +32,8 @@ class MiscellaneousExpenseService:
         self.db = db
         self.repo = MiscellaneousExpenseRepository(db)
         # The ledger service is designed to be used asynchronously
-        self.ledger_service = LedgerService(db)
+        self.ledger_repo = LedgerRepository(db)
+        self.ledger_service = LedgerService(self.ledger_repo)
 
     def _generate_next_expense_id(self) -> str:
         """Generates a unique Miscellaneous Expense ID in the format MISC-YYYY-#####."""
@@ -46,7 +48,7 @@ class MiscellaneousExpenseService:
             
         return f"MISC-{current_year}-{str(sequence).zfill(5)}"
 
-    async def create_misc_expense(self, case_no: str, expense_data: MiscellaneousExpenseCreate, user_id: int) -> MiscellaneousExpense:
+    def create_misc_expense(self, case_no: str, expense_data: MiscellaneousExpenseCreate, user_id: int) -> MiscellaneousExpense:
         """
         Creates a new Miscellaneous Expense from the BPM workflow.
         This operation validates the data, creates the master record, and
@@ -78,7 +80,7 @@ class MiscellaneousExpenseService:
             
             # --- Post to Ledger ---
             # This is an atomic operation that creates a DEBIT posting and an OPEN balance
-            balance = await self.ledger_service.create_obligation(
+            balance = self.ledger_service.create_obligation(
                 category=PostingCategory.MISC,
                 amount=new_expense.amount,
                 reference_id=new_expense.expense_id, # Use the unique expense ID as the reference

@@ -98,22 +98,32 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
         # Format lease data for UI display
         formatted_leases = []
         for lease in active_leases:
-            # Get the weekly lease amount
-            weekly_amount = "$1,200.00/week"  # Default fallback
+            # Get the weekly lease amount from schedule (not config!)
+            weekly_amount = None
             try:
-                lease_config = lease_service.get_lease_configurations(
-                    db,
-                    lease_id=lease.id,
-                    lease_breakup_type="lease_amount"
-                )
-                if lease_config:
-                    weekly_amount = f"${lease_config.lease_limit:.2f}/week"
+                schedule_amount = lease_service.get_current_lease_amount(db, lease.id)
+                if schedule_amount:
+                    weekly_amount = f"${schedule_amount:.2f}/week"
+                else:
+                    # Only if no schedule exists, fall back to config
+                    lease_config = lease_service.get_lease_configurations(
+                        db,
+                        lease_id=lease.id,
+                        lease_breakup_type="lease_amount"
+                    )
+                    if lease_config:
+                        weekly_amount = f"${float(lease_config.lease_limit):.2f}/week"
+                    else:
+                        weekly_amount = "Not Configured"
+                        
             except Exception as e:
-                logger.warning(
-                    "Could not fetch lease configuration",
+                logger.error(
+                    "Error fetching lease amount",
                     lease_id=lease.id,
-                    error=str(e)
+                    error=str(e),
+                    exc_info=True
                 )
+                weekly_amount = "Error Loading"
             
             
             formatted_leases.append({
@@ -185,7 +195,7 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
 
 
 @step(step_id="308", name="Process - Create Miscellaneous Expense", operation="process")
-async def create_miscellaneous_expense_process(db: Session, case_no: str, step_data: Dict[str, Any]):
+def create_miscellaneous_expense_process(db: Session, case_no: str, step_data: Dict[str, Any]):
     """
     Processes the final submission of the miscellaneous expense, creating the master record
     and posting the charge immediately to the centralized ledger.
@@ -247,7 +257,7 @@ async def create_miscellaneous_expense_process(db: Session, case_no: str, step_d
         
         # Create the miscellaneous expense and post to ledger
         misc_expense_service = MiscellaneousExpenseService(db)
-        created_expense = await misc_expense_service.create_misc_expense(
+        created_expense = misc_expense_service.create_misc_expense(
             case_no=case_no,
             expense_data=expense_create_data,
             user_id=current_user_id

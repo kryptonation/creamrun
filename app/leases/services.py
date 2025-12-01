@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from decimal import Decimal
 from datetime import date, datetime, timezone
 from typing import List, Optional, Tuple, Union
 
@@ -2019,6 +2020,52 @@ class LeaseService:
         except Exception as e:
             logger.error(f"Error fetching leases by status with relationships: {e}", exc_info=True)
             raise
+
+    def get_current_lease_amount(self, db: Session, lease_id: int) -> Optional[Decimal]:
+        """
+        Get the current or next scheduled lease amount from lease_schedule.
+        This is the authoritative source for lease amounts as it accounts for proration.
+        
+        Args:
+            db: Database session
+            lease_id: Lease ID
+            
+        Returns:
+            Decimal amount or None if no schedule exists
+        """
+        from datetime import datetime
+        from app.leases.models import LeaseSchedule
+        from sqlalchemy import and_
+        
+        today = datetime.now().date()
+        
+        # Try current period
+        current_installment = db.query(LeaseSchedule).filter(
+            and_(
+                LeaseSchedule.lease_id == lease_id,
+                LeaseSchedule.period_start_date <= today,
+                LeaseSchedule.period_end_date >= today,
+                LeaseSchedule.installment_status.in_(['Scheduled', 'Posted'])
+            )
+        ).first()
+        
+        # If no current, get next upcoming
+        if not current_installment:
+            current_installment = db.query(LeaseSchedule).filter(
+                and_(
+                    LeaseSchedule.lease_id == lease_id,
+                    LeaseSchedule.installment_due_date >= today,
+                    LeaseSchedule.installment_status == 'Scheduled'
+                )
+            ).order_by(LeaseSchedule.installment_due_date.asc()).first()
+        
+        # Fallback to most recent
+        if not current_installment:
+            current_installment = db.query(LeaseSchedule).filter(
+                LeaseSchedule.lease_id == lease_id
+            ).order_by(LeaseSchedule.installment_due_date.desc()).first()
+        
+        return current_installment.installment_amount if current_installment else None
 
 
 lease_service = LeaseService()

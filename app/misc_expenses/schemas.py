@@ -2,7 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +42,7 @@ class MiscellaneousExpenseResponse(BaseModel):
     vehicle_name: Optional[str] = None # e.g., "Toyota RAV4 2021"
     plate_no: Optional[str] = None
     medallion_no: Optional[str] = None
+    documents: List[dict] = Field(default_factory=list, description="Associated documents with presigned URLs")
 
     class Config:
         from_attributes = True
@@ -51,9 +52,14 @@ class MiscellaneousExpenseResponse(BaseModel):
 class PaginatedMiscellaneousExpenseResponse(BaseModel):
     """
     Paginated response schema for a list of Miscellaneous Expenses.
+    Includes available categories for filter dropdown population.
     """
     items: List[MiscellaneousExpenseResponse]
     total_items: int
     page: int
     per_page: int
     total_pages: int
+    available_categories: List[str] = Field(
+        default_factory=list,
+        description="List of distinct expense categories available in the system"
+    )

@@ -109,18 +109,18 @@ class DocusignClient:
             # Get signing positions for this specific signer using their signer_id
             signer_positions = signing_position_info.get(signer_id, {})
 
-            in_person_signers_list.append({
-                "recipientId": str(idx),
-                "routingOrder": str(idx),
-                "hostEmail": host_email,
-                "hostName": host_name,
-                "signerName": signer.name,
-                "tabs": signer_positions,
-            })
+            in_person_signers_list.append(
+                {
+                    "recipientId": str(idx),
+                    "routingOrder": str(idx),
+                    "hostEmail": host_email,
+                    "hostName": host_name,
+                    "signerName": signer.name,
+                    "tabs": signer_positions,
+                }
+            )
 
-        docusign_signers = {
-            "inPersonSigners": in_person_signers_list
-        }
+        docusign_signers = {"inPersonSigners": in_person_signers_list}
 
         return docusign_signers
 
@@ -244,14 +244,18 @@ class DocusignClient:
         # If envelope requires to have a project name that webhook callbacks map back
         custom_fields = []
         if project_name:
-            custom_fields.append({"name": "project", "value": project_name, "show": "false"})
+            custom_fields.append(
+                {"name": "project", "value": project_name, "show": "false"}
+            )
         if case_no:
             custom_fields.append({"name": "case_no", "value": case_no, "show": "false"})
 
+        custom_fields.append(
+            {"name": "env", "value": settings.environment, "show": "false"}
+        )
+
         if custom_fields:
-            envelope_definition["customFields"] = {
-                "textCustomFields": custom_fields
-            }
+            envelope_definition["customFields"] = {"textCustomFields": custom_fields}
 
         logger.info("********** Envelope Details **********")
         logger.info(envelope_definition)

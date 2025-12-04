@@ -2,8 +2,9 @@
 
 from datetime import date, datetime
 from typing import List, Optional, Tuple
+from decimal import Decimal
 
-from sqlalchemy import func, update
+from sqlalchemy import func, update, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.drivers.models import Driver
@@ -11,7 +12,8 @@ from app.interim_payments.models import InterimPayment
 from app.leases.models import Lease
 from app.medallions.models import Medallion
 from app.misc_expenses.models import MiscellaneousExpense, MiscellaneousExpenseStatus
-from app.vehicles.models import Vehicle
+from app.uploads.models import Document
+from app.vehicles.models import Vehicle, VehicleRegistration
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -61,22 +63,32 @@ class MiscellaneousExpenseRepository:
         expense_id: Optional[str] = None,
         reference_no: Optional[str] = None,
         category: Optional[str] = None,
-        expense_date: Optional[date] = None,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+        from_amount: Optional[Decimal] = None,
+        to_amount: Optional[Decimal] = None,
         driver_name: Optional[str] = None,
         lease_id: Optional[str] = None,
         vin: Optional[str] = None,
         plate_no: Optional[str] = None,
         medallion_no: Optional[str] = None,
+        vehicle: Optional[str] = None,
     ) -> Tuple[List[MiscellaneousExpense], int]:
         """
         Retrieves a paginated, sorted, and filtered list of Miscellaneous Expenses.
+        
+        Supports:
+        - Comma-separated filters for: expense_id, lease_id, vin, plate_no, medallion_no, vehicle
+        - Date range filtering with from_date and to_date
+        - Amount range filtering with from_amount and to_amount
+        - Text search for driver_name, reference_no, category
         """
         query = (
             self.db.query(MiscellaneousExpense)
             .options(
                 joinedload(MiscellaneousExpense.driver),
                 joinedload(MiscellaneousExpense.lease),
-                joinedload(MiscellaneousExpense.vehicle),
+                joinedload(MiscellaneousExpense.vehicle).joinedload(Vehicle.registrations),
                 joinedload(MiscellaneousExpense.medallion),
             )
             .join(Driver, MiscellaneousExpense.driver_id == Driver.id)
@@ -85,29 +97,74 @@ class MiscellaneousExpenseRepository:
             .outerjoin(Medallion, MiscellaneousExpense.medallion_id == Medallion.id)
         )
 
-        # Apply filters
+        # Apply filters with comma-separated support
         if expense_id:
-            query = query.filter(MiscellaneousExpense.expense_id.ilike(f"%{expense_id}%"))
+            ids = [id.strip() for id in expense_id.split(',') if id.strip()]
+            if ids:
+                query = query.filter(or_(*[MiscellaneousExpense.expense_id.ilike(f"%{id}%") for id in ids]))
+
         if reference_no:
             query = query.filter(MiscellaneousExpense.reference_number.ilike(f"%{reference_no}%"))
+
         if category:
             query = query.filter(MiscellaneousExpense.category.ilike(f"%{category}%"))
-        if expense_date:
-            start_of_day = datetime.combine(expense_date, datetime.min.time())
-            end_of_day = datetime.combine(expense_date, datetime.max.time())
-            query = query.filter(MiscellaneousExpense.expense_date.between(start_of_day, end_of_day))
+
+        # Date range filters
+        if from_date:
+            from_datetime = datetime.combine(from_date, datetime.min.time())
+            query = query.filter(MiscellaneousExpense.expense_date >= from_datetime)
+
+        if to_date:
+            to_datetime = datetime.combine(to_date, datetime.max.time())
+            query = query.filter(MiscellaneousExpense.expense_date <= to_datetime)
+
+        # Amount range filters
+        if from_amount is not None:
+            query = query.filter(MiscellaneousExpense.amount >= from_amount)
+
+        if to_amount is not None:
+            query = query.filter(MiscellaneousExpense.amount <= to_amount)
+
         if driver_name:
             query = query.filter(Driver.full_name.ilike(f"%{driver_name}%"))
+
         if lease_id:
-            query = query.filter(Lease.lease_id.ilike(f"%{lease_id}%"))
+            lease_ids = [id.strip() for id in lease_id.split(',') if id.strip()]
+            if lease_ids:
+                query = query.filter(or_(*[Lease.lease_id.ilike(f"%{id}%") for id in lease_ids]))
+
         if vin:
-            query = query.filter(Vehicle.vin.ilike(f"%{vin}%"))
+            vins = [v.strip() for v in vin.split(',') if v.strip()]
+            if vins:
+                query = query.filter(or_(*[Vehicle.vin.ilike(f"%{v}%") for v in vins]))
+
         if plate_no:
-            # Assumes plate number is on the vehicle or a related table
-            from app.vehicles.models import VehicleRegistration
-            query = query.join(VehicleRegistration, Vehicle.id == VehicleRegistration.vehicle_id).filter(VehicleRegistration.plate_number.ilike(f"%{plate_no}%"))
+            plates = [p.strip() for p in plate_no.split(',') if p.strip()]
+            if plates:
+                # Join with VehicleRegistration if not already joined
+                query = query.join(
+                    VehicleRegistration,
+                    Vehicle.id == VehicleRegistration.vehicle_id,
+                    isouter=True
+                ).filter(or_(*[VehicleRegistration.plate_number.ilike(f"%{p}%") for p in plates]))
+
         if medallion_no:
-            query = query.filter(Medallion.medallion_number.ilike(f"%{medallion_no}%"))
+            medallion_nos = [m.strip() for m in medallion_no.split(',') if m.strip()]
+            if medallion_nos:
+                query = query.filter(or_(*[Medallion.medallion_number.ilike(f"%{m}%") for m in medallion_nos]))
+
+        if vehicle:
+            # Filter by vehicle make, model, or year (comma-separated)
+            vehicle_terms = [v.strip() for v in vehicle.split(',') if v.strip()]
+            if vehicle_terms:
+                vehicle_filters = []
+                for term in vehicle_terms:
+                    vehicle_filters.extend([
+                        Vehicle.make.ilike(f"%{term}%"),
+                        Vehicle.model.ilike(f"%{term}%"),
+                        Vehicle.year.ilike(f"%{term}%"),
+                    ])
+                query = query.filter(or_(*vehicle_filters))
 
         total_items = query.with_entities(func.count(MiscellaneousExpense.id)).scalar()
 
@@ -121,6 +178,8 @@ class MiscellaneousExpenseRepository:
             "driver": Driver.full_name,
             "lease_id": Lease.lease_id,
             "vin_no": Vehicle.vin,
+            "vehicle": Vehicle.make,  # Default vehicle sorting by make
+            "plate_no": VehicleRegistration.plate_number,
             "medallion_no": Medallion.medallion_number,
         }
         
@@ -132,4 +191,52 @@ class MiscellaneousExpenseRepository:
 
         query = query.offset((page - 1) * per_page).limit(per_page)
 
-        return query.all(), total_items
+        expenses = query.all()
+        
+        # Fetch documents for each expense
+        for expense in expenses:
+            # Get documents associated with this miscellaneous expense
+            documents = (
+                self.db.query(Document)
+                .filter(
+                    Document.object_type == "miscellaneous_expense",
+                    Document.object_lookup_id == str(expense.id)
+                )
+                .order_by(Document.created_on.desc())
+                .all()
+            )
+            
+            # Convert documents to dictionaries with presigned URLs
+            expense_documents = []
+            for doc in documents:
+                expense_documents.append({
+                    "document_id": doc.id,
+                    "document_name": doc.document_name,
+                    "document_type": doc.document_type,
+                    "document_format": doc.document_format,
+                    "document_date": doc.document_date.strftime("%Y-%m-%d") if doc.document_date else None,
+                    "document_size": doc.document_actual_size,
+                    "document_note": doc.document_note,
+                    "presigned_url": doc.presigned_url,
+                    "object_type": doc.object_type,
+                    "created_on": doc.created_on.strftime("%Y-%m-%d %H:%M:%S") if doc.created_on else None,
+                })
+            
+            # Attach documents to the expense object as a custom attribute
+            expense._documents = expense_documents
+
+        return expenses, total_items
+    
+    def get_distinct_categories(self) -> List[str]:
+        """
+        Retrieves all distinct expense categories from the database.
+        Returns a sorted list of unique category names.
+        """
+        categories = (
+            self.db.query(MiscellaneousExpense.category)
+            .distinct()
+            .filter(MiscellaneousExpense.category.isnot(None))
+            .order_by(MiscellaneousExpense.category)
+            .all()
+        )
+        return [cat[0] for cat in categories if cat[0]]

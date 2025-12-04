@@ -60,9 +60,9 @@ class LedgerRepository:
         Fetches a single ledger posting by its reference_id.
         Raises PostingNotFoundError if not found.
         """
-        stmt = select(LedgerPosting).where(LedgerPosting.reference_id == reference_id)
+        stmt = select(LedgerPosting).where(LedgerPosting.reference_id == reference_id).order_by(LedgerPosting.created_on.desc())
         result = self.db.execute(stmt)
-        posting = result.scalar_one_or_none()
+        posting = result.scalars().first()
         if not posting:
             raise PostingNotFoundError(reference_id=reference_id)
         return posting
@@ -93,9 +93,9 @@ class LedgerRepository:
         Fetches a single LedgerBalance by its reference_id.
         Returns None if not found.
         """
-        stmt = select(LedgerBalance).where(LedgerBalance.reference_id == reference_id)
+        stmt = select(LedgerBalance).where(LedgerBalance.reference_id == reference_id).order_by(LedgerBalance.created_on.desc())
         result = self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     def get_balance_by_id(self, balance_id: str) -> LedgerBalance:
         """

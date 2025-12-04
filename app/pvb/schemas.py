@@ -4,7 +4,7 @@ from datetime import date, time, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.pvb.models import PVBViolationStatus , PVBSource
 
@@ -34,10 +34,12 @@ class PVBViolationResponse(BaseModel):
     penalty: Optional[Decimal] = None
     interest: Optional[Decimal] = None
     reduction: Optional[Decimal] = None
+    processing_fee: Optional[Decimal] = None
     amount: Optional[Decimal] = None
     failure_reason: Optional[str] = None
-
-
+    violation_code: Optional[str] = None
+    violation_country: Optional[str] = None
+    street_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -62,6 +64,41 @@ class PaginatedPVBViolationResponse(BaseModel):
     states : Optional[List[str]] = None
     types : Optional[List[str]] = None
 
+
+class PVBManualPostRequest(BaseModel):
+    """Request schema for manually posting PVB violations to the ledger."""
+    transaction_ids: List[int]
+    all_transactions: bool = False
+
+    @model_validator(mode='after')
+    def validate_transaction_ids(self):
+        if self.all_transactions and self.transaction_ids:
+            raise ValueError("Cannot provide both transaction_ids and all_transactions")
+        if not self.all_transactions and not self.transaction_ids:
+            raise ValueError("Either transaction_ids or all_transactions must be provided")
+
+        return self
+
+    class Config:
+        json_schema_extra = {
+            "examples": [
+                {"transaction_ids": [1, 2, 3]},
+                {"all_transactions": True}
+            ]
+        }
+
+class PVBReassignRequest(BaseModel):
+    """Request schema for reassigning PVB violations to different driver/lease."""
+    transaction_ids: List[int]
+    new_driver_id: int
+    new_lease_id: int
+    new_medallion_id: Optional[int] = None
+    new_vehicle_id: Optional[int] = None
+
+
+class PVBManualAssociateRequest(BaseModel):
+    """Request schema for retrying automatic association on failed violations."""
+    transaction_ids: Optional[List[int]] = None
 
 class PVBManualCreateRequest(BaseModel):
     """

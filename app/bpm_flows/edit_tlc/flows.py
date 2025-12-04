@@ -11,15 +11,19 @@ from app.audit_trail.services import audit_trail_service
 from app.bpm.services import bpm_service
 from app.bpm.step_info import step
 from app.leases.services import lease_service
+from app.leases.schemas import LeaseStatus
 from app.drivers.services import driver_service
 from app.vehicles.services import vehicle_service
 from app.medallions.services import medallion_service
 from app.tlc.services import TLCService
-from app.tlc.models import TLCViolation , TLCViolationType
+from app.tlc.models import TLCViolation , TLCViolationType , TLCDisposition
 from app.uploads.services import upload_service
 from app.utils.logger import get_logger
 from app.medallions.utils import format_medallion_response
 from app.bpm_flows.new_tlc.utils import format_tlc_violation
+from app.ledger.services import LedgerService
+from app.ledger.repository import LedgerRepository
+from app.ledger.models import PostingCategory , EntryType
 logger = get_logger(__name__)
 
 ENTITY_MAPPER = {
@@ -52,10 +56,10 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
             TLCViolationType.FN.value : "Failure to Comply with Notice",
             TLCViolationType.RF.value : "Reinspection Fee",
             TLCViolationType.EA.value : [
-                "Meter Mile Run",
+                "Air Bag Light",
                 "Defective Light",
                 "Dirty Cab",
-                "Air Bag Light",
+                "Meter Mile Run",
                 "Windshield"
             ]
         }
@@ -65,57 +69,12 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
                 db, case_no, ENTITY_MAPPER["TLC"], ENTITY_MAPPER["TLC_IDENTIFIER"], str(violation.id)
             )
           
-        driver_name = case_params.get("driver_name")
-        tlc_license_no = case_params.get("tlc_license_no")
-        medallion_no = case_params.get("medallion_no")
-        
-
-        if not any([medallion_no, tlc_license_no, driver_name]):
-            return {"search_results": [] , "tlc_violation": violation_data  , "violation_types": violation_tyeps}
 
         driver = None
-        active_leases = []
-        
-        # Search by TLC License Number
-        if tlc_license_no:
-            driver = driver_service.get_drivers(db, tlc_license_number=tlc_license_no)
-            if driver:
-                active_leases = lease_service.get_lease(
-                    db, 
-                    driver_id=driver.driver_id, 
-                    status="Active", 
-                    exclude_additional_drivers=True, 
-                    multiple=True
-                )
-
-        
-        # Search by Medallion Number
-        elif medallion_no:
-            active_leases = lease_service.get_lease(
-                db, 
-                medallion_number=medallion_no, 
-                status="Active", 
-                multiple=True
-            )
-            if active_leases and active_leases[0]:
-                # Get primary driver from first lease
-                first_lease = active_leases[0][0] if isinstance(active_leases[0], list) else active_leases[0]
-                for lease_driver in first_lease.lease_driver:
-                    if not lease_driver.is_additional_driver:
-                        driver = lease_driver.driver
-                        break
-        
-        # Search by Vehicle Plate Number
-        elif driver_name:
-            driver = driver_service.get_drivers(db, driver_name=driver_name)
-            if driver:
-                active_leases = lease_service.get_lease(
-                    db, 
-                    driver_id=driver.driver_id, 
-                    status="Active", 
-                    exclude_additional_drivers=True, 
-                    multiple=True
-                )
+        active_lease = None        
+        if violation:
+            driver = driver_service.get_drivers(db, id=violation.driver_id)
+            active_lease = lease_service.get_lease(db,lookup_id=violation.lease_id, status= LeaseStatus.ACTIVE.value)
 
         if not driver:
             logger.info("No driver found for TLC case", case_no=case_no)
@@ -126,16 +85,8 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
                 "violation_types": violation_tyeps
             }
         
-        if active_leases and active_leases[0]:
-            if isinstance(active_leases[0], list):
-                lease_list = active_leases[0]
-            else:
-                lease_list = [active_leases[0]]
-        else:
-            lease_list = []
-        
-        if not lease_list:
-            logger.warning("No active leases found for driver", driver_id=driver.id)
+        if not active_lease:
+            logger.warning("No active lease found for driver", driver_id=driver.id)
             return {
                 "driver": {
                     "id": driver.id,
@@ -146,32 +97,50 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
                     "phone": driver.phone_number_1 or "N/A",
                     "email": driver.email_address or "N/A",
                 },
-                "leases": [],
+                "lease": {},
                 "tlc_violation": violation_data,
                 "violation_types": violation_tyeps
             }
         
         # Format lease data for UI
-        formatted_leases = []
-        for lease in lease_list:
-            driver_lease = lease_service.get_lease_drivers(db=db , lease_id=lease.id , driver_id=driver.driver_id , is_additional_driver=False)
 
-            if not driver_lease:
-                continue
-            
-            medallion_owner = format_medallion_response(lease.medallion).get("medallion_owner" , "N/A") if lease.medallion else "N/A"
-            formatted_leases.append({
-                "id": lease.id,
-                "lease_id": lease.lease_id,
-                "medallion_number": lease.medallion.medallion_number if lease.medallion else "N/A",
-                "medallion_owner": medallion_owner,
-                "plate_no": lease.vehicle.registrations[0].plate_number if lease.vehicle and lease.vehicle.registrations else "N/A",
-                "vin": lease.vehicle.vin if lease.vehicle else "N/A",
-                "vehicle_id": lease.vehicle_id if lease.vehicle_id else None,
-                "medallion_id": lease.medallion_id if lease.medallion_id else None,
-            })
+        medallion_owner = format_medallion_response(active_lease.medallion).get("medallion_owner") if active_lease.medallion else None
+
+        lease_confis = active_lease.lease_configuration
+        lease_amount = 0
+
+        if lease_confis:
+            config = config = next(
+                (c for c in lease_confis if c.lease_breakup_type == "lease_amount"),
+                None
+            )
+            if config and config.lease_limit:
+                lease_amount = float(config.lease_limit)
+
+        format_data = {}
+        format_data["lease"] = {
+                "id": active_lease.id,
+                "lease_id": active_lease.lease_id,
+                "lease_type": active_lease.lease_type if active_lease.lease_type else "N/A",
+                "status": active_lease.lease_status if active_lease.lease_status else "N/A",
+                "start_date": active_lease.lease_start_date if active_lease.lease_start_date else "N/A",
+                "end_date": active_lease.lease_end_date if active_lease.lease_end_date else "N/A",
+                "amount": f"{lease_amount:,.2f}",
+            }
+        format_data["medallion"]= {
+            "medallion_id": active_lease.medallion_id if active_lease.medallion_id else None,
+            "medallion_number": active_lease.medallion.medallion_number if active_lease.medallion else "N/A",
+            "medallion_owner": medallion_owner,
+        }
+
+        format_data["vehicle"] = {
+            "vehicle_id": active_lease.vehicle_id if active_lease.vehicle_id else None,
+            "plate_no": active_lease.vehicle.registrations[0].plate_number if active_lease.vehicle and active_lease.vehicle.registrations else "N/A",
+            "vin": active_lease.vehicle.vin if active_lease.vehicle else "N/A",
+            "vehicle": " ".join(filter(None , [active_lease.vehicle.make, active_lease.vehicle.model, active_lease.vehicle.year]))
+        }
         
-        driver_data = {
+        format_data["driver"] = {
             "id": driver.id,
             "driver_id": driver.driver_id,
             "full_name": driver.full_name,
@@ -191,8 +160,7 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
         logger.info("Successfully fetched driver and lease details for TLC case", case_no=case_no, driver_id=driver.id)
         
         return {
-            "driver": driver_data,
-            "leases": formatted_leases,
+            "data": format_data,
             "tlc_ticket": tlc_ticket,
             "tlc_violation": violation_data,
             "violation_types": violation_tyeps
@@ -216,6 +184,16 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
      """
      try:
         logger.info("Processing driver selection for PVB case", case_no=case_no)
+
+        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["TLC"])
+
+        tlc_service = TLCService(db)
+
+        violation = None
+
+        if case_entity:
+            violation = db.query(TLCViolation).filter_by(id=int(case_entity.identifier_value)).first()
+
         
         # Validate required fields
         driver_id = step_data.get("driver_id" , None)
@@ -250,6 +228,9 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
         if not lease:
             raise HTTPException(status_code=404, detail="Active lease not found")
         
+        if lease.id !=violation.lease_id:
+            raise HTTPException(status_code=400, detail="Lease does not belong to the selected violation")
+    
         # Verify driver is the primary driver on the lease
         is_primary_driver = False
         for lease_driver in lease.lease_driver:
@@ -279,17 +260,48 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
         if medallion.id != lease.medallion_id:
             raise HTTPException(status_code=400, detail="Medallion does not belong to the selected lease")
         
-        case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["TLC"])
 
-        tlc_service = TLCService(db)
+        if violation:
+            ledger_repo = LedgerRepository(db)
+            ledger_service = LedgerService(ledger_repo)
 
-        if case_entity:
-            violation = db.query(TLCViolation).filter_by(id=int(case_entity.identifier_value)).first()
+            new_disposition = step_data.get("disposition")
+            old_disposition = violation.disposition
 
-            violation.driver_id = driver.id
-            violation.lease_id = lease.id
-            violation.vehicle_id = vehicle.id
-            violation.medallion_id = medallion.id
+            if old_disposition == TLCDisposition.REDUCED.value and new_disposition == TLCDisposition.PAID.value:
+                raise ValueError("TLC disposition cannot be changed from reduced to paid")
+
+            if (
+                old_disposition == TLCDisposition.DISMISSED.value
+                and new_disposition in [TLCDisposition.PAID.value, TLCDisposition.REDUCED.value]
+            ):
+                raise ValueError("TLC disposition cannot be changed from dismissed to paid or reduced")
+            
+
+            if step_data.get("disposition") == TLCDisposition.REDUCED.value:
+                amount = violation.driver_payable - step_data.get("driver_payable")
+                ledger_posting = ledger_service.create_obligation(
+                    category=PostingCategory.TLC,
+                    entry_type= EntryType.CREDIT if amount > 0 else EntryType.DEBIT,
+                    amount= abs(amount) ,
+                    reference_id= step_data.get("summons_number" , violation.summons_no),
+                    driver_id=violation.driver_id,
+                    lease_id=violation.lease_id,
+                    medallion_id=violation.medallion_id,
+                    vehicle_id=violation.vehicle_id
+                )
+            elif step_data.get("disposition") == TLCDisposition.DISMISSED.value:
+                ledger_posting = ledger_service.create_obligation(
+                    category=PostingCategory.TLC,
+                    entry_type= EntryType.CREDIT,
+                    amount= violation.driver_payable or 0 ,
+                    reference_id= step_data.get("summons_number" , violation.summons_no),
+                    driver_id=violation.driver_id,
+                    lease_id=violation.lease_id,
+                    medallion_id=violation.medallion_id,
+                    vehicle_id=violation.vehicle_id
+                )
+
             violation.summons_no = step_data.get("summons_number")
             violation.issue_date = step_data.get("issue_date")
             violation.issue_time = datetime.now().time()
@@ -298,6 +310,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
             violation.description = step_data.get("description")
             violation.amount = Decimal(step_data.get("penalty_amount"))
             violation.total_payable = Decimal(step_data.get("penalty_amount"))
+            violation.driver_payable = Decimal(step_data.get("driver_payable"))
             violation.disposition = step_data.get("disposition")
             violation.due_date = step_data.get("due_date")
             violation.note = step_data.get("note")
@@ -318,6 +331,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
                 "violation_type": step_data.get("ticket_type"),
                 "description": step_data.get("description"),
                 "amount": Decimal(step_data.get("penalty_amount")),
+                "driver_payable": Decimal(step_data.get("driver_payable")),
                 "disposition": step_data.get("disposition"),
                 "due_date": step_data.get("due_date"),
                 "note": step_data.get("note")

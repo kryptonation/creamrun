@@ -463,10 +463,12 @@ class EZPassService:
         Used to force posting of ASSOCIATED transactions.
         """
         from app.ledger.services import LedgerService
+        from app.ledger.repository import LedgerRepository
 
         logger.info("Manual posting of transactions to ledger", transactions_count=len(transaction_ids))
 
-        ledger_service = LedgerService(self.db)
+        ledger_repo = LedgerRepository(self.db)
+        ledger_service = LedgerService(ledger_repo)
         success_count = 0
         failed_count = 0
         errors = []
@@ -579,7 +581,7 @@ class EZPassService:
         lease_drivers = new_lease.lease_driver
         is_primary_driver = False
         for ld in lease_drivers:
-            if ld.driver_id == new_driver_id and ld.is_additional_driver:
+            if ld.driver_id == new_driver.driver_id and not ld.is_additional_driver:
                 is_primary_driver = True
                 break
 

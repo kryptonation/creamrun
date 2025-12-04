@@ -26,6 +26,7 @@ class TLCViolationListResponse(BaseModel):
     penalty_amount: Optional[Decimal] = 0
     service_fee : Optional[Decimal] = 0
     total_payable : Optional[Decimal] = 0
+    driver_payable : Optional[Decimal] = 0
     disposition : Optional[TLCDisposition] = None
     note : Optional[str] = None
     

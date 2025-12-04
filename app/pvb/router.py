@@ -15,6 +15,9 @@ from app.core.dependencies import get_db_with_current_user
 from app.pvb.exceptions import PVBError
 from app.pvb.schemas import (
     PaginatedPVBViolationResponse,
+    PVBManualAssociateRequest,
+    PVBManualPostRequest,
+    PVBReassignRequest,
     PVBViolationResponse,
 )
 from app.pvb.services import PVBService
@@ -68,8 +71,8 @@ def list_pvb_violations(
     use_stubs: bool = Query(False, description="Return stubbed data for testing."),
     page: int = Query(1, ge=1, description="Page number for pagination."),
     per_page: int = Query(10, ge=1, le=100, description="Items per page."),
-    sort_by: Optional[str] = Query("issue_date", description="Field to sort by."),
-    sort_order: str = Query("desc", enum=["asc", "desc"]),
+    sort_by: Optional[str] = Query(None, description="Field to sort by."),
+    sort_order: Optional[str] = Query(None , description="Sort order (asc or desc)."),
     plate: Optional[str] = Query(None, description="Filter by Plate Number."),
     state: Optional[str] = Query(None, description="Filter by State."),
     type: Optional[str] = Query(None, description="Filter by violation Type."),
@@ -90,6 +93,8 @@ def list_pvb_violations(
     to_interest: Optional[float] = Query(None, description="Filter by Interest (to)."),
     from_reduction: Optional[float] = Query(None, description="Filter by Reduction (from)."),
     to_reduction: Optional[float] = Query(None, description="Filter by Reduction (to)."),
+    from_processing_fee: Optional[float] = Query(None, description="Filter by Processing Fee (from)."),
+    to_processing_fee: Optional[float] = Query(None, description="Filter by Processing Fee (to)."),
     failure_reason: Optional[str] = Query(None, description="Filter by Failure Reason."),
     lease_id: Optional[str] = Query(None, description="Filter by associated Lease ID."),
     vin: Optional[str] = Query(None, description="Filter by associated Vehicle VIN."),
@@ -97,6 +102,9 @@ def list_pvb_violations(
     medallion_no: Optional[str] = Query(None, description="Filter by associated Medallion No."),
     status: Optional[str] = Query(None, description="Filter by Status."),
     source: Optional[str] = Query(None, description="Filter by Source."),
+    violation_code = Query(None, description="Filter by Violation Code."),
+    violation_country = Query(None, description="Filter by Violation Country."),
+    street_name = Query(None, description="Filter by Street Name."),
     pvb_service: PVBService = Depends(get_pvb_service),
     current_user: User = Depends(get_current_user),
 ):
@@ -133,13 +141,18 @@ def list_pvb_violations(
             to_interest=to_interest,
             from_reduction=from_reduction,
             to_reduction=to_reduction,
+            from_processing_fee=from_processing_fee,
+            to_processing_fee=to_processing_fee,
             failure_reason=failure_reason,
             lease_id=lease_id,
             vin=vin,
             driver_id=driver_id,
             medallion_no=medallion_no,
             status=status,
-            source=source
+            source=source,
+            violation_code = violation_code,
+            violation_country = violation_country,
+            street_name = street_name
         )
 
         response_items = [
@@ -162,7 +175,11 @@ def list_pvb_violations(
                 penalty=v.penalty,
                 interest=v.interest,
                 reduction=v.reduction,
+                processing_fee=v.processing_fee,
                 failure_reason=v.failure_reason,
+                violation_code= v.violation_code,
+                violation_country= v.violation_country,
+                street_name = v.street_name
             ) for v in violations
         ]
         
@@ -207,6 +224,8 @@ def export_pvb_violations(
     to_interest: Optional[float] = Query(None),
     from_reduction: Optional[float] = Query(None),
     to_reduction: Optional[float] = Query(None),
+    from_processing_fee: Optional[float] = Query(None),
+    to_processing_fee: Optional[float] = Query(None),
     failure_reason: Optional[str] = Query(None),
     lease_id: Optional[str] = Query(None),
     vin: Optional[str] = Query(None),
@@ -232,6 +251,7 @@ def export_pvb_violations(
             from_penalty=from_penalty, to_penalty=to_penalty,
             from_interest=from_interest, to_interest=to_interest,
             from_reduction=from_reduction, to_reduction=to_reduction,
+            from_processing_fee=from_processing_fee, to_processing_fee=to_processing_fee,
             failure_reason=failure_reason, lease_id=lease_id,
             vin=vin, driver_id=driver_id, medallion_no=medallion_no,
             status=status, source=source
@@ -259,7 +279,11 @@ def export_pvb_violations(
                 penalty=v.penalty,
                 interest=v.interest,
                 reduction=v.reduction,
+                processing_fee=v.processing_fee,
                 failure_reason=v.failure_reason,
+                violation_code= v.violation_code,
+                violation_country= v.violation_country,
+                street_name = v.street_name
             ).model_dump(exclude={"id"}) for v in violations
         ]
         
@@ -288,6 +312,137 @@ def export_pvb_violations(
             detail="An error occurred during the export process.",
         ) from e    
 
+
+@router.post("/post-to-batm", summary="Manually post violations to ledger", status_code=fast_status.HTTP_200_OK)
+def manual_post_to_batm(
+    request: PVBManualPostRequest,
+    pvb_service: PVBService = Depends(get_pvb_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Manually post PVB violations to the centralized ledger.
+    Used to force posting of ASSOCIATED violations without waiting for the automatic Celery task.
+
+    This endpoint allows staff to:
+    - Immediately post ASSOCIATED violations to ledger
+    - Retry failed postings (POSTING_FAILED status)
+    - Process specific violations urgently
+
+    **Restrictions:**
+    - Only ASSOCIATED status violations can be posted
+    - Cannot re-post violations already POSTED_TO_LEDGER
+    - Requires valid driver_id, lease_id, and positive amount
+
+    **Process:**
+    1. Validates violation is ASSOCIATED
+    2. Creates DEBIT obligation in centralized ledger (category: PVB)
+    3. Updates violation status to POSTED_TO_LEDGER
+    4. Sets posting_date to current timestamp
+    """
+    try:
+        if request.transaction_ids and request.all_transactions:
+            raise ValueError("Cannot specify both transaction_ids and all_transactions")
+        
+        if not request.transaction_ids and not request.all_transactions:
+            raise ValueError("Must specify either transaction_ids or all_transactions")
+
+        result = pvb_service.manual_post_to_ledger(
+            transaction_ids=request.transaction_ids , all_transactions=request.all_transactions
+        )
+        return JSONResponse(content=result, status_code=fast_status.HTTP_200_OK)
+    except PVBError as e:
+        logger.warning("Business logic error during PVB manual posting: %s", e)
+        raise HTTPException(status_code=fast_status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.error("Error during PVB manual posting: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during manual posting.") from e
+
+
+@router.post("/reassign", summary="Reassign PVB violations to different driver", status_code=fast_status.HTTP_200_OK)
+def reassign_pvb_transactions(
+    request: PVBReassignRequest,
+    pvb_service: PVBService = Depends(get_pvb_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Reassign PVB violations from one driver/lease to another.
+    Used to correct incorrect associations or handle driver changes.
+
+    This endpoint allows staff to:
+    - Move violations between valid lease primary drivers
+    - Correct misattributed summons
+    - Handle mid-lease driver changes
+
+    **Restrictions:**
+    - Cannot reassign violations already POSTED_TO_LEDGER
+    - New lease must be an active lease
+    - New lease must belong to the specified new driver (valid primary driver)
+    - Both new driver and new lease must exist in the system
+
+    **Process:**
+    1. Validates new driver and new lease exist
+    2. Verifies new lease belongs to new driver
+    3. Updates violation with new associations
+    4. Sets status to ASSOCIATED
+    5. Clears any previous failure_reason
+    """
+    try:
+        result = pvb_service.reassign_transactions(
+            transaction_ids=request.transaction_ids,
+            new_driver_id=request.new_driver_id,
+            new_lease_id=request.new_lease_id,
+            new_medallion_id=request.new_medallion_id,
+            new_vehicle_id=request.new_vehicle_id,
+        )
+        return JSONResponse(content=result, status_code=fast_status.HTTP_200_OK)
+    except PVBError as e:
+        logger.warning("Business logic error during PVB reassignment: %s", e)
+        raise HTTPException(status_code=fast_status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.error("Error during PVB reassignment: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during reassignment.") from e
+
+
+@router.post("/associate-with-batm", summary="Retry failed associations", status_code=fast_status.HTTP_200_OK)
+def retry_association_with_batm(
+    request: PVBManualAssociateRequest,
+    pvb_service: PVBService = Depends(get_pvb_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retry automatic association logic for failed or specific PVB violations.
+
+    This endpoint does NOT manually assign to a driver - it retries the same
+    automatic association logic (plate → vehicle → CURB trip → driver/lease).
+
+    **Use Cases:**
+    - Retry all ASSOCIATION_FAILED violations (send empty request)
+    - Retry specific violations that failed (provide transaction_ids)
+    - Re-run association after CURB data updates
+
+    **Request Body:**
+    - transaction_ids: Optional list of violation IDs to retry
+    - If null/empty: Retries ALL violations with ASSOCIATION_FAILED status
+
+    **Association Logic:**
+    1. Extract plate number from violation data
+    2. Find Vehicle via plate registration
+    3. Find CURB trip on that vehicle ±2 hours of violation time
+    4. If found: Associate with driver/lease/medallion from CURB trip
+    5. Update status to ASSOCIATED or ASSOCIATION_FAILED
+    """
+    try:
+        result = pvb_service.retry_failed_associations(
+            transaction_ids=request.transaction_ids
+        )
+        return JSONResponse(content=result, status_code=fast_status.HTTP_200_OK)
+    except PVBError as e:
+        logger.warning("Business logic error during PVB association retry: %s", e)
+        raise HTTPException(status_code=fast_status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.error("Error during PVB association retry: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during association retry.") from e
+
 @router.get("/{pvb_id}" , summary="Get PVB Violation Details")
 def get_pvb_violation(
     pvb_id: int,
@@ -304,35 +459,53 @@ def get_pvb_violation(
         if not pvb:
             raise HTTPException(status_code=404, detail="PVB violation not found.")
         
-        pvb_response = PVBViolationResponse(
-                id=pvb.id,
-                plate=pvb.plate,
-                state=pvb.state,
-                type=pvb.type,
-                summons=pvb.summons,
-                source=pvb.source,    
-                issue_datetime = datetime.combine(pvb.issue_date, pvb.issue_time) if pvb.issue_time and pvb.issue_date else None,
-                vin= pvb.vehicle.vin if pvb.vehicle else None,
-                lease_id=pvb.lease.lease_id if pvb.lease else None,
-                medallion_no=pvb.medallion.medallion_number if pvb.medallion else None,
-                driver_id=pvb.driver.driver_id if pvb.driver else None,
-                posting_date=pvb.posting_date,
-                status=pvb.status,
-                amount=pvb.amount_due,
-                fine=pvb.fine,
-                penalty=pvb.penalty,
-                interest=pvb.interest,
-                reduction=pvb.reduction,
-                failure_reason=pvb.failure_reason,
-            )
+        pvb_response = {
+                "id":pvb.id,
+                "plate":pvb.plate,
+                "state":pvb.state,
+                "type":pvb.type,
+                "summons":pvb.summons,
+                "source":pvb.source,    
+                "issue_datetime": datetime.combine(pvb.issue_date, pvb.issue_time) if pvb.issue_time and pvb.issue_date else None,
+                "vin": pvb.vehicle.vin if pvb.vehicle else None,
+                "lease_id":pvb.lease.lease_id if pvb.lease else None,
+                "medallion_no":pvb.medallion.medallion_number if pvb.medallion else None,
+                "driver_id":pvb.driver.driver_id if pvb.driver else None,
+                "posting_date":pvb.posting_date,
+                "status":pvb.status,
+                "amount":pvb.amount_due,
+                "fine":pvb.fine,
+                "penalty":pvb.penalty,
+                "interest":pvb.interest,
+                "reduction":pvb.reduction,
+                "processing_fee":pvb.processing_fee,
+                "failure_reason":pvb.failure_reason,
+                "violation_code": pvb.violation_code,
+                "violation_country": pvb.violation_country,
+                "street_name": pvb.street_name,
+                "is_terminated":pvb.is_terminated,
+                "non_program":pvb.non_program,
+                "system_entry_date":pvb.system_entry_date,
+                "new_issue":pvb.new_issue,
+                "hearing_ind":pvb.hearing_ind,
+                "penalty_warning":pvb.penalty_warning,
+                "front_or_opp":pvb.front_or_opp,
+                "house_number":pvb.house_number,
+                "intersect_street":pvb.intersect_street,
+                "geo_location":pvb.geo_location,
+                "street_code_1":pvb.street_code_1,
+                "street_code_2":pvb.street_code_2,
+                "street_code_3":pvb.street_code_3,
+                "driver_payment_amount":pvb.driver_payment_amount,
+                "judgement":pvb.judgement,
+                "ng_pmt":pvb.ng_pmt,
+                "payment":pvb.payment,
+                "document":upload_service.get_documents(
+                    db=db , object_id=pvb.id , object_type="pvb" , document_type="pvb_invoice"
+                )
+        }
         
-        response = pvb_response.model_dump()
-
-        response["pvb_document"] = upload_service.get_documents(
-            db=db , object_id=pvb.id , object_type="pvb" , document_type="pvb_invoice"
-        )
-
-        return response
+        return pvb_response
     except Exception as e:
         logger.error("Error fetching PVB violation: %s", e, exc_info=True)
         raise e

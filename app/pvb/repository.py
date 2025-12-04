@@ -83,6 +83,10 @@ class PVBRepository:
     def get_violation_by_summons(self, summons: str) -> Optional[PVBViolation]:
         """Fetches a single violation by its unique summons number."""
         return self.db.query(PVBViolation).filter(PVBViolation.summons == summons).first()
+    
+    def get_violation_by_id(self, violation_id: int) -> Optional[PVBViolation]:
+        """Retrieves a single violation record by its ID."""
+        return self.db.query(PVBViolation).filter(PVBViolation.id == violation_id).first()
 
     def get_violations_by_status(
         self, status: PVBViolationStatus
@@ -108,8 +112,8 @@ class PVBRepository:
         self,
         page: int,
         per_page: int,
-        sort_by: str,
-        sort_order: str,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
         plate: Optional[str] = None,
         state: Optional[str] = None,
         type: Optional[str] = None,
@@ -130,6 +134,8 @@ class PVBRepository:
         to_interest: Optional[float] = None,
         from_reduction: Optional[float] = None,
         to_reduction: Optional[float] = None,
+        from_processing_fee: Optional[float] = None,
+        to_processing_fee: Optional[float] = None,
         failure_reason: Optional[str] = None,
         lease_id: Optional[str] = None,
         vin: Optional[str] = None,
@@ -137,6 +143,9 @@ class PVBRepository:
         medallion_no: Optional[str] = None,
         status: Optional[str] = None,
         source: Optional[str] = None,
+        violation_code: Optional[str] = None,
+        violation_country: Optional[str] = None,
+        street_name: Optional[str] = None
     ) -> Tuple[List[PVBViolation], int]:
         """
         Retrieves a paginated, sorted, and filtered list of PVB violations.
@@ -220,6 +229,12 @@ class PVBRepository:
         if to_reduction:
             query = query.filter(PVBViolation.reduction <= to_reduction)
 
+        if from_processing_fee:
+            query = query.filter(PVBViolation.processing_fee >= from_processing_fee)
+
+        if to_processing_fee:
+            query = query.filter(PVBViolation.processing_fee <= to_processing_fee)
+
         if failure_reason:
             query = apply_multi_filter(query, PVBViolation.failure_reason, failure_reason)
 
@@ -243,6 +258,15 @@ class PVBRepository:
             sources = [s.strip() for s in source.split(',') if s.strip()]
             query = query.filter(PVBViolation.source.in_(sources))
 
+        if violation_code:
+            query = apply_multi_filter(query, PVBViolation.violation_code, violation_code)
+
+        if violation_country:
+            query = apply_multi_filter(query, PVBViolation.violation_country, violation_country)
+
+        if street_name:
+            query = apply_multi_filter(query, PVBViolation.street_name, street_name)
+
 
         total_items = query.with_entities(func.count(PVBViolation.id)).scalar()
 
@@ -263,16 +287,25 @@ class PVBRepository:
             "penalty": PVBViolation.penalty,
             "interest": PVBViolation.interest,
             "reduction": PVBViolation.reduction,
+            "processing_fee": PVBViolation.processing_fee,
             "failure_reason": PVBViolation.failure_reason,
             "posting_date": PVBViolation.posting_date,
             "source": PVBViolation.source,
+            "violation_code": PVBViolation.violation_code,
+            "violation_country": PVBViolation.violation_country,
+            "street_name": PVBViolation.street_name,
         }
         
-        sort_column = sort_column_map.get(sort_by, PVBViolation.issue_date)
-        if sort_order.lower() == "desc":
-            query = query.order_by(sort_column.desc())
+        if sort_by and sort_order:
+            sort_column = sort_column_map.get(sort_by, PVBViolation.issue_date)
+            if sort_order.lower() == "desc":
+                query = query.order_by(sort_column.desc())
+            else:
+                query = query.order_by(sort_column.asc())
         else:
-            query = query.order_by(sort_column.asc())
+            query = query.order_by(PVBViolation.updated_on.desc() , PVBViolation.created_on.desc())
+
+        # Apply pagination
 
         query = query.offset((page - 1) * per_page).limit(per_page)
 

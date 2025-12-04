@@ -63,6 +63,7 @@ class TLCViolation(Base, AuditMixin):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), comment="Base ticket amount.")
     service_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     total_payable: Mapped[Decimal] = mapped_column(Numeric(10, 2), comment="Calculated as Amount + Service Fee.")
+    driver_payable: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     disposition: Mapped[TLCDisposition] = mapped_column(Enum(TLCDisposition), default=TLCDisposition.PAID)
     due_date: Mapped[date] = mapped_column(Date)
     note: Mapped[Optional[str]] = mapped_column(Text)

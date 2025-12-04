@@ -31,6 +31,7 @@ from app.seeder.bat.parse_drivers import parse_drivers
 from app.seeder.bat.parse_leases import parse_lease
 from app.seeder.bat.parse_lease_driver import parse_lease_driver
 from app.seeder.bat.parse_vehicle_entity import parse_vehicle_entity
+from app.seeder.bat.parse_vehicle_expenses import parse_vehicle_expenses_and_compliance
 
 logger = get_logger(__name__)
 
@@ -50,6 +51,7 @@ SHEET_PARSERS = {
     "vehicle_hackups": parse_vehicle_hackup_information,
     "vehicle_registration": parse_vehicle_registration_information,
     "vehicle_inspections": parse_vehicle_inspection_information,
+    "vehicle_expenses": parse_vehicle_expenses_and_compliance,
     "leases": parse_lease,
     "lease_driver": parse_lease_driver,
     # "mo_lease": parse_mo_lease,

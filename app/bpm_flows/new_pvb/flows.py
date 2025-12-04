@@ -271,6 +271,10 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
         
         # Check if case entity already exists
         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
+
+        fine = Decimal(step_data.get("fine" , 0))
+        processing_fee = fine * Decimal("0.025")
+        amount_due = fine + processing_fee
         
         pvb_service = PVBService(db)
         
@@ -288,11 +292,32 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 violation.summons = step_data.get("summons" , None)
                 violation.issue_date = step_data.get("issue_date" , None)
                 violation.issue_time = step_data.get("issue_time" , None)
-                violation.fine = Decimal(step_data.get("fine" , None))
-                violation.penalty = Decimal(step_data.get("penalty" , None))
-                violation.interest = Decimal(step_data.get("interest" , None))
-                violation.reduction = Decimal(step_data.get("reduction" , None))
-                violation.amount_due = Decimal(step_data.get("amount_due" , None))
+                violation.fine = fine
+                violation.penalty = Decimal(step_data.get("penalty" , 0))
+                violation.interest = Decimal(step_data.get("interest" , 0))
+                violation.reduction = Decimal(step_data.get("reduction" , 0))
+                violation.amount_due = amount_due
+                violation.violation_code = step_data.get("violation_code" , None)
+                violation.violation_country = step_data.get("violation_country" , None)
+                violation.street_name = step_data.get("street_name" , None)
+                violation.processing_fee = processing_fee
+                violation.front_or_opp = step_data.get("front_or_opp" , None)
+                violation.house_number = step_data.get("house_number" , None)
+                violation.intersect_street = step_data.get("intersect_street" , None)
+                violation.geo_location = step_data.get("geo_location" , None)
+                violation.street_code_1 = step_data.get("street_code_1" , None)
+                violation.street_code_2 = step_data.get("street_code_2" , None)
+                violation.street_code_3 = step_data.get("street_code_3" , None)
+                violation.non_program = step_data.get("non_program" , False)
+                violation.payment = Decimal(step_data.get("payment" , 0))
+                violation.ng_pmt = step_data.get("ng_pmt")
+                violation.judgement = step_data.get("judgement")
+                violation.system_entry_date = step_data.get("system_entry_date" , None)
+                violation.new_issue = step_data.get("new_issue" , False)
+                violation.hearing_ind = step_data.get("hearing" , None)
+                violation.penalty_warning = step_data.get("penalty_warning" , None)
+
+
                 db.flush()
                 logger.info("Updated existing PVB violation record", violation_id=violation.id)
         else:
@@ -302,18 +327,38 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 "vehicle_id": vehicle_id,
                 "medallion_id": medallion_id,
                 "lease_id": lease.id,
-                "status": PVBViolationStatus.IMPORTED,
+                "status": PVBViolationStatus.ASSOCIATED.value,
                 "plate": vehicle_plate_no.split("-")[0] if "-" in vehicle_plate_no else vehicle_plate_no,
                 "state": step_data.get("state" , None),
                 "type": step_data.get("type" , None),
                 "summons": step_data.get("summons" , None),
                 "issue_time": step_data.get("issue_time" , None),
                 "issue_date": step_data.get("issue_date" , None),
-                "fine": Decimal(step_data.get("fine" , None)),
-                "penalty": Decimal(step_data.get("penalty" , None)),
-                "interest": Decimal(step_data.get("interest" , None)),
-                "reduction": Decimal(step_data.get("reduction" , None)),
-                "amount_due": Decimal(step_data.get("amount_due" , None)),
+                "fine": fine,
+                "processing_fee": processing_fee,
+                "penalty": Decimal(step_data.get("penalty" ,0)),
+                "interest": Decimal(step_data.get("interest" , 0)),
+                "reduction": Decimal(step_data.get("reduction" , 0)),
+                "amount_due": amount_due,
+                "violation_code": step_data.get("violation_code" , None),
+                "violation_country": step_data.get("violation_country" , None),
+                "street_name": step_data.get("street_name" , None),
+                "front_or_opp": step_data.get("front_or_opp" , None),
+                "house_number": step_data.get("house_number" , None),
+                "intersect_street": step_data.get("intersect_street" , None),
+                "geo_location": step_data.get("geo_location" , None),
+                "street_code_1": step_data.get("street_code_1" , None),
+                "street_code_2": step_data.get("street_code_2" , None),
+                "street_code_3": step_data.get("street_code_3" , None),
+                "non_program": step_data.get("non_program" , False),
+                "payment": Decimal(step_data.get("payment" , 0)),
+                "ng_pmt": step_data.get("ng_pmt" ),
+                "judgement": step_data.get("judgement" , False),
+                "system_entry_date": step_data.get("system_entry_date" , None),
+                "new_issue": step_data.get("new_issue" , False),
+                "hearing_ind": step_data.get("hearing" , None),
+                "penalty_warning": step_data.get("penalty_warning" , None),
+
             }
             
             violation = pvb_service.create_manual_violation(case_no, initial_data, 1)

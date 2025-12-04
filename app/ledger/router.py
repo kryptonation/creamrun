@@ -23,8 +23,7 @@ from app.ledger.stubs import (
 )
 from app.users.models import User
 from app.users.utils import get_current_user
-from app.utils.exporter.excel_exporter import ExcelExporter
-from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.exporter_utils import ExporterFactory
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -188,8 +187,7 @@ def void_ledger_posting(
 @router.get("/export", summary="Export Ledger Data")
 def export_ledger_data(
     export_type: str = Query("postings", enum=["postings", "balances"]),
-    format: str = Query("excel", enum=["excel", "pdf"]),
-    # Pass through all filters from the list endpoints to the service layer
+    export_format: str = Query("excel", enum=["excel", "pdf"], alias="format"),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query("desc"),
     driver_name: Optional[str] = Query(None),
@@ -203,9 +201,10 @@ def export_ledger_data(
     medallion_no: Optional[str] = Query(None),
     db_session=Depends(get_db_with_current_user),
     ledger_service: LedgerService = Depends(),
+    _current_user: User = Depends(get_current_user),
 ):
     """
-    Exports ledger postings or balances to the specified format without pagination.
+    Exports filtered ledger data to the specified format (Excel or PDF).
     """
     try:
         data = []
@@ -214,56 +213,48 @@ def export_ledger_data(
         if export_type == "postings":
             filename_prefix = "ledger_postings"
             postings, _ = ledger_service.list_postings(
-                include_all=True, # Bypass pagination
+                include_all=True,
                 sort_by=sort_by, sort_order=sort_order,
                 start_date=start_date, end_date=end_date, status=status,
                 category=category, entry_type=entry_type, driver_name=driver_name,
                 lease_id=lease_id, vehicle_vin=vehicle_vin, medallion_no=medallion_no
             )
             data = postings
-        else: # balances
+        else:  # balances
             filename_prefix = "ledger_balances"
             balances, _ = ledger_service.list_balances(
-                include_all=True, # Bypass pagination
+                include_all=True,
                 sort_by=sort_by, sort_order=sort_order, driver_name=driver_name,
                 lease_id=lease_id, status=status, category=category
             )
             data = balances
 
         if not data:
-            raise HTTPException(
-                status_code=404,
-                detail="No data available for export with the given filters.",
-            )
+            raise ValueError("No ledger data available for export with the given filters.")
 
-        # Convert Pydantic models to a list of dictionaries for the exporter
         export_data = [item.model_dump() for item in data]
         
-        filename = f"{filename_prefix}_{date.today()}.{'xlsx' if format == 'excel' else format}"
-        file_content: BytesIO
-        media_type: str
+        filename = f"{filename_prefix}_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
-        if format == "excel":
-            exporter = ExcelExporter(export_data)
-            file_content = exporter.export()
-            media_type = (
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        elif format == "pdf":
-            exporter = PDFExporter(export_data)
-            file_content = exporter.export()
-            media_type = "application/pdf"
-        else:
-            raise HTTPException(status_code=400, detail="Invalid format specified.")
+        exporter = ExporterFactory.get_exporter(export_format, export_data)
+        file_content = exporter.export()
+
+        media_types = {
+            "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pdf": "application/pdf"
+        }
+        media_type = media_types.get(export_format, "application/octet-stream")
 
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
-        return StreamingResponse(
-            file_content, media_type=media_type, headers=headers
-        )
+        return StreamingResponse(file_content, media_type=media_type, headers=headers)
+
+    except LedgerError as e:
+        logger.warning("Business logic error during ledger export: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     except Exception as e:
         logger.error("Error exporting ledger data: %s", e, exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,
             detail="An error occurred during the export process.",
         ) from e

@@ -50,6 +50,7 @@ class LedgerService:
         amount: Decimal,
         reference_id: str,
         driver_id: int,
+        entry_type: EntryType = EntryType.DEBIT,
         lease_id: Optional[int] = None,
         vehicle_id: Optional[int] = None,
         medallion_id: Optional[int] = None,
@@ -65,7 +66,7 @@ class LedgerService:
             posting = LedgerPosting(
                 category=category,
                 amount=amount,
-                entry_type=EntryType.DEBIT,
+                entry_type=entry_type,
                 status=PostingStatus.POSTED,
                 reference_id=reference_id,
                 driver_id=driver_id,
@@ -75,18 +76,32 @@ class LedgerService:
             )
             self.repo.create_posting(posting)
 
-            balance = LedgerBalance(
-                category=category,
-                reference_id=reference_id,
-                original_amount=amount,
-                balance=amount,
-                status=BalanceStatus.OPEN,
-                driver_id=driver_id,
-                lease_id=lease_id,
-                vehicle_id=vehicle_id,
-                medallion_id=medallion_id,
-            )
-            new_balance = self.repo.create_balance(balance)
+            balance_ledger = self.repo.get_balance_by_reference_id(reference_id)
+            
+            if balance_ledger:
+                amount = Decimal(str(amount))  # MUST convert before arithmetic
+                balance = balance_ledger.balance  # already Decimal
+
+                new_balance = (balance - amount) if entry_type == EntryType.CREDIT.value else (balance + amount)
+
+                new_balance = self.repo.update_balance(
+                    balance_ledger,
+                    new_balance,
+                    BalanceStatus.OPEN
+                )
+            else:
+                balance = LedgerBalance(
+                    category=category,
+                    reference_id=reference_id,
+                    original_amount=amount,
+                    balance=amount,
+                    status=BalanceStatus.OPEN,
+                    driver_id=driver_id,
+                    lease_id=lease_id,
+                    vehicle_id=vehicle_id,
+                    medallion_id=medallion_id,
+                )
+                new_balance = self.repo.create_balance(balance)
 
             self.repo.db.commit()
             logger.info(

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     Date,
     Time,
+    Boolean
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -114,7 +115,26 @@ class PVBViolation(Base, AuditMixin):
     penalty: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=0)
     interest: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=0)
     reduction: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=0)
+    processing_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=0)
     amount_due: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    driver_payment_amount : Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2) , default=0)
+
+    is_terminated: Mapped[bool] = mapped_column(Boolean, default=False)
+    non_program : Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
+    system_entry_date: Mapped[Optional[date]] = mapped_column(Date , nullable=True)
+    new_issue: Mapped[bool] = mapped_column(Boolean, default=False)
+    hearing_ind: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    penalty_warning: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    judgement: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
+    payment : Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), default=0)
+    ng_pmt: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
+    front_or_opp: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    house_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    intersect_street: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    geo_location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    street_code_1: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    street_code_2: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    street_code_3: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # --- Processing and Association Fields ---
     status: Mapped[PVBViolationStatus] = mapped_column(
@@ -122,6 +142,9 @@ class PVBViolation(Base, AuditMixin):
     )
     failure_reason: Mapped[Optional[str]] = mapped_column(Text)
     posting_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    violation_code : Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    violation_country : Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    street_name : Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # --- Mapped Foreign Keys ---
     driver_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("drivers.id"), index=True)

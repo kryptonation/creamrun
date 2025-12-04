@@ -16,13 +16,6 @@ def format_tlc_violation(db: Session, tlc_violation: TLCViolation):
     def iso(value):
         return value.isoformat() if value else None
 
-    # Fetch attached documents
-    tlc_ticket = upload_service.get_documents(
-        db=db,
-        object_type="tlc",
-        object_id=tlc_violation.id,
-        document_type="tlc_ticket"
-    )
 
     return {
         "id": tlc_violation.id,
@@ -42,6 +35,7 @@ def format_tlc_violation(db: Session, tlc_violation: TLCViolation):
         "amount": float(tlc_violation.amount) if tlc_violation.amount is not None else None,
         "service_fee": float(tlc_violation.service_fee) if tlc_violation.service_fee is not None else None,
         "total_payable": float(tlc_violation.total_payable) if tlc_violation.total_payable is not None else None,
+        "driver_payable": float(tlc_violation.driver_payable) if tlc_violation.driver_payable is not None else None,
 
         "disposition": getattr(tlc_violation.disposition, "value", None),
         "note": tlc_violation.note,
@@ -56,8 +50,5 @@ def format_tlc_violation(db: Session, tlc_violation: TLCViolation):
         "plate": tlc_violation.plate,
         "state": tlc_violation.state,
         "attachment_document_id": tlc_violation.attachment_document_id,
-        "status": getattr(tlc_violation.status, "value", None),
-
-        # Document attachment
-        "tlc_ticket": tlc_ticket,
+        "status": getattr(tlc_violation.status, "value", None)
     }

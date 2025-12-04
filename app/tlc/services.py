@@ -63,6 +63,7 @@ class TLCService:
                 amount=Decimal(violation_data["amount"]),
                 service_fee=Decimal(violation_data.get("service_fee", 0)),
                 total_payable=total_payable,
+                driver_payable=Decimal(violation_data["driver_payable"]),
                 disposition=TLCDisposition(violation_data.get("disposition", "Paid")),
                 driver_id=violation_data["driver_id"],
                 lease_id=violation_data["lease_id"],
@@ -83,7 +84,7 @@ class TLCService:
             )
 
             # Immediately post to ledger if disposition is 'Paid' or 'Reduced'
-            if created_violation.disposition in [TLCDisposition.PAID, TLCDisposition.REDUCED] and created_violation.total_payable > 0:
+            if created_violation.disposition == TLCDisposition.PAID and created_violation.total_payable > 0:
                 self.post_to_ledger(created_violation)
 
             self.db.commit()

@@ -410,3 +410,23 @@ def get_random_routing_number(db: Session) -> str:
             status_code=500,
             detail=f"Failed to fetch routing numbers: {str(e)}"
         )
+    
+def clean_value(value: str, is_bool=False):
+    """
+    Cleans CSV values:
+    - For booleans: empty -> False
+    - For strings: empty -> None
+    """
+    if value is None:
+        return False if is_bool else None
+
+    v = str(value).strip()
+
+    if is_bool:
+        # empty/blank -> False
+        if v == "":
+            return False
+        return v.lower() in ("true", "1", "y", "yes")
+
+    # String field
+    return v or None

@@ -55,8 +55,8 @@ class TLCRepository:
         self,
         page: int,
         per_page: int,
-        sort_by: str,
-        sort_order: str,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
         plate: Optional[str] = None,
         state: Optional[str] = None,
         type: Optional[str] = None,
@@ -73,6 +73,8 @@ class TLCRepository:
         to_service_fee: Optional[float] = None,
         from_total_payable: Optional[float] = None,
         to_total_payable: Optional[float] = None,
+        from_driver_payable: Optional[float] = None,
+        to_driver_payable: Optional[float] = None,
         disposition: Optional[str] = None,
         status: Optional[str] = None,
         description: Optional[str] = None,
@@ -159,6 +161,12 @@ class TLCRepository:
         
         if to_total_payable:
             query = query.filter(TLCViolation.total_payable <= to_total_payable)
+
+        if from_driver_payable:
+            query = query.filter(TLCViolation.driver_payable >= from_driver_payable)
+
+        if to_driver_payable:
+            query = query.filter(TLCViolation.driver_payable <= to_driver_payable)
         
         if disposition:
             dps = [d.strip() for d in disposition.split(",") if d.strip()]
@@ -214,6 +222,7 @@ class TLCRepository:
             "penalty_amount": TLCViolation.amount,
             "service_fee": TLCViolation.service_fee,
             "total_payable": TLCViolation.total_payable,
+            "driver_payable": TLCViolation.driver_payable,
             "disposition": TLCViolation.disposition,
             "status": TLCViolation.status,
             "driver_name": Driver.full_name,
@@ -223,11 +232,16 @@ class TLCRepository:
             "note": TLCViolation.note,
         }
         
-        sort_column = sort_column_map.get(sort_by, TLCViolation.issue_date)
-        if sort_order.lower() == "desc":
-            query = query.order_by(sort_column.desc())
+        if sort_by and sort_order:
+            sort_column = sort_column_map.get(sort_by, TLCViolation.issue_date)
+            if sort_order.lower() == "desc":
+                query = query.order_by(sort_column.desc())
+            else:
+                query = query.order_by(sort_column.asc())
         else:
-            query = query.order_by(sort_column.asc())
+            query = query.order_by(TLCViolation.updated_on.desc() , TLCViolation.created_on.desc())
+
+        # Apply pagination
 
         query = query.offset((page - 1) * per_page).limit(per_page)
 

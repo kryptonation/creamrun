@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.bpm_flows.additionaldriver import additionaldriver_esign_utils
 from app.bpm_flows.driverlease import driverlease_esign_utils
+from app.core.config import settings
 from app.core.db import get_db
 from app.esign import utils
 from app.esign.models import ESignEnvelope
@@ -156,6 +157,24 @@ async def docusign_webhooks(
             status_code=202,
         )
 
+    fields = (
+        payload.get("data")
+        .get("envelopeSummary")
+        .get("customFields")
+        .get("textCustomFields")
+    )
+    for f in fields:
+        if (f.get("name") or "").lower() == "env":
+            val = f.get("value")
+            if val != settings.environment:
+                logger.info("Not the env that should pick the task")
+                return JSONResponse(
+                    {
+                        "status": "ignored",
+                        "reason": "Not the env that should pick the task",
+                    },
+                    status_code=202,
+                )
     ctx = utils.extract_ctx(headers, payload)
 
     # Look up handler

@@ -162,10 +162,10 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
             TLCViolationType.FN.value : "Failure to Comply with Notice",
             TLCViolationType.RF.value : "Reinspection Fee",
             TLCViolationType.EA.value : [
-                "Meter Mile Run",
+                "Air Bag Light",
                 "Defective Light",
                 "Dirty Cab",
-                "Air Bag Light",
+                "Meter Mile Run",
                 "Windshield"
             ]
         }
@@ -284,6 +284,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
             violation.description = step_data.get("description")
             violation.amount = Decimal(step_data.get("penalty_amount"))
             violation.total_payable = Decimal(step_data.get("penalty_amount"))
+            violation.driver_payable = Decimal(step_data.get("driver_payable"))
             violation.disposition = step_data.get("disposition")
             violation.due_date = step_data.get("due_date")
             violation.note = step_data.get("note")
@@ -305,6 +306,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
                 "violation_type": step_data.get("ticket_type"),
                 "description": step_data.get("description"),
                 "amount": Decimal(step_data.get("penalty_amount")),
+                "driver_payable": Decimal(step_data.get("driver_payable")),
                 "disposition": step_data.get("disposition"),
                 "due_date": step_data.get("due_date"),
                 "note": step_data.get("note"),

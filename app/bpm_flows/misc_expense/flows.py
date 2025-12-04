@@ -28,10 +28,10 @@ ENTITY_MAPPER = {
 def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, case_params: Dict[str, Any] = None):
     """
     Fetches driver and associated active lease information to initiate a miscellaneous expense entry.
-    
+
     This step allows searching for a driver by TLC License, Medallion Number, or VIN/Plate Number.
     It returns the driver's profile and all their currently active leases.
-    
+
     Args:
         db: Database session
         case_no: BPM case number
@@ -39,25 +39,41 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             - tlc_license_no: Driver's TLC License number
             - medallion_no: Medallion number associated with driver's lease
             - vin_or_plate: VIN or Plate number of the leased vehicle
-    
+
     Returns:
         Dict containing driver information and list of active leases
-    
+
     Raises:
         HTTPException: If driver not found or driver has no active leases
     """
     try:
+        documents = upload_service.get_documents(db, object_type="misc_expense", object_id=case_no)
+        if not documents:
+            documents = {
+                "document_id": "",
+                "document_name": "",
+                "document_note": "",
+                "document_path": "",
+                "document_type": "misc_expense",
+                "document_date": "",
+                "document_object_type": "misc_expense",
+                "document_object_id": case_no,
+                "document_size": "",
+                "document_uploaded_date": "",
+                "presigned_url": "",
+            }
+
         if not case_params:
-            return {"driver": None, "leases": []}
-        
+            return {"driver": None, "leases": [], "documents": documents}
+
         tlc_license_no = case_params.get("tlc_license_no")
         medallion_no = case_params.get("medallion_no")
         vin_or_plate = case_params.get("vin_or_plate")
-        
+
         # Validate at least one search parameter is provided
         if not any([tlc_license_no, medallion_no, vin_or_plate]):
-            return {"driver": None, "leases": []}
-        
+            return {"driver": None, "leases": [], "documents": documents}
+
         logger.info(
             "Searching for driver for Miscellaneous Expense",
             case_no=case_no,
@@ -65,7 +81,7 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             medallion=medallion_no,
             vin_or_plate=vin_or_plate
         )
-        
+
         # Find the driver using provided search criteria
         driver = driver_service.get_drivers(
             db,
@@ -73,13 +89,13 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             medallion_number=medallion_no,
             vin=vin_or_plate,
         )
-        
+
         if not driver:
             raise HTTPException(
                 status_code=404,
                 detail="No matching active driver found for the provided search criteria."
             )
-        
+
         # Fetch all active leases for the driver
         leases_tuple = lease_service.get_lease(
             db,
@@ -88,13 +104,13 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             multiple=True
         )
         active_leases = leases_tuple[0] if leases_tuple else []
-        
+
         if not active_leases:
             raise HTTPException(
                 status_code=404,
                 detail="Driver does not have an active lease. Cannot create miscellaneous expense."
             )
-        
+
         # Format lease data for UI display
         formatted_leases = []
         for lease in active_leases:
@@ -115,7 +131,7 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
                         weekly_amount = f"${float(lease_config.lease_limit):.2f}/week"
                     else:
                         weekly_amount = "Not Configured"
-                        
+
             except Exception as e:
                 logger.error(
                     "Error fetching lease amount",
@@ -124,8 +140,8 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
                     exc_info=True
                 )
                 weekly_amount = "Error Loading"
-            
-            
+
+
             formatted_leases.append({
                 "lease_id_pk": lease.id,
                 "lease_id": lease.lease_id,
@@ -147,7 +163,7 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
                 "lease_status": lease.lease_status,
                 "weekly_lease": weekly_amount,
             })
-        
+
         # Format driver data for UI display
         driver_data = {
             "id": driver.id,
@@ -166,19 +182,20 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             "phone": driver.phone_number_1 or "N/A",
             "email": driver.email_address or "N/A",
         }
-        
+
         logger.info(
             "Successfully fetched driver and lease details for Miscellaneous Expense",
             case_no=case_no,
             driver_id=driver.id,
             active_leases_count=len(formatted_leases)
         )
-        
+
         return {
             "driver": driver_data,
             "leases": formatted_leases,
+            "documents": documents
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -192,8 +209,7 @@ def search_driver_and_enter_expense_details_fetch(db: Session, case_no: str, cas
             status_code=500,
             detail=f"An error occurred while fetching driver details: {str(e)}"
         ) from e
-
-
+    
 @step(step_id="308", name="Process - Create Miscellaneous Expense", operation="process")
 def create_miscellaneous_expense_process(db: Session, case_no: str, step_data: Dict[str, Any]):
     """

@@ -21,7 +21,7 @@ FAKE_REFERENCE_IDS = [
     "TLC-VIOL-2025-001", "MISC-2025-00001", "LSE-2025-002-WK43"
 ]
 FAKE_AMOUNTS = [50.00, 75.00, 100.00, 125.00, 150.00, 200.00, 250.00, 300.00, 500.00]
-FAKE_PAYMENT_METHODS = [PaymentMethod.CASH, PaymentMethod.CHECK, PaymentMethod.ACH]
+FAKE_PAYMENT_METHODS = [PaymentMethod.CASH, PaymentMethod.CHECK, PaymentMethod.DRIVER_CREDIT]
 
 def _generate_random_payment_date(days_ago_max=30) -> datetime:
     """Generates a random payment date within the last `days_ago_max` days."""

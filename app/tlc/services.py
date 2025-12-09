@@ -19,6 +19,7 @@ from app.tlc.models import TLCDisposition, TLCViolation, TLCViolationStatus, TLC
 from app.tlc.repository import TLCRepository
 from app.tlc.exceptions import TLCLedgerPostingError
 from app.utils.logger import get_logger
+from app.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,7 @@ class TLCService:
                 raise TLCValidationError(f"A violation with summons number '{summons}' already exists.")
 
             # Calculate total payable
-            total_payable = Decimal(violation_data.get("amount", 0)) + Decimal(violation_data.get("service_fee", 0))
+            total_payable = Decimal(violation_data.get("amount", 0)) + Decimal(violation_data.get("service_fee", settings.tlc_service_fee))
 
             new_violation = TLCViolation(
                 case_no=case_no,
@@ -61,9 +62,9 @@ class TLCService:
                 issue_time=violation_data.get("issue_time"),
                 description=violation_data.get("description"),
                 amount=Decimal(violation_data["amount"]),
-                service_fee=Decimal(violation_data.get("service_fee", 0)),
+                service_fee=Decimal(violation_data.get("service_fee", settings.tlc_service_fee)),
                 total_payable=total_payable,
-                driver_payable=Decimal(violation_data["driver_payable"]),
+                driver_payable=total_payable,
                 disposition=TLCDisposition(violation_data.get("disposition", "Paid")),
                 driver_id=violation_data["driver_id"],
                 lease_id=violation_data["lease_id"],

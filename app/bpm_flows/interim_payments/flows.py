@@ -480,6 +480,7 @@ def fetch_outstanding_balances(db: Session, case_no: str, case_params: Optional[
             "lease": lease_details,
             "total_outstanding": round(total_outstanding, 2),
             "obligations": formatted_balances,
+            "payment_amount": interim_payment.total_amount
         }
         
     except HTTPException:

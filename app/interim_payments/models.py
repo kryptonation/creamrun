@@ -24,7 +24,7 @@ class PaymentMethod(str, PyEnum):
     """Enumeration for the payment method used."""
     CASH = "Cash"
     CHECK = "Check"
-    ACH = "ACH"
+    DRIVER_CREDIT = "driver_credit"
 
 
 class InterimPayment(Base, AuditMixin):

@@ -131,7 +131,7 @@ def list_ezpass_transactions(
                 entry_plaza=t.entry_plaza,
                 exit_plaza=t.exit_plaza,
                 ezpass_class=t.ezpass_class,
-                medallion_no=t.medallion.medallion_number if t.medallion else None,
+                medallion_no=t.medallion.medallion_number if t.medallion else (t.vehicle.medallions.medallion_number if t.vehicle and t.vehicle.medallions else ""),
                 vin=t.vehicle.vin if t.vehicle else None,
                 driver_id=t.driver.driver_id if t.driver else None,
                 tag_or_plate=t.tag_or_plate,
@@ -140,6 +140,7 @@ def list_ezpass_transactions(
                 amount=t.amount,
                 failure_reason=t.failure_reason,
                 agency=t.agency,
+                created_on=t.created_on
             )
             for t in transactions
         ]
@@ -214,23 +215,27 @@ def export_ezpass_transactions(
         if not transactions:
             raise ValueError("No EZPass data available for export with the given filters.")
 
+        
         export_data = [
             EZPassTransactionResponse(
+                posting_date=t.posting_date,
+                tag_or_plate=t.tag_or_plate,
+                created_on=t.created_on,
+                entry_lane="",
+                exit_lane="",  
                 transaction_id=t.transaction_id,
+                entry_plaza=t.entry_plaza,
+                exit_plaza=t.exit_plaza,   
                 transaction_date=t.transaction_datetime,
                 transaction_time=t.transaction_datetime.time(),
-                entry_plaza=t.entry_plaza,
-                exit_plaza=t.exit_plaza,
+                amount=t.amount,     
+                agency=t.agency,
                 ezpass_class=t.ezpass_class,
                 vin=t.vehicle.vin if t.vehicle else None,
-                medallion_no=t.medallion.medallion_number if t.medallion else None,
+                medallion_no=t.medallion.medallion_number if t.medallion else (t.vehicle.medallions.medallion_number if t.vehicle and t.vehicle.medallions else "N/A"),
                 driver_id=t.driver.driver_id if t.driver else None,
-                tag_or_plate=t.tag_or_plate,
-                posting_date=t.posting_date,
-                status=t.status,
-                amount=t.amount,
-                failure_reason=t.failure_reason,
-                agency=t.agency,
+                status=t.status, 
+                failure_reason=t.failure_reason,    
             ).model_dump(exclude={"id"})
             for t in transactions
         ]

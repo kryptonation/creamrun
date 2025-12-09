@@ -24,6 +24,9 @@ from app.bpm_flows.new_tlc.utils import format_tlc_violation
 from app.ledger.services import LedgerService
 from app.ledger.repository import LedgerRepository
 from app.ledger.models import PostingCategory , EntryType
+from app.core.config import settings
+
+
 logger = get_logger(__name__)
 
 ENTITY_MAPPER = {
@@ -155,15 +158,24 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
             object_type="tlc",
             object_id=violation.id,
             document_type="tlc_ticket"
-        )    
+        )
+
+        other_tlc = upload_service.get_documents(
+            db=db,
+            object_type="tlc",
+            object_id=violation.id,
+            document_type="other_tlc"
+        )   
         
         logger.info("Successfully fetched driver and lease details for TLC case", case_no=case_no, driver_id=driver.id)
         
         return {
             "data": format_data,
             "tlc_ticket": tlc_ticket,
+            "other_tlc": other_tlc,
             "tlc_violation": violation_data,
-            "violation_types": violation_tyeps
+            "violation_types": violation_tyeps,
+            "service_fee": settings.tlc_service_fee
         }
         
     except Exception as e:
@@ -277,9 +289,11 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
             ):
                 raise ValueError("TLC disposition cannot be changed from dismissed to paid or reduced")
             
+            total_payble = Decimal(step_data.get("driver_payable"))
+
 
             if step_data.get("disposition") == TLCDisposition.REDUCED.value:
-                amount = violation.driver_payable - step_data.get("driver_payable")
+                amount = violation.driver_payable - Decimal(step_data.get("driver_payable"))
                 ledger_posting = ledger_service.create_obligation(
                     category=PostingCategory.TLC,
                     entry_type= EntryType.CREDIT if amount > 0 else EntryType.DEBIT,
@@ -291,16 +305,19 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
                     vehicle_id=violation.vehicle_id
                 )
             elif step_data.get("disposition") == TLCDisposition.DISMISSED.value:
+                amount = abs(violation.driver_payable - settings.tlc_service_fee)
+                total_payble = 0
                 ledger_posting = ledger_service.create_obligation(
                     category=PostingCategory.TLC,
-                    entry_type= EntryType.CREDIT,
-                    amount= violation.driver_payable or 0 ,
+                    entry_type= EntryType.CREDIT if amount > 0 else EntryType.DEBIT,
+                    amount= amount,
                     reference_id= step_data.get("summons_number" , violation.summons_no),
                     driver_id=violation.driver_id,
                     lease_id=violation.lease_id,
                     medallion_id=violation.medallion_id,
                     vehicle_id=violation.vehicle_id
                 )
+                
 
             violation.summons_no = step_data.get("summons_number")
             violation.issue_date = step_data.get("issue_date")
@@ -309,8 +326,10 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
             violation.violation_type = step_data.get("ticket_type")
             violation.description = step_data.get("description")
             violation.amount = Decimal(step_data.get("penalty_amount"))
-            violation.total_payable = Decimal(step_data.get("penalty_amount"))
-            violation.driver_payable = Decimal(step_data.get("driver_payable"))
+            violation.service_fee = settings.tlc_service_fee
+            violation.total_payable = Decimal(step_data.get("penalty_amount") + settings.tlc_service_fee)
+            violation.driver_payable = total_payble
+            violation.reduced_tlc_amount = step_data.get("reduced_by")
             violation.disposition = step_data.get("disposition")
             violation.due_date = step_data.get("due_date")
             violation.note = step_data.get("note")

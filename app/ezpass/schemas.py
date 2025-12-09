@@ -31,6 +31,7 @@ class EZPassTransactionResponse(BaseModel):
     # Extra fields for detailed view or potential future columns
     failure_reason: Optional[str] = None
     agency: Optional[str] = None
+    created_on: Optional[datetime] = None
     
     class Config:
         from_attributes = True

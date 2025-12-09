@@ -29,8 +29,8 @@ enable_utc = True
 
 # Task settings
 task_track_started = True
-task_time_limit = 30 * 60  # 30 minutes
-task_soft_time_limit = 25 * 60  # 25 minutes
+task_time_limit = 30 * 60 * 6  # 180 minutes
+task_soft_time_limit = 25 * 60 * 6  # 150 minutes
 worker_prefetch_multiplier = 1
 task_acks_late = True
 worker_disable_rate_limits = False
@@ -76,7 +76,7 @@ result_backend_transport_options = {
 beat_schedule = {
     # --- CURB Fetch, Upload to S3, and Process Pipeline (Every 2 Minutes) ---
     "curb-fetch-upload-and-process": {
-        "task": "curb.fetch_and_process_chained",
+        "task": "curb.full_sync_chain",
         "schedule": 10800,  # Runs every 3 hours (10800 seconds)
         "options": {"timezone": "America/New_York"},
     },

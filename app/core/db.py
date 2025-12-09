@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 engine = create_engine(settings.db_url)
 
 # --- Create sessionmaker ---
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, db_echo=True)
 
 # --- Create declarative base ---
 Base = declarative_base()

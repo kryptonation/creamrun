@@ -19,6 +19,7 @@ from app.tlc.models import TLCViolation , TLCViolationType
 from app.uploads.services import upload_service
 from app.utils.logger import get_logger
 from app.medallions.utils import format_medallion_response
+from app.core.config import settings
 
 
 logger = get_logger(__name__)
@@ -174,7 +175,8 @@ def choose_driver_fetch(db: Session, case_no: str, case_params: dict = None):
             "driver": driver_data,
             "leases": formatted_leases,
             "tlc_ticket": tlc_ticket,
-            "violation_types": violation_tyeps
+            "violation_types": violation_tyeps,
+            "service_fee": settings.tlc_service_fee
         }
         
     except Exception as e:
@@ -271,6 +273,8 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
 
         if case_entity:
             violation = db.query(TLCViolation).filter_by(id=int(case_entity.identifier_value)).first()
+            if not violation:
+                raise HTTPException(status_code=404, detail="TLC violation not found")
 
             violation.driver_id = driver.id
             violation.lease_id = lease.id
@@ -283,8 +287,9 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
             violation.violation_type = step_data.get("ticket_type")
             violation.description = step_data.get("description")
             violation.amount = Decimal(step_data.get("penalty_amount"))
-            violation.total_payable = Decimal(step_data.get("penalty_amount"))
-            violation.driver_payable = Decimal(step_data.get("driver_payable"))
+            violation.service_fee = settings.tlc_inspection_fees
+            violation.total_payable = Decimal(step_data.get("penalty_amount"))+Decimal(settings.tlc_inspection_fees)
+            violation.driver_payable = Decimal(step_data.get("penalty_amount"))+Decimal(settings.tlc_inspection_fees)
             violation.disposition = step_data.get("disposition")
             violation.due_date = step_data.get("due_date")
             violation.note = step_data.get("note")
@@ -306,7 +311,6 @@ def choose_driver_process(db: Session, case_no: str, step_data: dict):
                 "violation_type": step_data.get("ticket_type"),
                 "description": step_data.get("description"),
                 "amount": Decimal(step_data.get("penalty_amount")),
-                "driver_payable": Decimal(step_data.get("driver_payable")),
                 "disposition": step_data.get("disposition"),
                 "due_date": step_data.get("due_date"),
                 "note": step_data.get("note"),

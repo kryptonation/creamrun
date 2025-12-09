@@ -11,7 +11,7 @@ import aiohttp
 import jwt
 from fastapi import HTTPException, status
 
-from app.core.config import settings
+from app.core.config import get_docusign_private_key_s3_key, settings
 from app.esign.schemas import Signer
 from app.utils.logger import get_logger
 from app.utils.s3_utils import s3_utils
@@ -41,24 +41,55 @@ class DocusignClient:
         with open(path, "rb") as f:
             return f.read()
 
+    def normalize_pem_continuous(self, raw: str) -> str:
+        """
+        Convert a continuous PEM string into a properly formatted PEM block.
+        """
+        if not raw:
+            raise ValueError("PEM string is empty")
+
+        raw = raw.strip()
+
+        # Extract parts using markers
+        begin = "-----BEGIN RSA PRIVATE KEY-----"
+        end = "-----END RSA PRIVATE KEY-----"
+
+        if begin in raw and end in raw:
+            # strip markers and rebuild properly
+            body = raw.replace(begin, "").replace(end, "").strip()
+
+            # Re-split into 64-character lines per PEM spec
+            lines = [body[i : i + 64] for i in range(0, len(body), 64)]
+
+            normalized = f"{begin}\n" + "\n".join(lines) + f"\n{end}\n"
+            return normalized
+
+        raise ValueError("Invalid PEM format: markers not found")
+
     async def _get_access_token(self) -> str:
         """
         Generates a JWT and exchanges it for a DocuSign access token.
         It securely fetches the private key from S3.
         """
         try:
-            # Requirement #5: Get private key from S3 or localhost
-            if settings.docusign_pem_path:
-                logger.info("Loading private key from local path")
-                private_key_bytes = self._load_pem(settings.docusign_pem_path)
+            # If the Client Secret is configured, the key would be picked from the vault
+            if settings.aws_credentials_secret_id:
+                logger.info("Loading private key from secrets vault")
+                private_key = get_docusign_private_key_s3_key()
+                private_key = self.normalize_pem_continuous(private_key)
             else:
-                logger.info("Loading private key from S3 path")
-                private_key_bytes = s3_utils.download_file(
-                    settings.docusign_private_key_s3_key
-                )
-            if not private_key_bytes:
-                raise ValueError("Could not retrieve DocuSign private key from S3.")
-            private_key = private_key_bytes.decode("utf-8")
+                # Requirement #5: Get private key from S3 or localhost
+                if settings.docusign_pem_path:
+                    logger.info("Loading private key from local path")
+                    private_key_bytes = self._load_pem(settings.docusign_pem_path)
+                elif settings.docusign_private_key_s3_key:
+                    logger.info("Loading private key from S3 path")
+                    private_key_bytes = s3_utils.download_file(
+                        settings.docusign_private_key_s3_key
+                    )
+                if not private_key_bytes:
+                    raise ValueError("Could not retrieve DocuSign private key from S3.")
+                private_key = private_key_bytes.decode("utf-8")
 
             jwt_payload = {
                 "iss": settings.docusign_client_id,

@@ -3,8 +3,10 @@
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.dialects.mysql import insert
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from app.curb.models import CurbTrip, CurbTripStatus
 from app.curb.schemas import PaymentType
@@ -47,8 +49,8 @@ class CurbRepository:
 
     def bulk_insert_or_update(self, trips_data: List[dict]) -> Tuple[int, int]:
         """
-        Efficiently inserts new trips and updates existing ones in a single transaction.
-        Uses the curb_trip_id as the key for matching.
+        Efficiently inserts new trips and updates existing ones using MySQL's 
+        INSERT ... ON DUPLICATE KEY UPDATE to handle race conditions and concurrent writes.
 
         Args:
             trips_data: A list of dictionaries, where each dict represents a trip.
@@ -56,35 +58,148 @@ class CurbRepository:
         Returns:
             A tuple containing the count of (inserted_records, updated_records).
         """
+        if not trips_data:
+            return 0, 0
+
+        # Additional deduplication safety check within this batch
+        seen_ids = set()
+        deduplicated_data = []
+        for trip in trips_data:
+            trip_id = trip["curb_trip_id"]
+            if trip_id not in seen_ids:
+                deduplicated_data.append(trip)
+                seen_ids.add(trip_id)
+            else:
+                logger.warning(f"Duplicate trip ID in batch detected: {trip_id}")
+        
+        if len(deduplicated_data) != len(trips_data):
+            logger.warning(f"Removed {len(trips_data) - len(deduplicated_data)} duplicate entries from batch")
+            trips_data = deduplicated_data
+
+        try:
+            # Use MySQL's INSERT ... ON DUPLICATE KEY UPDATE for atomic upsert
+            stmt = insert(CurbTrip)
+            
+            # Get the actual columns that will be in the INSERT statement
+            # by using the first trip's keys
+            if not trips_data:
+                return 0, 0
+                
+            sample_trip = trips_data[0]
+            data_columns = set()
+            for trip in trips_data:
+                data_columns.update(trip.keys())
+            table_columns = set(CurbTrip.__table__.columns.keys())
+            
+            # Log the data structure for debugging
+            logger.debug(f"Sample trip keys: {sorted(data_columns)}")
+            logger.debug(f"Table columns: {sorted(table_columns)}")
+            
+            # Filter trips_data to only include columns that exist in the table
+            # This prevents issues with extra fields that don't match the schema
+            filtered_data = []
+            valid_columns = data_columns.intersection(table_columns)
+            
+            for trip in trips_data:
+                filtered_trip = {k: v for k, v in trip.items() if k in valid_columns}
+                # Ensure ALL valid columns are present with explicit None if missing
+                for col in valid_columns:
+                    if col not in filtered_trip:
+                        filtered_trip[col] = None
+                filtered_data.append(filtered_trip)
+            
+            # Update the data_columns to reflect only the valid columns
+            data_columns = valid_columns
+            
+            # Build the ON DUPLICATE KEY UPDATE clause only for columns that are:
+            # 1. Present in the filtered data being inserted
+            # 2. Exist in the database table 
+            # 3. Are not primary key or unique key fields
+            update_dict = {}
+            updateable_columns = []
+            for column in data_columns:
+                if column not in ['id', 'curb_trip_id']:  # Exclude primary/unique keys
+                    update_dict[column] = stmt.inserted[column]
+                    updateable_columns.append(column)
+            
+            # Validate that we have at least some columns to update
+            if not update_dict:
+                logger.warning("No updateable columns found, performing INSERT IGNORE instead")
+                # Fall back to INSERT IGNORE if no updateable columns
+                ignore_stmt = stmt.prefix_with("IGNORE")
+                result = self.db.execute(ignore_stmt, filtered_data)
+                return len(filtered_data), 0  # All considered inserts
+            
+            # Log the columns being updated for debugging
+            logger.debug(f"UPSERT filtered data columns: {sorted(data_columns)}")
+            logger.debug(f"UPSERT updateable columns: {sorted(updateable_columns)}")
+            
+            # Execute the upsert with ON DUPLICATE KEY UPDATE
+            upsert_stmt = stmt.on_duplicate_key_update(**update_dict)
+            result = self.db.execute(upsert_stmt, filtered_data)
+            
+            # Log successful upsert
+            logger.info(f"Successfully processed {len(filtered_data)} trip records with MySQL upsert")
+            
+            # Since we can't easily distinguish inserts from updates with ON DUPLICATE KEY UPDATE,
+            # we'll estimate based on MySQL rowcount behavior
+            if hasattr(result, 'rowcount') and result.rowcount > 0:
+                # MySQL rowcount behavior: 1 for insert, 2 for update, 0 for no change
+                if result.rowcount >= len(filtered_data):
+                    # Likely mostly updates
+                    estimated_updates = len(filtered_data)
+                    estimated_inserts = 0
+                else:
+                    # Mixed or mostly inserts
+                    estimated_inserts = len(filtered_data) // 2
+                    estimated_updates = len(filtered_data) - estimated_inserts
+            else:
+                # Fallback estimation
+                estimated_inserts = len(filtered_data) // 2
+                estimated_updates = len(filtered_data) - estimated_inserts
+            
+            return estimated_inserts, estimated_updates
+            
+        except (SQLAlchemyError, IntegrityError) as e:
+            logger.error(f"Bulk upsert failed, falling back to individual processing: {str(e)}")
+            # Rollback the failed transaction
+            self.db.rollback()
+            # Fallback to individual record processing for better error handling
+            return self._fallback_individual_processing(trips_data)
+
+    def _fallback_individual_processing(self, trips_data: List[dict]) -> Tuple[int, int]:
+        """
+        Fallback method to process trips individually when bulk operation fails.
+        """
         inserted_count = 0
         updated_count = 0
-
-        # Get all existing trip IDs from the database that are in the incoming batch
-        incoming_trip_ids = {trip["curb_trip_id"] for trip in trips_data}
-        existing_trips_query = self.db.query(CurbTrip).filter(
-            CurbTrip.curb_trip_id.in_(incoming_trip_ids)
-        )
-        existing_trips_map = {trip.curb_trip_id: trip for trip in existing_trips_query}
-
-        new_trips_to_add = []
+        
         for trip_data in trips_data:
             curb_trip_id = trip_data["curb_trip_id"]
-            existing_trip = existing_trips_map.get(curb_trip_id)
-
-            if existing_trip:
-                # Update existing record
-                for key, value in trip_data.items():
-                    setattr(existing_trip, key, value)
-                updated_count += 1
-            else:
-                # This is a new record, prepare for bulk insert
-                new_trips_to_add.append(CurbTrip(**trip_data))
-                inserted_count += 1
-
-        if new_trips_to_add:
-            self.db.add_all(new_trips_to_add)
-
-        # The session is flushed and committed by the service layer or db dependency
+            
+            try:
+                # Check if trip already exists
+                existing_trip = self.db.query(CurbTrip).filter(
+                    CurbTrip.curb_trip_id == curb_trip_id
+                ).first()
+                
+                if existing_trip:
+                    # Update existing record
+                    for key, value in trip_data.items():
+                        if hasattr(existing_trip, key):
+                            setattr(existing_trip, key, value)
+                    updated_count += 1
+                else:
+                    # Create new record
+                    new_trip = CurbTrip(**trip_data)
+                    self.db.add(new_trip)
+                    inserted_count += 1
+                    
+            except (SQLAlchemyError, IntegrityError) as e:
+                logger.error(f"Failed to process trip {curb_trip_id}: {str(e)}")
+                # Skip this record and continue
+                continue
+        
         return inserted_count, updated_count
 
     def get_unreconciled_trips(self) -> List[CurbTrip]:
@@ -209,7 +324,7 @@ class CurbRepository:
             )
 
         # Determine total items before pagination
-        total_items = query.with_entities(func.count(CurbTrip.id)).scalar()
+        total_items = query.count()
 
         # Apply sorting
         sort_column_map = {

@@ -68,6 +68,7 @@ class WeeklyBalanceRow(BaseModel):
     tlc_license: Optional[str] = Field(None, description="Driver TLC license")
     medallion_number: str = Field(..., description="Medallion number")
     plate_number: str = Field(..., description="Vehicle plate number")
+    vin_number: Optional[str] = Field(None, description="Vehicle VIN number")
     
     # Status fields
     lease_status: LeaseStatusEnum = Field(..., description="Lease status")
@@ -125,12 +126,27 @@ class WeekPeriod(BaseModel):
 
 
 class CurrentBalancesFilter(BaseModel):
-    """Filters for current balances query"""
-    search: Optional[str] = Field(None, description="Search by lease ID, driver name, TLC license, medallion, or plate")
+    """Enhanced filters for current balances query with individual column search and sorting"""
+    # General search (existing)
+    search: Optional[str] = Field(None, description="General search by lease ID, driver name, TLC license, medallion, or plate")
+    
+    # Individual column searches
+    lease_id_search: Optional[str] = Field(None, description="Search by lease ID (comma-separated for multiple values)")
+    driver_name_search: Optional[str] = Field(None, description="Search by driver name (comma-separated for multiple values)")
+    tlc_license_search: Optional[str] = Field(None, description="Search by TLC license (comma-separated for multiple values)")
+    medallion_search: Optional[str] = Field(None, description="Search by medallion number (comma-separated for multiple values)")
+    plate_search: Optional[str] = Field(None, description="Search by plate number (comma-separated for multiple values)")
+    vin_search: Optional[str] = Field(None, description="Search by VIN number (comma-separated for multiple values)")
+    
+    # Status filters (existing)
     lease_status: Optional[LeaseStatusEnum] = Field(None, description="Filter by lease status")
     driver_status: Optional[DriverStatusEnum] = Field(None, description="Filter by driver status")
     payment_type: Optional[PaymentTypeEnum] = Field(None, description="Filter by payment type")
     dtr_status: Optional[DTRStatusEnum] = Field(None, description="Filter by DTR status")
+    
+    # Sorting
+    sort_by: Optional[str] = Field(None, description="Column to sort by (lease_id, driver_name, medallion_number, plate_number, cc_earnings, net_earnings, etc.)")
+    sort_order: Optional[str] = Field("asc", description="Sort order: asc or desc")
 
 
 class CurrentBalancesResponse(BaseModel):
@@ -142,6 +158,7 @@ class CurrentBalancesResponse(BaseModel):
     per_page: int = Field(..., description="Items per page")
     total_pages: int = Field(..., description="Total pages")
     last_refresh: datetime = Field(..., description="Last data refresh timestamp")
+    available_filters: Optional[dict] = Field(None, description="Available filter values for frontend reference")
 
 
 class WeeklyBalanceDetail(BaseModel):
@@ -153,6 +170,7 @@ class WeeklyBalanceDetail(BaseModel):
     tlc_license: Optional[str]
     medallion_number: str
     plate_number: str
+    vin_number: Optional[str]
     lease_status: LeaseStatusEnum
     driver_status: DriverStatusEnum
     dtr_status: DTRStatusEnum

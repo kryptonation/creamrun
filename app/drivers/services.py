@@ -62,7 +62,8 @@ class DriverService:
         try:
             query = db.query(Driver)
 
-            logger.info(f"Filtering drivers with IDs: {driver_id}")
+            if driver_id is not None:
+                logger.info(f"Filtering drivers with IDs: {driver_id}")
             if id:
                 query = query.filter(Driver.id == id)
             if driver_id:

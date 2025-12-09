@@ -4,7 +4,7 @@ app/current_balances/router.py
 FastAPI router for Current Balances endpoints
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -25,6 +25,7 @@ from app.current_balances.schemas import (
     DTRStatusEnum
 )
 from app.utils.logger import get_logger
+from app.utils.exporter_utils import ExporterFactory
 
 logger = get_logger(__name__)
 
@@ -49,14 +50,31 @@ async def get_current_balances(
     ),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(25, ge=1, le=100, description="Items per page"),
+    
+    # General search (existing)
     search: Optional[str] = Query(
         None,
-        description="Search by lease ID, driver name, TLC license, medallion number, or plate number"
+        description="General search by lease ID, driver name, TLC license, medallion number, or plate number"
     ),
+    
+    # Individual column searches
+    lease_id_search: Optional[str] = Query(None, description="Search by lease ID (comma-separated for multiple values)"),
+    driver_name_search: Optional[str] = Query(None, description="Search by driver name (comma-separated for multiple values)"),
+    tlc_license_search: Optional[str] = Query(None, description="Search by TLC license (comma-separated for multiple values)"),
+    medallion_search: Optional[str] = Query(None, description="Search by medallion number (comma-separated for multiple values)"),
+    plate_search: Optional[str] = Query(None, description="Search by plate number (comma-separated for multiple values)"),
+    vin_search: Optional[str] = Query(None, description="Search by VIN number (comma-separated for multiple values)"),
+    
+    # Status filters (existing)
     lease_status: Optional[LeaseStatusEnum] = Query(None, description="Filter by lease status"),
     driver_status: Optional[DriverStatusEnum] = Query(None, description="Filter by driver status"),
     payment_type: Optional[PaymentTypeEnum] = Query(None, description="Filter by payment type"),
     dtr_status: Optional[DTRStatusEnum] = Query(None, description="Filter by DTR status"),
+    
+    # Sorting
+    sort_by: Optional[str] = Query(None, description="Column to sort by (lease_id, driver_name, medallion_number, plate_number, cc_earnings, net_earnings, etc.)"),
+    sort_order: Optional[str] = Query("asc", regex="^(asc|desc)$", description="Sort order: asc or desc"),
+    
     service: CurrentBalancesService = Depends(get_service),
     current_user: User = Depends(get_current_user)
 ):
@@ -84,10 +102,18 @@ async def get_current_balances(
         # Create filters
         filters = CurrentBalancesFilter(
             search=search,
+            lease_id_search=lease_id_search,
+            driver_name_search=driver_name_search,
+            tlc_license_search=tlc_license_search,
+            medallion_search=medallion_search,
+            plate_search=plate_search,
+            vin_search=vin_search,
             lease_status=lease_status,
             driver_status=driver_status,
             payment_type=payment_type,
-            dtr_status=dtr_status
+            dtr_status=dtr_status,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
         
         # Get balances
@@ -117,7 +143,20 @@ async def get_current_balances(
             page=page,
             per_page=per_page,
             total_pages=total_pages,
-            last_refresh=datetime.utcnow()
+            last_refresh=datetime.now(timezone.utc),
+            available_filters={
+                "dtr_statuses": [status.value for status in DTRStatusEnum],
+                "lease_statuses": [status.value for status in LeaseStatusEnum],
+                "driver_statuses": [status.value for status in DriverStatusEnum],
+                "payment_types": [payment_type.value for payment_type in PaymentTypeEnum],
+                "sortable_columns": [
+                    "lease_id", "driver_name", "tlc_license", "medallion_number", 
+                    "plate_number", "vin_number", "cc_earnings", "weekly_lease_fee",
+                    "mta_tif", "ezpass_tolls", "pvb_violations", "tlc_tickets",
+                    "repairs_wtd", "loans_wtd", "misc_charges", "subtotal_deductions",
+                    "prior_balance", "net_earnings", "last_updated"
+                ]
+            }
         )
     
     except HTTPException:
@@ -335,19 +374,35 @@ async def get_balances_summary(
 )
 async def export_current_balances(
     week_start: Optional[date] = Query(None, description="Week start date (Sunday)"),
-    format: str = Query("excel", regex="^(excel|csv)$", description="Export format"),
-    search: Optional[str] = Query(None, description="Search filter"),
+    format: str = Query("excel", regex="^(excel|csv|pdf|json)$", description="Export format: excel, csv, pdf, or json"),
+    
+    # Search parameters
+    search: Optional[str] = Query(None, description="General search filter"),
+    lease_id_search: Optional[str] = Query(None, description="Search by lease ID (comma-separated for multiple values)"),
+    driver_name_search: Optional[str] = Query(None, description="Search by driver name (comma-separated for multiple values)"),
+    tlc_license_search: Optional[str] = Query(None, description="Search by TLC license (comma-separated for multiple values)"),
+    medallion_search: Optional[str] = Query(None, description="Search by medallion number (comma-separated for multiple values)"),
+    plate_search: Optional[str] = Query(None, description="Search by plate number (comma-separated for multiple values)"),
+    vin_search: Optional[str] = Query(None, description="Search by VIN number (comma-separated for multiple values)"),
+    
+    # Status filters
     lease_status: Optional[LeaseStatusEnum] = Query(None),
     driver_status: Optional[DriverStatusEnum] = Query(None),
     payment_type: Optional[PaymentTypeEnum] = Query(None),
     dtr_status: Optional[DTRStatusEnum] = Query(None),
+    
+    # Sorting
+    sort_by: Optional[str] = Query(None, description="Column to sort by"),
+    sort_order: Optional[str] = Query("asc", regex="^(asc|desc)$", description="Sort order"),
+    
     service: CurrentBalancesService = Depends(get_service),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Export current balances data to Excel or CSV.
+    Export current balances data to multiple formats (Excel, CSV, PDF, JSON).
     
     The export includes all filtered data (not paginated) for the specified week.
+    Supports Excel (.xlsx), CSV (.csv), PDF (.pdf), and JSON (.json) formats.
     """
     try:
         # Determine week range
@@ -364,10 +419,18 @@ async def export_current_balances(
         # Create filters
         filters = CurrentBalancesFilter(
             search=search,
+            lease_id_search=lease_id_search,
+            driver_name_search=driver_name_search,
+            tlc_license_search=tlc_license_search,
+            medallion_search=medallion_search,
+            plate_search=plate_search,
+            vin_search=vin_search,
             lease_status=lease_status,
             driver_status=driver_status,
             payment_type=payment_type,
-            dtr_status=dtr_status
+            dtr_status=dtr_status,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
         
         # Get all balances (no pagination for export)
@@ -379,12 +442,10 @@ async def export_current_balances(
             filters=filters
         )
         
-        # Convert to export format
-        from io import BytesIO
-        import pandas as pd
+        # Convert to export format using exporter utils
         from fastapi.responses import StreamingResponse
         
-        # Prepare data
+        # Prepare data for export
         data = []
         for row in balance_rows:
             data.append({
@@ -393,6 +454,7 @@ async def export_current_balances(
                 'TLC License': row.tlc_license or '',
                 'Medallion': row.medallion_number,
                 'Plate': row.plate_number,
+                'VIN Number': row.vin_number or '',
                 'Lease Status': row.lease_status.value,
                 'DTR Status': row.dtr_status.value,
                 'Payment Type': row.payment_type.value,
@@ -410,34 +472,59 @@ async def export_current_balances(
                 'Net Earnings': float(row.net_earnings)
             })
         
-        df = pd.DataFrame(data)
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No data available for export"
+            )
         
-        # Generate file
-        output = BytesIO()
-        
-        if format == "excel":
-            df.to_excel(output, index=False, engine='openpyxl')
-            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            filename = f"current_balances_{week_start}.xlsx"
-        else:  # csv
-            df.to_csv(output, index=False)
-            media_type = "text/csv"
-            filename = f"current_balances_{week_start}.csv"
-        
-        output.seek(0)
-        
-        logger.info(
-            f"Exported current balances in {format} format for week {week_start}",
-            user_id=current_user.id
-        )
-        
-        return StreamingResponse(
-            output,
-            media_type=media_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+        # Use exporter factory to generate file
+        try:
+            exporter = ExporterFactory.get_exporter(format, data)
+            output = exporter.export()
+            
+            # Determine media type and filename based on format
+            format_config = {
+                "excel": {
+                    "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "extension": "xlsx"
+                },
+                "csv": {
+                    "media_type": "text/csv",
+                    "extension": "csv"
+                },
+                "pdf": {
+                    "media_type": "application/pdf",
+                    "extension": "pdf"
+                },
+                "json": {
+                    "media_type": "application/json",
+                    "extension": "json"
+                }
             }
-        )
+            
+            config = format_config[format]
+            filename = f"current_balances_{week_start}.{config['extension']}"
+            
+            logger.info(
+                f"Exported current balances in {format} format for week {week_start}",
+                user_id=current_user.id
+            )
+            
+            return StreamingResponse(
+                output,
+                media_type=config["media_type"],
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename}"
+                }
+            )
+            
+        except ValueError as e:
+            logger.error(f"Export format error: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported export format: {format}"
+            ) from e
     
     except HTTPException:
         raise

@@ -12,8 +12,8 @@ from sqlalchemy import or_, func
 
 from app.leases.models import Lease, LeaseDriver
 from app.leases.schemas import LeaseStatus
-from app.drivers.models import Driver
-from app.vehicles.models import Vehicle
+from app.drivers.models import Driver, TLCLicense
+from app.vehicles.models import Vehicle, VehicleRegistration
 from app.medallions.models import Medallion
 from app.dtr.models import DTR, DTRStatus as DTRStatusModel
 from app.curb.models import CurbTrip
@@ -117,17 +117,56 @@ class CurrentBalancesService:
         
         # Apply filters
         if filters:
+            # General search (existing)
             if filters.search:
                 search_term = f"%{filters.search}%"
                 query = query.filter(
                     or_(
                         Lease.lease_id.ilike(search_term),
                         Driver.full_name.ilike(search_term),
-                        Vehicle.plate_number.ilike(search_term),
+                        Vehicle.registrations.any(VehicleRegistration.plate_number.ilike(search_term)),
                         Medallion.medallion_number.ilike(search_term)
                     )
                 )
             
+            # Individual column searches with comma-separated support
+            if filters.lease_id_search:
+                lease_ids = [term.strip() for term in filters.lease_id_search.split(',') if term.strip()]
+                if lease_ids:
+                    lease_id_conditions = [Lease.lease_id.ilike(f"%{term}%") for term in lease_ids]
+                    query = query.filter(or_(*lease_id_conditions))
+            
+            if filters.driver_name_search:
+                driver_names = [term.strip() for term in filters.driver_name_search.split(',') if term.strip()]
+                if driver_names:
+                    driver_name_conditions = [Driver.full_name.ilike(f"%{term}%") for term in driver_names]
+                    query = query.filter(or_(*driver_name_conditions))
+            
+            if filters.tlc_license_search:
+                tlc_licenses = [term.strip() for term in filters.tlc_license_search.split(',') if term.strip()]
+                if tlc_licenses:
+                    tlc_conditions = [TLCLicense.tlc_license_number.ilike(f"%{term}%") for term in tlc_licenses]
+                    query = query.join(Driver).join(TLCLicense).filter(or_(*tlc_conditions))
+            
+            if filters.medallion_search:
+                medallions = [term.strip() for term in filters.medallion_search.split(',') if term.strip()]
+                if medallions:
+                    medallion_conditions = [Medallion.medallion_number.ilike(f"%{term}%") for term in medallions]
+                    query = query.filter(or_(*medallion_conditions))
+            
+            if filters.plate_search:
+                plates = [term.strip() for term in filters.plate_search.split(',') if term.strip()]
+                if plates:
+                    plate_conditions = [Vehicle.registrations.any(VehicleRegistration.plate_number.ilike(f"%{term}%")) for term in plates]
+                    query = query.filter(or_(*plate_conditions))
+            
+            if filters.vin_search:
+                vins = [term.strip() for term in filters.vin_search.split(',') if term.strip()]
+                if vins:
+                    vin_conditions = [Vehicle.vin.ilike(f"%{term}%") for term in vins]
+                    query = query.filter(or_(*vin_conditions))
+            
+            # Status filters (existing)
             if filters.lease_status:
                 query = query.filter(Lease.lease_status == filters.lease_status.value)
             
@@ -138,20 +177,70 @@ class CurrentBalancesService:
             if filters.payment_type:
                 query = query.join(Driver).filter(Driver.pay_to_mode == filters.payment_type.value)
         
-        total_items = query.count()
-        leases = query.offset((page - 1) * per_page).limit(per_page).all()
+        # Apply sorting
+        if filters and filters.sort_by:
+            sort_column = None
+            if filters.sort_by == "lease_id":
+                sort_column = Lease.lease_id
+            elif filters.sort_by == "driver_name":
+                sort_column = Driver.full_name
+            elif filters.sort_by == "medallion_number":
+                sort_column = Medallion.medallion_number
+            elif filters.sort_by == "plate_number":
+                # Can't sort by plate_number at database level due to relationship
+                sort_column = None
+            elif filters.sort_by == "vin_number":
+                sort_column = Vehicle.vin
+            # Note: Financial columns (cc_earnings, net_earnings, etc.) will be sorted post-query
+            # as they are calculated fields, not database columns
+            
+            if sort_column is not None:
+                if filters.sort_order == "desc":
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
         
-        # Calculate balances for each lease
-        balance_rows = []
-        for lease in leases:
-            row = self._calculate_live_balance_for_lease(lease, week_start, week_end)
+        total_items = query.count()
+        
+        # Handle pagination differently for financial column sorting
+        if filters and filters.sort_by and filters.sort_by in [
+            "cc_earnings", "weekly_lease_fee", "mta_tif", "ezpass_tolls", "pvb_violations",
+            "tlc_tickets", "repairs_wtd", "loans_wtd", "misc_charges", "subtotal_deductions",
+            "prior_balance", "net_earnings"
+        ]:
+            # For financial columns, get all data first, then sort and paginate
+            all_leases = query.all()
+            all_balance_rows = []
+            for lease in all_leases:
+                row = self._calculate_live_balance_for_lease(lease, week_start, week_end)
+                if filters.dtr_status:
+                    if row.dtr_status != filters.dtr_status:
+                        continue
+                all_balance_rows.append(row)
             
-            # Apply DTR status filter
-            if filters and filters.dtr_status:
-                if row.dtr_status != filters.dtr_status:
-                    continue
+            # Sort by financial column
+            reverse_order = filters.sort_order == "desc"
+            all_balance_rows.sort(
+                key=lambda x: getattr(x, filters.sort_by, Decimal("0")),
+                reverse=reverse_order
+            )
             
-            balance_rows.append(row)
+            # Apply pagination after sorting
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            balance_rows = all_balance_rows[start_idx:end_idx]
+            total_items = len(all_balance_rows)
+        else:
+            # For non-financial columns, use database-level sorting and pagination
+            leases = query.offset((page - 1) * per_page).limit(per_page).all()
+            balance_rows = []
+            for lease in leases:
+                row = self._calculate_live_balance_for_lease(lease, week_start, week_end)
+                # Apply DTR status filter
+                if filters and filters.dtr_status:
+                    if row.dtr_status != filters.dtr_status:
+                        continue
+                balance_rows.append(row)
         
         return balance_rows, total_items
     
@@ -203,7 +292,7 @@ class CurrentBalancesService:
         prior_balance = self._get_prior_balance(lease.id, week_start)
         
         # Get deposit amount
-        deposit_amount = lease.deposit_amount or Decimal("0")
+        deposit_amount = lease.deposit_amount_paid or Decimal("0")
         
         # Calculate subtotal and net
         subtotal = (
@@ -221,7 +310,8 @@ class CurrentBalancesService:
             driver_name=driver.full_name if driver else "Unknown",
             tlc_license=driver.tlc_license.tlc_license_number if driver and driver.tlc_license else None,
             medallion_number=medallion.medallion_number if medallion else "N/A",
-            plate_number=vehicle.plate_number if vehicle else "N/A",
+            plate_number=vehicle.get_active_plate_number() if vehicle else "N/A",
+            vin_number=vehicle.vin if vehicle else None,
             lease_status=LeaseStatusEnum(lease.status.value),
             driver_status=DriverStatusEnum.ACTIVE,  # Would need proper driver status
             dtr_status=DTRStatusEnum.NOT_GENERATED,
@@ -261,24 +351,89 @@ class CurrentBalancesService:
                 joinedload(DTR.medallion)
             )
             .filter(
-                DTR.period_start_date == week_start,
-                DTR.period_end_date == week_end,
+                DTR.week_start_date == week_start,
+                DTR.week_end_date == week_end,
                 DTR.status == DTRStatusModel.FINALIZED
             )
         )
         
         # Apply filters
         if filters:
+            # General search
             if filters.search:
                 search_term = f"%{filters.search}%"
                 query = query.outerjoin(Driver).outerjoin(Vehicle).outerjoin(Medallion).filter(
                     or_(
                         DTR.lease.has(Lease.lease_id.ilike(search_term)),
                         Driver.full_name.ilike(search_term),
-                        Vehicle.plate_number.ilike(search_term),
-                        Medallion.medallion_number.ilike(search_term)
+                        # Note: plate_number search removed as it requires VehicleRegistration join
+                        Medallion.medallion_number.ilike(search_term),
+                        Vehicle.vin.ilike(search_term)  # Added VIN search
                     )
                 )
+            
+            # Individual column searches with comma-separated support
+            if filters.lease_id_search:
+                lease_ids = [term.strip() for term in filters.lease_id_search.split(',') if term.strip()]
+                if lease_ids:
+                    lease_id_conditions = [DTR.lease.has(Lease.lease_id.ilike(f"%{term}%")) for term in lease_ids]
+                    query = query.filter(or_(*lease_id_conditions))
+            
+            if filters.driver_name_search:
+                driver_names = [term.strip() for term in filters.driver_name_search.split(',') if term.strip()]
+                if driver_names:
+                    driver_name_conditions = [Driver.full_name.ilike(f"%{term}%") for term in driver_names]
+                    query = query.filter(or_(*driver_name_conditions))
+            
+            if filters.tlc_license_search:
+                tlc_licenses = [term.strip() for term in filters.tlc_license_search.split(',') if term.strip()]
+                if tlc_licenses:
+                    tlc_conditions = [TLCLicense.tlc_license_number.ilike(f"%{term}%") for term in tlc_licenses]
+                    query = query.join(Driver).join(TLCLicense).filter(or_(*tlc_conditions))
+            
+            if filters.medallion_search:
+                medallions = [term.strip() for term in filters.medallion_search.split(',') if term.strip()]
+                if medallions:
+                    medallion_conditions = [Medallion.medallion_number.ilike(f"%{term}%") for term in medallions]
+                    query = query.filter(or_(*medallion_conditions))
+            
+            if filters.plate_search:
+                plates = [term.strip() for term in filters.plate_search.split(',') if term.strip()]
+                if plates:
+                    plate_conditions = [Vehicle.registrations.any(VehicleRegistration.plate_number.ilike(f"%{term}%")) for term in plates]
+                    query = query.filter(or_(*plate_conditions))
+            
+            if filters.vin_search:
+                vins = [term.strip() for term in filters.vin_search.split(',') if term.strip()]
+                if vins:
+                    vin_conditions = [Vehicle.vin.ilike(f"%{term}%") for term in vins]
+                    query = query.filter(or_(*vin_conditions))
+        
+        # Apply sorting for database columns
+        if filters and filters.sort_by:
+            sort_column = None
+            if filters.sort_by == "lease_id":
+                sort_column = Lease.lease_id
+            elif filters.sort_by == "driver_name":
+                sort_column = Driver.full_name
+            elif filters.sort_by == "medallion_number":
+                sort_column = Medallion.medallion_number
+            elif filters.sort_by == "plate_number":
+                # Can't sort by plate_number at database level due to relationship
+                sort_column = None
+            elif filters.sort_by == "vin_number":
+                sort_column = Vehicle.vin
+            elif filters.sort_by == "cc_earnings":
+                sort_column = DTR.credit_card_earnings
+            elif filters.sort_by == "net_earnings":
+                sort_column = DTR.net_earnings
+            # Add other DTR financial columns as needed
+            
+            if sort_column is not None:
+                if filters.sort_order == "desc":
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
         
         total_items = query.count()
         dtrs = query.offset((page - 1) * per_page).limit(per_page).all()
@@ -305,7 +460,8 @@ class CurrentBalancesService:
             driver_name=driver.full_name if driver else "Unknown",
             tlc_license=driver.tlc_license.tlc_license_number if driver and driver.tlc_license else None,
             medallion_number=medallion.medallion_number if medallion else "N/A",
-            plate_number=vehicle.plate_number if vehicle else "N/A",
+            plate_number=vehicle.get_active_plate_number() if vehicle else "N/A",
+            vin_number=vehicle.vin if vehicle else None,
             lease_status=LeaseStatusEnum.ACTIVE if lease and lease.status == LeaseStatus.ACTIVE else LeaseStatusEnum.TERMINATED,
             driver_status=DriverStatusEnum.ACTIVE,
             dtr_status=DTRStatusEnum.GENERATED,
@@ -321,7 +477,7 @@ class CurrentBalancesService:
             misc_charges=dtr.misc_charges or Decimal("0"),
             subtotal_deductions=dtr.subtotal_deductions or Decimal("0"),
             prior_balance=dtr.prior_balance or Decimal("0"),
-            deposit_amount=lease.deposit_amount if lease else Decimal("0"),
+            deposit_amount=lease.deposit_amount_paid if lease else Decimal("0"),
             net_earnings=dtr.net_earnings or Decimal("0"),
             last_updated=dtr.generation_date or datetime.now(timezone.utc)
         )

@@ -19,12 +19,19 @@ autodiscovery mechanism as configured in `app/core/celery_app.py`.
 #     import_filtered_data_task,
 # )
 
-from app.curb.import_raw_curb_data import (
-    import_raw_curb_data_task,
-    import_and_process_from_s3_task,
-    fetch_and_process_chained,
-    test_import,
-    map_reconciled_trips_task,
+# from app.curb.import_raw_curb_data import (
+#     import_raw_curb_data_task,
+#     import_and_process_from_s3_task,
+#     fetch_and_process_chained,
+#     test_import,
+#     map_reconciled_trips_task,
+# )
+from app.curb.curb_sync_tasks import (
+    fetch_trips_to_s3_task,
+    parse_and_map_trips_task,
+    fetch_transactions_to_s3_task,
+    parse_and_map_transactions_task,
+    curb_full_sync_chain_task
 )
 
 from app.curb.services import (
@@ -36,10 +43,16 @@ from app.curb.services import (
 # This keeps the task logic co-located with the service that performs the work.
 
 __all__ = [
-    "import_raw_curb_data_task",
-    "import_and_process_from_s3_task",
-    "fetch_and_process_chained",
-    "test_import",
-    "map_reconciled_trips_task",
+    # "import_raw_curb_data_task",
+    # "import_and_process_from_s3_task",
+    # "fetch_and_process_chained",
+    # "test_import",
+    # "map_reconciled_trips_task",
+
+    "fetch_trips_to_s3_task",
+    "parse_and_map_trips_task",
+    "fetch_transactions_to_s3_task",
+    "parse_and_map_transactions_task",
+    "curb_full_sync_chain_task",
     "post_earnings_to_ledger_task",
 ]

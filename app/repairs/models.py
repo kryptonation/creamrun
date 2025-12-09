@@ -40,7 +40,7 @@ class RepairInstallmentStatus(str, PyEnum):
 
 class WorkshopType(str, PyEnum):
     """Enumeration for the workshop type."""
-    BIG_APPLE = "Big Apple Workshop"
+    DSW_AUTO_REPAIR = "DSW Auto Repair"
     EXTERNAL = "External Workshop"
 
 

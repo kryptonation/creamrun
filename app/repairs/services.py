@@ -159,6 +159,8 @@ class RepairService:
             for repair in repairs:
                 installments = self.db.query(RepairInstallment).filter(RepairInstallment.invoice_id == repair.id).all()
                 if all(inst.status == RepairInstallmentStatus.POSTED for inst in installments):
+                        repair.status = RepairInvoiceStatus.OPEN
+                if all(inst.status == RepairInstallmentStatus.PAID for inst in installments):
                     repair.status = RepairInvoiceStatus.CLOSED
             
             self.db.commit()

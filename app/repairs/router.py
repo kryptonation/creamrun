@@ -416,7 +416,12 @@ def list_repair_installments(
         
         for inst in installments:
             # balance accumulates as we go through installments (assuming sorted by week)
-            balance += inst.principal_amount
+            # Calculate remaining balance: total invoice amount - sum of all paid installments
+            total_paid = sum(
+                i.principal_amount for i in inst.invoice.installments 
+                if i.status != i.week_start_date <= inst.week_start_date
+            )
+            balance = inst.invoice.total_amount - total_paid
             
             response_items.append(
                 RepairInstallmentListResponse(

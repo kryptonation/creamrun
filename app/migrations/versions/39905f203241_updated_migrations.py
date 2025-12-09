@@ -1,8 +1,8 @@
-"""models updated
+"""updated migrations
 
-Revision ID: b4ed624bcff2
+Revision ID: 39905f203241
 Revises: 
-Create Date: 2025-11-24 06:41:46.960263
+Create Date: 2025-12-04 19:38:00.012612
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'b4ed624bcff2'
+revision: str = '39905f203241'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -1468,7 +1468,7 @@ def upgrade() -> None:
     sa.Column('lease_id', sa.Integer(), nullable=False),
     sa.Column('payment_date', sa.DateTime(timezone=True), nullable=False),
     sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='The total amount received from the driver.'),
-    sa.Column('payment_method', sa.Enum('CASH', 'CHECK', 'ACH', name='paymentmethod'), nullable=False),
+    sa.Column('payment_method', sa.Enum('CASH', 'CHECK', 'DRIVER_CREDIT', name='paymentmethod'), nullable=False),
     sa.Column('notes', sa.String(length=255), nullable=True, comment='Optional notes from the cashier.'),
     sa.Column('allocations', sa.JSON(), nullable=True, comment='A JSON object detailing how the payment was allocated to different ledger balances.'),
     sa.Column('is_archived', sa.Boolean(), nullable=True, comment='Flag indicating if the record is archived'),
@@ -1699,10 +1699,31 @@ def upgrade() -> None:
     sa.Column('penalty', sa.Numeric(precision=10, scale=2), nullable=True),
     sa.Column('interest', sa.Numeric(precision=10, scale=2), nullable=True),
     sa.Column('reduction', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('processing_fee', sa.Numeric(precision=10, scale=2), nullable=True),
     sa.Column('amount_due', sa.Numeric(precision=10, scale=2), nullable=False),
+    sa.Column('driver_payment_amount', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('is_terminated', sa.Boolean(), nullable=False),
+    sa.Column('non_program', sa.Boolean(), nullable=True),
+    sa.Column('system_entry_date', sa.Date(), nullable=True),
+    sa.Column('new_issue', sa.Boolean(), nullable=False),
+    sa.Column('hearing_ind', sa.String(length=50), nullable=True),
+    sa.Column('penalty_warning', sa.String(length=50), nullable=True),
+    sa.Column('judgement', sa.Boolean(), nullable=True),
+    sa.Column('payment', sa.Numeric(precision=10, scale=2), nullable=True),
+    sa.Column('ng_pmt', sa.Boolean(), nullable=True),
+    sa.Column('front_or_opp', sa.String(length=150), nullable=True),
+    sa.Column('house_number', sa.String(length=50), nullable=True),
+    sa.Column('intersect_street', sa.String(length=255), nullable=True),
+    sa.Column('geo_location', sa.String(length=255), nullable=True),
+    sa.Column('street_code_1', sa.String(length=50), nullable=True),
+    sa.Column('street_code_2', sa.String(length=50), nullable=True),
+    sa.Column('street_code_3', sa.String(length=50), nullable=True),
     sa.Column('status', sa.Enum('IMPORTED', 'ASSOCIATION_PENDING', 'ASSOCIATION_FAILED', 'ASSOCIATED', 'POSTING_PENDING', 'POSTING_FAILED', 'POSTED_TO_LEDGER', name='pvbviolationstatus'), nullable=False),
     sa.Column('failure_reason', sa.Text(), nullable=True),
     sa.Column('posting_date', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('violation_code', sa.String(length=255), nullable=True),
+    sa.Column('violation_country', sa.String(length=255), nullable=True),
+    sa.Column('street_name', sa.String(length=255), nullable=True),
     sa.Column('driver_id', sa.Integer(), nullable=True),
     sa.Column('vehicle_id', sa.Integer(), nullable=True),
     sa.Column('medallion_id', sa.Integer(), nullable=True),
@@ -1742,7 +1763,7 @@ def upgrade() -> None:
     sa.Column('lease_id', sa.Integer(), nullable=False),
     sa.Column('vehicle_id', sa.Integer(), nullable=False),
     sa.Column('medallion_id', sa.Integer(), nullable=False),
-    sa.Column('workshop_type', sa.Enum('BIG_APPLE', 'EXTERNAL', name='workshoptype'), nullable=False),
+    sa.Column('workshop_type', sa.Enum('DSW_AUTO_REPAIR', 'EXTERNAL', name='workshoptype'), nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('total_amount', sa.Numeric(precision=10, scale=2), nullable=False),
     sa.Column('status', sa.Enum('DRAFT', 'OPEN', 'CLOSED', 'HOLD', 'CANCELLED', name='repairinvoicestatus'), nullable=False),
@@ -1775,16 +1796,20 @@ def upgrade() -> None:
     sa.Column('summons_no', sa.String(length=255), nullable=False),
     sa.Column('issue_date', sa.Date(), nullable=False),
     sa.Column('issue_time', sa.Time(), nullable=True),
-    sa.Column('violation_type', sa.Enum('FI', 'FN', 'RF' , "EA", name='tlcviolationtype'), nullable=False),
+    sa.Column('violation_type', sa.Enum('FI', 'FN', 'RF', 'EA', name='tlcviolationtype'), nullable=False),
     sa.Column('description', sa.Text(), nullable=True, comment='Required only if type is FN.'),
     sa.Column('amount', sa.Numeric(precision=10, scale=2), nullable=False, comment='Base ticket amount.'),
     sa.Column('service_fee', sa.Numeric(precision=10, scale=2), nullable=False),
     sa.Column('total_payable', sa.Numeric(precision=10, scale=2), nullable=False, comment='Calculated as Amount + Service Fee.'),
+    sa.Column('driver_payable', sa.Numeric(precision=10, scale=2), nullable=False),
     sa.Column('disposition', sa.Enum('PAID', 'REDUCED', 'DISMISSED', name='tlcdisposition'), nullable=False),
+    sa.Column('due_date', sa.Date(), nullable=False),
+    sa.Column('note', sa.Text(), nullable=True),
     sa.Column('driver_id', sa.Integer(), nullable=True),
-    sa.Column('medallion_id', sa.Integer(), nullable=False),
-    sa.Column('lease_id', sa.Integer(), nullable=False),
-    sa.Column('attachment_document_id', sa.Integer(), nullable=False, comment='FK to the uploaded ticket scan.'),
+    sa.Column('medallion_id', sa.Integer(), nullable=True),
+    sa.Column('lease_id', sa.Integer(), nullable=True),
+    sa.Column('vehicle_id', sa.Integer(), nullable=True),
+    sa.Column('attachment_document_id', sa.Integer(), nullable=True, comment='FK to the uploaded ticket scan.'),
     sa.Column('status', sa.Enum('PENDING', 'POSTED', 'REVERSED', name='tlcviolationstatus'), nullable=False),
     sa.Column('original_posting_id', sa.String(length=255), nullable=True, comment='Reference to the initial ledger posting.'),
     sa.Column('reversal_posting_id', sa.String(length=255), nullable=True, comment='Reference to the reversal posting if disposition is changed.'),
@@ -1802,6 +1827,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['lease_id'], ['leases.id'], ),
     sa.ForeignKeyConstraint(['medallion_id'], ['medallions.id'], ),
     sa.ForeignKeyConstraint(['modified_by'], ['users.id'], onupdate='CASCADE', ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['vehicle_id'], ['vehicles.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tlc_violations_case_no'), 'tlc_violations', ['case_no'], unique=False)
@@ -1810,6 +1836,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_tlc_violations_lease_id'), 'tlc_violations', ['lease_id'], unique=False)
     op.create_index(op.f('ix_tlc_violations_medallion_id'), 'tlc_violations', ['medallion_id'], unique=False)
     op.create_index(op.f('ix_tlc_violations_summons_no'), 'tlc_violations', ['summons_no'], unique=True)
+    op.create_index(op.f('ix_tlc_violations_vehicle_id'), 'tlc_violations', ['vehicle_id'], unique=False)
     op.create_table('lease_driver_documents',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('lease_driver_id', sa.Integer(), nullable=False, comment='Foreign Key to Lease Driver Table'),
@@ -1904,6 +1931,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_lease_driver_documents_id'), table_name='lease_driver_documents')
     op.drop_index(op.f('ix_lease_driver_documents_document_id'), table_name='lease_driver_documents')
     op.drop_table('lease_driver_documents')
+    op.drop_index(op.f('ix_tlc_violations_vehicle_id'), table_name='tlc_violations')
     op.drop_index(op.f('ix_tlc_violations_summons_no'), table_name='tlc_violations')
     op.drop_index(op.f('ix_tlc_violations_medallion_id'), table_name='tlc_violations')
     op.drop_index(op.f('ix_tlc_violations_lease_id'), table_name='tlc_violations')

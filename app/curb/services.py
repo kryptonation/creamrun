@@ -1,7 +1,8 @@
 # app/curb/services.py
 
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, date, timezone
+import datetime as dt
+from datetime import timedelta, date, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from io import BytesIO
@@ -213,12 +214,18 @@ class CurbService:
                     else:
                         payment_type = PaymentType.UNKNOWN
 
-                    if filter_cash_only and payment_type != PaymentType.CASH:
+                    if filter_cash_only and payment_type == PaymentType.CREDIT_CARD:
                         continue
 
                     # Use ROWID for transactions, ID for RECORD elements, or a composite key for trips
                     trip_id = trip_node.attrib.get("ROWID") or trip_node.attrib.get("RECORD ID") or trip_node.attrib.get("ID")
                     period = trip_node.attrib.get("PERIOD")
+                    
+                    # If period is not available, generate it as MMYYYY from current date
+                    if not period:
+                        from datetime import datetime
+                        now = datetime.now()
+                        period = f"{now.month:02d}{now.year}"
 
                     if not trip_id:
                         continue
@@ -254,20 +261,21 @@ class CurbService:
                     # Clean up the strings
                     start_datetime_str = (start_datetime_str or "").strip()
                     end_datetime_str = (end_datetime_str or "").strip()
+
                     
                     # Try parsing with seconds first, then without
-                    def parse_flexible_datetime(datetime_str: str) -> datetime:
+                    def parse_flexible_datetime(datetime_str: str) -> dt.datetime:
                         """Parse datetime with flexible format handling."""
                         if not datetime_str or datetime_str == " ":
                             raise ValueError("Empty datetime string")
                         
                         # Try with seconds first
                         try:
-                            return datetime.strptime(datetime_str, "%m/%d/%Y %H:%M:%S")
+                            return dt.datetime.strptime(datetime_str, "%m/%d/%Y %H:%M:%S")
                         except ValueError:
                             # If that fails, try without seconds
                             try:
-                                return datetime.strptime(datetime_str, "%m/%d/%Y %H:%M")
+                                return dt.datetime.strptime(datetime_str, "%m/%d/%Y %H:%M")
                             except ValueError:
                                 # If both fail, log and re-raise
                                 logger.warning(f"Failed to parse datetime: '{datetime_str}'")
@@ -292,6 +300,12 @@ class CurbService:
                         logger.warning(f"Available child elements: {child_elements}")
                     elif cab_number:
                         logger.debug(f"Found CABNUMBER: {cab_number} for transaction {unique_id}")
+
+                    # Generate curb_period from transaction_date if period is null/none
+                    if not period and transaction_date:
+                        # Format: MMYYYY (e.g., 032025 for March 2025)
+                        period = transaction_date.strftime("%m%Y")
+                        logger.debug(f"Generated curb_period from transaction_date: {period}")
 
                     trip_data = {
                         "curb_trip_id": unique_id,
@@ -330,7 +344,24 @@ class CurbService:
             logger.error("Failed to parse CURB XML data: %s", e, exc_info=True)
             raise CurbApiError("Invalid XML data received from CURB.") from e
         
-        return trips
+        # Deduplicate trips by curb_trip_id - keep the last occurrence
+        seen_trip_ids = {}
+        deduplicated_trips = []
+        
+        for trip in trips:
+            trip_id = trip["curb_trip_id"]
+            if trip_id in seen_trip_ids:
+                logger.warning(f"Duplicate trip ID found in XML batch: {trip_id}. Keeping latest occurrence.")
+                # Replace the previous entry
+                deduplicated_trips = [t for t in deduplicated_trips if t["curb_trip_id"] != trip_id]
+            
+            deduplicated_trips.append(trip)
+            seen_trip_ids[trip_id] = True
+        
+        if len(deduplicated_trips) != len(trips):
+            logger.info(f"Removed {len(trips) - len(deduplicated_trips)} duplicate trips from XML batch")
+        
+        return deduplicated_trips
     
     def _reconcile_locally(self, trips: List[CurbTrip]) -> int:
         """
@@ -412,7 +443,7 @@ class CurbService:
                 if settings.environment == "production":
                     logger.info("Reconciling with CURB server (production environment).")
                     trip_ids_to_reconcile = [trip.curb_trip_id.split('-')[-1] for trip in unreconciled_trips]
-                    reconciliation_id = f"BAT-RECO-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                    reconciliation_id = f"BAT-RECO-{dt.datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
                     try:
                         self.api_service.reconcile_trips(trip_ids_to_reconcile, reconciliation_id)
                         # Update status in local DB after successful API call
@@ -465,6 +496,57 @@ class CurbService:
             
         logger.info(f"Found {len(trips_to_map)} reconciled trips to process for mapping.")
         
+        # Use the shared mapping logic
+        return self._process_trip_mappings(trips_to_map)
+
+        # return {
+        #     "total_trips_to_map": len(trips_to_map),
+        #     "successfully_mapped": successful_count,
+        #     "mapping_failures": failed_count,
+        #     "errors": errors,
+        # }
+    
+    def map_reconciled_trips_by_ids(self, trip_ids: List[int]) -> Dict:
+        """
+        Map specific reconciled trips by their internal database IDs.
+        More efficient than mapping all reconciled trips when only targeting a subset.
+        
+        Args:
+            trip_ids: List of internal CurbTrip.id values to map
+            
+        Returns:
+            Dictionary with mapping results
+        """
+        logger.info(f"Starting targeted mapping for {len(trip_ids)} specific trip IDs.")
+        
+        trips_to_map = (
+            self.db.query(CurbTrip)
+            .filter(
+                CurbTrip.id.in_(trip_ids),
+                CurbTrip.status == CurbTripStatus.RECONCILED
+            )
+            .all()
+        )
+        
+        if not trips_to_map:
+            logger.info("No reconciled trips found for the provided IDs.")
+            return {
+                "total_trips_found": 0,
+                "successfully_mapped": 0,
+                "mapping_failures": 0,
+                "errors": []
+            }
+            
+        logger.info(f"Found {len(trips_to_map)} reconciled trips to process for targeted mapping.")
+        
+        # Use the same mapping logic as the main method
+        return self._process_trip_mappings(trips_to_map)
+    
+    def _process_trip_mappings(self, trips_to_map: List[CurbTrip]) -> Dict:
+        """
+        Internal method to process trip mappings for a given list of trips.
+        Extracted from map_reconciled_trips to avoid code duplication.
+        """
         successful_count = 0
         failed_count = 0
         errors = []
@@ -492,12 +574,12 @@ class CurbService:
                         "Lease", f"Driver ID {driver.driver_id} & Medallion {medallion.medallion_number}"
                     )
                 
-                # 4. Update the CurbTrip record with foreign keys and set status to MAPPED
+                # Update the CurbTrip record with foreign keys and set status to MAPPED
                 trip.driver_id = driver.id
                 trip.medallion_id = medallion.id
                 trip.lease_id = lease.id
                 trip.vehicle_id = lease.vehicle_id
-                trip.status = CurbTripStatus.MAPPED # Update status
+                trip.status = CurbTripStatus.MAPPED
                 
                 if lease.vehicle and lease.vehicle.registrations:
                     trip.plate = lease.vehicle.registrations[0].plate_number
@@ -517,12 +599,12 @@ class CurbService:
 
         try:
             self.db.commit()
-            logger.info("Committed all successful trip mappings to the database.")
+            logger.info(f"Committed {successful_count} successful trip mappings to the database.")
         except SQLAlchemyError as e:
             self.db.rollback()
             logger.error("Database commit failed during trip mapping: %s", e, exc_info=True)
             errors.append({"general_error": "Database commit failed", "detail": str(e)})
-            failed_count = len(trips_to_map) # Mark all as failed if commit fails
+            failed_count = len(trips_to_map)  # Mark all as failed if commit fails
             successful_count = 0
 
         return {
@@ -628,6 +710,277 @@ class CurbService:
                 trip_id="batch", reason=f"A critical error occurred: {e}"
             ) from e
 
+    # --- S3 Backup CURB trips -----------------------------        
+    def import_and_reconcile_from_s3(
+        self,
+        start_datetime: dt.datetime,
+        end_datetime: dt.datetime,
+    ) -> Dict:
+        """
+        Import and reconcile CURB data from S3 XML files based on datetime range.
+
+        This method:
+        1. Lists XML files in S3 for the datetime range (matches exact folder structure)
+        2. Downloads and parses XML files
+        3. Normalizes trip data
+        4. Stores in database
+        5. Reconciles trips
+
+        Args:
+            start_datetime: Start datetime for import
+            end_datetime: End datetime for import
+
+        Returns:
+            Dictionary with import summary
+        """
+        logger.info(
+            f"Starting CURB import from S3 for datetime range: {start_datetime} to {end_datetime}"
+        )
+
+        try:
+            # Step 1: List S3 files
+            s3_files = self._list_s3_files_by_datetime_range(
+                start_datetime, end_datetime
+            )
+
+            if not s3_files["transactions"] and not s3_files["trips"]:
+                logger.warning("No XML files found in S3 for the specified date range")
+                return {
+                    "message": "No XML files found in S3 for the specified date range",
+                    "records_fetched": 0,
+                    "newly_inserted": 0,
+                    "records_updated": 0,
+                    "records_reconciled": 0,
+                }
+
+            # Step 2: Download and parse XML files
+            all_trips_data = {}
+            parse_errors = []
+
+            # Process transaction files
+            for s3_key in s3_files["transactions"]:
+                try:
+                    xml_content = self._download_and_parse_xml_from_s3(s3_key)
+                    normalized_trans = self._parse_and_normalize_trips(xml_content)
+
+                    # Deduplicate using dictionary
+                    for trip in normalized_trans:
+                        all_trips_data[trip["curb_trip_id"]] = trip
+
+                    logger.info(
+                        f"Parsed {len(normalized_trans)} transactions from {s3_key}"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Failed to process {s3_key}: {e}")
+                    parse_errors.append({"file": s3_key, "error": str(e)})
+
+            # Process trip files
+            for s3_key in s3_files["trips"]:
+                try:
+                    xml_content = self._download_and_parse_xml_from_s3(s3_key)
+                    normalized_trips = self._parse_and_normalize_trips(xml_content, filter_cash_only=True)
+
+                    # Deduplicate using dictionary
+                    for trip in normalized_trips:
+                        all_trips_data[trip["curb_trip_id"]] = trip
+
+                    logger.info(f"Parsed {len(normalized_trips)} trips from {s3_key}")
+
+                except Exception as e:
+                    logger.error(f"Failed to process {s3_key}: {e}")
+                    parse_errors.append({"file": s3_key, "error": str(e)})
+
+            final_trip_list = list(all_trips_data.values())
+            logger.info(
+                f"Fetched a total of {len(final_trip_list)} unique records from S3."
+            )
+
+            # Step 3: Store data in database
+            inserted, updated = self.repo.bulk_insert_or_update(final_trip_list)
+            self.db.commit()
+            logger.info(
+                f"Database operation complete: {inserted} new trips inserted, {updated} trips updated."
+            )
+
+            # Step 4: Reconcile trips
+            unreconciled_trips = self.repo.get_unreconciled_trips()
+            reconciled_count = 0
+            reconciliation_id = None
+
+            if unreconciled_trips:
+                if settings.environment == "production":
+                    logger.info(
+                        "Reconciling with CURB server (production environment)."
+                    )
+                    trip_ids_to_reconcile = [
+                        trip.curb_trip_id.split("-")[-1] for trip in unreconciled_trips
+                    ]
+                    reconciliation_id = f"BAT-S3-RECO-{dt.datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                    try:
+                        self.api_service.reconcile_trips(
+                            trip_ids_to_reconcile, reconciliation_id
+                        )
+                        # Update status in local DB after successful API call
+                        for trip in unreconciled_trips:
+                            self.repo.update_trip_status(
+                                trip.id, CurbTripStatus.RECONCILED, reconciliation_id
+                            )
+                        self.db.commit()
+                        reconciled_count = len(unreconciled_trips)
+                        logger.info(
+                            f"Successfully reconciled {reconciled_count} trips with CURB API."
+                        )
+                    except CurbApiError as e:
+                        self.db.rollback()
+                        logger.error(f"Failed to reconcile trips with CURB API: {e}")
+                        parse_errors.append(
+                            {"reconciliation": "failed", "error": str(e)}
+                        )
+                else:
+                    reconciled_count = self._reconcile_locally(unreconciled_trips)
+
+            datetime_format = (
+                f"{settings.common_date_format} {settings.common_time_format}"
+            )
+            return {
+                "source": "s3",
+                "datetime_range": {
+                    "from": start_datetime.strftime(datetime_format),
+                    "to": end_datetime.strftime(datetime_format),
+                },
+                "files_processed": {
+                    "transactions": len(s3_files["transactions"]),
+                    "trips": len(s3_files["trips"]),
+                },
+                "records_fetched": len(final_trip_list),
+                "newly_inserted": inserted,
+                "records_updated": updated,
+                "records_reconciled": reconciled_count,
+                "reconciliation_id": reconciliation_id,
+                "parse_errors": parse_errors,
+            }
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(
+                "An unexpected error occurred during S3 import: %s", e, exc_info=True
+            )
+            raise
+
+    def _download_and_parse_xml_from_s3(self, s3_key: str) -> str:
+        """
+        Download XML file from S3 and return its contents.
+
+        Args:
+            s3_key: S3 object key
+
+        Returns:
+            XML content as string
+        """
+        logger.debug(f"Downloading XML from S3: {s3_key}")
+
+        try:
+            # Download file from S3
+            file_content = s3_utils.download_file(key=s3_key)
+
+            if file_content is None:
+                raise Exception(f"Failed to download file from S3: {s3_key}")
+
+            # If file_content is bytes, decode it
+            if isinstance(file_content, bytes):
+                xml_content = file_content.decode("utf-8")
+            elif isinstance(file_content, BytesIO):
+                xml_content = file_content.getvalue().decode("utf-8")
+            else:
+                xml_content = str(file_content)
+
+            logger.debug(
+                f"Successfully downloaded {len(xml_content)} bytes from {s3_key}"
+            )
+            return xml_content
+
+        except Exception as e:
+            logger.error(f"Error downloading/parsing XML from S3: {e}", exc_info=True)
+            raise
+
+    def _list_s3_files_by_datetime_range(
+        self, start_datetime: dt.datetime, end_datetime: dt.datetime
+    ) -> Dict[str, List[str]]:
+        """
+        List XML files from S3 within a datetime range.
+        Lists all buckets and filters based on timestamp in bucket names.
+        Folder structure: curb-data/MM-DD-YYYY/HH-MM-SS/
+
+        Args:
+            start_datetime: Start datetime
+            end_datetime: End datetime
+
+        Returns:
+            Dictionary with 'transactions' and 'trips' lists of S3 keys
+        """
+        logger.info(f"Listing S3 files from {start_datetime} to {end_datetime}")
+
+        transactions_files = []
+        trips_files = []
+
+        try:
+            # List all files under the curb-data folder
+            prefix = f"{settings.curb_s3_folder}/"
+            all_files = s3_utils.list_files(prefix=prefix)
+
+            logger.debug(f"Found {len(all_files)} total files in {prefix}")
+
+            # Filter files based on datetime range from bucket names
+            for file_key in all_files:
+                # Skip metadata files
+                if "/metadata/" in file_key or not file_key.endswith(".xml"):
+                    continue
+
+                # Extract date and time from path: curb-data/09-21-2025/12-00-00/file.xml
+                path_parts = file_key.split("/")
+                if len(path_parts) < 3:
+                    continue
+
+                folder_date = path_parts[-3]  # e.g., "09-21-2025"
+                folder_time = path_parts[-2]  # e.g., "12-00-00"
+
+                # Convert folder names back to datetime for comparison
+                try:
+                    # Replace dashes with slashes for date, and colons for time
+                    date_str = folder_date.replace("-", "/")
+                    time_str = folder_time.replace("-", ":")
+
+                    # Parse using settings formats
+                    datetime_str = f"{date_str} {time_str}"
+                    datetime_format = (
+                        f"{settings.common_date_format} {settings.common_time_format}"
+                    )
+                    file_datetime = dt.datetime.strptime(datetime_str, datetime_format)
+
+                    # Check if file datetime is within range
+                    if start_datetime <= file_datetime <= end_datetime:
+                        if "transactions_" in file_key:
+                            transactions_files.append(file_key)
+                        elif "trips_" in file_key:
+                            trips_files.append(file_key)
+
+                except ValueError as e:
+                    logger.warning(
+                        f"Failed to parse datetime from path {file_key}: {e}"
+                    )
+                    continue
+
+        except Exception as e:
+            logger.error(f"Failed to list files from S3: {e}", exc_info=True)
+            raise
+
+        logger.info(
+            f"Found {len(transactions_files)} transaction files and {len(trips_files)} trip files in datetime range"
+        )
+
+        return {"transactions": transactions_files, "trips": trips_files}
+
 
 # --- Celery Tasks ---
 
@@ -673,7 +1026,8 @@ def post_earnings_to_ledger_task(
         }
     """
     from app.core.db import SessionLocal
-    from datetime import datetime, timedelta
+    import datetime as dt
+    from datetime import timedelta
 
     logger.info("*" * 80)
     logger.info("Starting CURB earnings posting task")
@@ -686,7 +1040,7 @@ def post_earnings_to_ledger_task(
 
         # Calculate date range if not provided (previous Sunday to Saturday)
         if not start_date or not end_date:
-            now = datetime.now()
+            now = dt.datetime.now()
             # Find last Sunday (week starts on Sunday)
             days_since_sunday = (now.weekday() + 1) % 7  # Monday=0 becomes 1, Sunday=6 becomes 0
             last_sunday = now - timedelta(days=days_since_sunday + 7)  # Go back to previous Sunday
@@ -698,8 +1052,8 @@ def post_earnings_to_ledger_task(
                 end_date = last_saturday.strftime("%Y-%m-%d")
 
         # Convert string dates to date objects
-        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+        start_date_obj = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date_obj = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
 
         logger.info(f"Posting earnings for period: {start_date_obj} to {end_date_obj}")
         if lease_id:

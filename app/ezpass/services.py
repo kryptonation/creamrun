@@ -167,6 +167,9 @@ class EZPassService:
                     time_str = row[column_indices['time']].strip()
                     amount_str = row[column_indices['amount']].strip()
                     
+                    if exit_plaza.upper() == "CRZ":
+                        continue
+                    
                     # Process amount (handle parentheses for negative values, remove $ signs)
                     amount_str = amount_str.replace("(", "-").replace(")", "").replace("$", "")
                     
@@ -376,6 +379,11 @@ class EZPassService:
                     CurbTrip.start_time <= trip_end,
                     CurbTrip.end_time >= trip_start
                 ).order_by(CurbTrip.start_time.desc()).first()
+                
+                if not curb_trip or not curb_trip.driver_id:
+                    curb_trip = self.db.query(CurbTrip).filter(
+                        CurbTrip.vehicle_id == vehicle.id
+                    ).order_by(CurbTrip.start_time.desc()).first()
 
                 if not curb_trip or not curb_trip.driver_id:
                     raise AssociationError(trans.transaction_id, f"No active CURB trip found for vehicle {vehicle.id} around {trans.transaction_datetime}")
@@ -501,7 +509,7 @@ class EZPassService:
                     failed_count += 1
                     continue
 
-                if not all([transaction.driver_id, transaction.lease_id, transaction.amount > 0]):
+                if not all([transaction.driver_id, transaction.lease_id, transaction.amount != 0]):
                     errors.append({
                         "transaction_id": txn_id,
                         "error": "Missing required fields (driver_id, lease_id, or valid amount)"
@@ -510,9 +518,10 @@ class EZPassService:
                     continue
 
                 # Post to ledger
+                logger.info("Posting transaction to ledger", amount=transaction.amount)
                 ledger_service.create_obligation(
                     category=PostingCategory.EZPASS,
-                    amount=transaction.amount,
+                    amount=transaction.amount if transaction.amount > 0 else transaction.amount * -1,
                     reference_id=transaction.transaction_id,
                     driver_id=transaction.driver_id,
                     lease_id=transaction.lease_id,

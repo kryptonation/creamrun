@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Tuple, Dict, Optional
+from io import BytesIO
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from app.loans.models import (
 from app.loans.repository import LoanRepository
 from app.loans.schemas import InstallmentPostingResult
 from app.utils.logger import get_logger
+from app.utils.s3_utils import s3_utils
 
 logger = get_logger(__name__)
 
@@ -99,6 +101,17 @@ class LoanService:
             bpm_service.create_case_entity(
                 self.db, case_no, "driver_loan", "id", str(new_loan.id)
             )
+
+            # NEW: Generate receipt PDF and store in S3
+            try:
+                receipt_s3_key, receipt_url = self._generate_and_store_receipt(new_loan)
+                new_loan.receipt_s3_key = receipt_s3_key
+                new_loan.receipt_url = receipt_url
+                logger.info(f"Successfully generated receipt for loan {loan_id} at {receipt_s3_key}")
+            except Exception as e:
+                logger.error(f"Failed to generate receipt for loan {loan_id}: {e}", exc_info=True)
+                # Don't fail the entire loan creation if receipt generation fails
+                # The receipt can be regenerated later if needed
             
             self.db.commit()
             logger.info(f"Successfully created and opened Driver Loan {loan_id}.")
@@ -107,6 +120,38 @@ class LoanService:
             self.db.rollback()
             logger.error(f"Failed to create driver loan: {e}", exc_info=True)
             raise InvalidLoanOperationError(f"Could not create driver loan: {e}")
+        
+    def _generate_and_store_receipt(self, loan: DriverLoan) -> Tuple[str, str]:
+        """
+        Generates the loan receipt PDF and stores it in S3.
+        
+        Returns:
+            Tuple[str, str]: (s3_key, presigned_url)
+        """
+        from app.loans.pdf_service import LoanPdfService
+        
+        # Generate PDF
+        pdf_service = LoanPdfService(self.db)
+        pdf_content = pdf_service.generate_receipt_pdf(loan.id)
+        
+        # Prepare S3 key
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"loan_receipts/{loan.loan_id}/{loan.loan_id}_{timestamp}.pdf"
+        
+        # Upload to S3
+        success = s3_utils.upload_file(
+            BytesIO(pdf_content),
+            s3_key,
+            content_type="application/pdf"
+        )
+        
+        if not success:
+            raise Exception("Failed to upload receipt to S3")
+        
+        # Generate presigned URL
+        presigned_url = s3_utils.generate_presigned_url(s3_key, expiration=3600)
+        
+        return s3_key, presigned_url
 
     def generate_payment_schedule(self, loan: DriverLoan):
         """

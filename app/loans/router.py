@@ -4,6 +4,7 @@ import math
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional , List
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -24,6 +25,7 @@ from app.loans.schemas import (
     PostInstallmentResponse,
     InstallmentPostingResult
 )
+from app.loans.repository import LoanRepository
 from app.loans.services import LoanService
 from app.loans.models import LoanInstallmentStatus
 from app.loans.stubs import create_stub_loan_response, create_stub_installment_response
@@ -41,66 +43,47 @@ def get_loan_service(db: Session = Depends(get_db)) -> LoanService:
     """Dependency to get LoanService instance."""
     return LoanService(db)
 
-@router.get("", response_model=PaginatedDriverLoanResponse, summary="List Driver Loans")
+@router.get("", summary="List All Driver Loans", response_model=PaginatedDriverLoanResponse)
 def list_driver_loans(
-    use_stubs: bool = Query(False, description="Return stubbed data for testing."),
     page: int = Query(1, ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    sort_by: Optional[str] = Query("start_week"),
-    sort_order: str = Query("desc", enum=["asc", "desc"]),
-    tlc_number: Optional[str] = Query(None, description="Filter by TLC License Number"),
-    lease_id: Optional[str] = Query(None, description="Filter by Lease ID"),
-    loan_id: Optional[str] = Query(None, description="Filter by Loan ID"),
-    status: Optional[List[str]] = Query(None, description="Filter by loan status"),
-    driver_name: Optional[str] = Query(None, description="Filter by driver name"),
-    medallion_no: Optional[str] = Query(None, description="Filter by medallion number"),
-    lease_type: Optional[str] = Query(None, description="Filter by lease type"),
-    start_week_from: Optional[date] = Query(None, description="Filter loans starting from this date (inclusive)"),
-    start_week_to: Optional[date] = Query(None, description="Filter loans starting up to this date (inclusive)"),
-    min_principal: Optional[Decimal] = Query(None, ge=0, description="Minimum principal amount"),
-    max_principal: Optional[Decimal] = Query(None, ge=0, description="Maximum principal amount"),
-    min_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100, description="Minimum interest rate (%)"),
-    max_interest_rate: Optional[Decimal] = Query(None, ge=0, le=100, description="Maximum interest rate (%)"),
-    loan_service: LoanService = Depends(get_loan_service)
+    per_page: int = Query(50, ge=1, le=200),
+    sort_by: str = Query("loan_date", regex="^(loan_id|loan_date|start_week|principal_amount|status|driver_name|medallion_no)$"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    tlc_number: Optional[str] = Query(None),
+    lease_id: Optional[str] = Query(None),
+    loan_id: Optional[str] = Query(None),
+    status: Optional[List[str]] = Query(None),
+    driver_name: Optional[str] = Query(None),
+    medallion_no: Optional[str] = Query(None),
+    lease_type: Optional[str] = Query(None),
+    start_week_from: Optional[date] = Query(None),
+    start_week_to: Optional[date] = Query(None),
+    min_principal: Optional[float] = Query(None),
+    max_principal: Optional[float] = Query(None),
+    min_interest_rate: Optional[float] = Query(None),
+    max_interest_rate: Optional[float] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Retrieves a paginated and filterable list of all driver loans.
+    List all driver loans with comprehensive filtering, sorting, and pagination.
     
-    Features:
-    - Driver details (ID, name, TLC license)
-    - Medallion details (number, owner)
-    - Date range filter for start week
-    - Range filters for principal amount and interest rate
-    - Available lease types for frontend reference
-    
-    Date Range Example:
-    - start_week_from=2025-01-01&start_week_to=2025-03-31 returns all loans starting in Q1 2025
+    NEW: Includes receipt_url in response for direct access to loan receipts
     """
-    if use_stubs:
-        return create_stub_loan_response(page, per_page)
-    
     try:
-        loans, total_items = loan_service.repo.list_loans(
-            page=page, 
-            per_page=per_page, 
-            sort_by=sort_by, 
-            sort_order=sort_order,
-            tlc_number=tlc_number, 
-            lease_id=lease_id,
-            loan_id=loan_id, 
-            status=status, 
-            driver_name=driver_name,
-            medallion_no=medallion_no, 
-            lease_type=lease_type, 
-            start_week_from=start_week_from,
-            start_week_to=start_week_to,
-            min_principal=min_principal,
-            max_principal=max_principal,
-            min_interest_rate=min_interest_rate,
+        repo = LoanRepository(db)
+        
+        loans, total_items = repo.list_loans(
+            page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
+            tlc_number=tlc_number, lease_id=lease_id, loan_id=loan_id,
+            status=status, driver_name=driver_name, medallion_no=medallion_no,
+            lease_type=lease_type, start_week_from=start_week_from,
+            start_week_to=start_week_to, min_principal=min_principal,
+            max_principal=max_principal, min_interest_rate=min_interest_rate,
             max_interest_rate=max_interest_rate,
         )
 
-        # Build response items with enhanced details
+        # Build response items with enhanced details including receipt URL
         response_items = []
         for loan in loans:
             # Extract driver details
@@ -115,13 +98,16 @@ def list_driver_loans(
             # Extract medallion details
             medallion_no = loan.medallion.medallion_number if loan.medallion else None
             owner_name = None
-            if loan.medallion.owner:
+            if loan.medallion and loan.medallion.owner:
                 medallion_dict = loan.medallion.to_dict()
                 owner_name = medallion_dict["owner_name"]
             medallion_owner = owner_name
             
             # Extract lease type
             lease_type_value = loan.lease.lease_type if loan.lease else None
+            
+            # NEW: Get fresh presigned URL for receipt
+            receipt_url = loan.presigned_receipt_url
             
             item = DriverLoanListResponse(
                 loan_id=loan.loan_id,
@@ -135,6 +121,7 @@ def list_driver_loans(
                 principal_amount=loan.principal_amount,
                 interest_rate=loan.interest_rate,
                 start_week=loan.start_week,
+                receipt_url=receipt_url,  # NEW: Include receipt URL
             )
             response_items.append(item)
         
@@ -179,73 +166,135 @@ def create_driver_loan_case(
         raise HTTPException(status_code=500, detail="Could not start a new driver loan case.") from e
 
 
-@router.get("/{loan_id}", response_model=DriverLoanDetailResponse, summary="View Driver Loan Details")
-def get_loan_details(
+@router.get("/{loan_id}", summary="Get Driver Loan Details", response_model=DriverLoanDetailResponse)
+def get_driver_loan_details(
     loan_id: str,
-    loan_service: LoanService = Depends(get_loan_service),
-    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    Retrieves the detailed view of a single driver loan, including its repayment schedule.
+    Retrieve detailed information about a single driver loan, including its installment schedule.
+    
+    NEW: Includes receipt_url in response for direct access to loan receipt
     """
     try:
-        loan = loan_service.repo.get_loan_by_loan_id(loan_id)
+        repo = LoanRepository(db)
+        loan = repo.get_loan_by_loan_id(loan_id)
+        
         if not loan:
-            raise LoanNotFoundError(loan_id)
-
-        total_paid = sum(
-            inst.principal_amount for inst in loan.installments if inst.status == LoanInstallmentStatus.PAID
+            raise HTTPException(status_code=404, detail=f"Driver loan not found with ID {loan_id}")
+        
+        # Format installments
+        installment_list = []
+        for inst in loan.installments:
+            installment_list.append(LoanInstallmentResponse(
+                installment_id=inst.installment_id,
+                week_start_date=inst.week_start_date,
+                week_end_date=inst.week_end_date,
+                principal_amount=inst.principal_amount,
+                interest_amount=inst.interest_amount,
+                total_due=inst.total_due,
+                status=inst.status,
+                ledger_posting_id=inst.ledger_posting_id,
+            ))
+        
+        # Extract driver details
+        driver_id = loan.driver.driver_id if loan.driver else None
+        driver_name = loan.driver.full_name if loan.driver else None
+        tlc_license = (
+            loan.driver.tlc_license.tlc_license_number 
+            if loan.driver and loan.driver.tlc_license 
+            else None
         )
-        remaining_balance = loan.principal_amount - total_paid
-        installments_progress = f"{len([i for i in loan.installments if i.status == LoanInstallmentStatus.PAID])}/{len(loan.installments)}"
-
-        driver_details = {"name": loan.driver.full_name}
-        lease_details = {"lease_id": loan.lease.lease_id, "type": loan.lease.lease_type}
-
-        schedule_response = []
-        balance = loan.principal_amount
-        prior_balance_agg = Decimal("0.0")
-        for inst in sorted(loan.installments, key=lambda x: x.week_start_date):
-            schedule_response.append(
-                LoanInstallmentResponse(
-                    installment_id=inst.installment_id,
-                    week_period=f"{inst.week_start_date.strftime('%m/%d/%Y')} - {inst.week_end_date.strftime('%m/%d/%Y')}",
-                    principal_amount=inst.principal_amount,
-                    interest_amount=inst.interest_amount,
-                    total_due=inst.total_due,
-                    prior_balance=prior_balance_agg,
-                    balance=balance - inst.principal_amount,
-                    status=inst.status,
-                    posted_on=inst.posted_on.date() if inst.posted_on else None,
-                )
-            )
-            balance -= inst.principal_amount
-            if inst.status == LoanInstallmentStatus.PAID:
-                prior_balance_agg += inst.principal_amount
+        
+        # Extract medallion details
+        medallion_no = loan.medallion.medallion_number if loan.medallion else None
+        owner_name = None
+        if loan.medallion and loan.medallion.owner:
+            medallion_dict = loan.medallion.to_dict()
+            owner_name = medallion_dict["owner_name"]
+        medallion_owner = owner_name
+        
+        # Extract lease type
+        lease_type_value = loan.lease.lease_type if loan.lease else None
+        
+        # NEW: Get fresh presigned URL for receipt
+        receipt_url = loan.presigned_receipt_url
         
         return DriverLoanDetailResponse(
             loan_id=loan.loan_id,
-            principal_amount=loan.principal_amount,
             status=loan.status,
-            loan_details={
-                "loan_id": loan.loan_id,
-                "principal": loan.principal_amount,
-                "interest_rate": loan.interest_rate,
-                "start_week": loan.start_week,
-                "medallion_no": loan.medallion.medallion_number,
-                "paid": total_paid,
-                "remaining": remaining_balance,
-                "progress": installments_progress,
-            },
-            driver_details=driver_details,
-            lease_details=lease_details,
-            payment_schedule=schedule_response,
+            driver_id=driver_id,
+            driver_name=driver_name,
+            tlc_license=tlc_license,
+            medallion_no=medallion_no,
+            medallion_owner=medallion_owner,
+            lease_type=lease_type_value,
+            principal_amount=loan.principal_amount,
+            interest_rate=loan.interest_rate,
+            loan_date=loan.loan_date,
+            start_week=loan.start_week,
+            notes=loan.notes,
+            installments=installment_list,
+            receipt_url=receipt_url,  # NEW: Include receipt URL
         )
-    except LoanNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching details for loan ID {loan_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching loan details.") from e
+        logger.error("Error fetching driver loan details: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred while fetching driver loan details."
+        ) from e
+    
+
+@router.get("/{loan_id}/receipt", summary="Download Driver Loan Receipt")
+def download_loan_receipt(
+    loan_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download the receipt PDF for a specific driver loan.
+    This endpoint redirects to the presigned S3 URL or generates the PDF on-the-fly if not stored.
+    
+    NEW ENDPOINT: Provides direct access to loan receipt PDFs
+    """
+    try:
+        repo = LoanRepository(db)
+        loan = repo.get_loan_by_loan_id(loan_id)
+        
+        if not loan:
+            raise HTTPException(status_code=404, detail=f"Driver loan not found with ID {loan_id}")
+        
+        # If receipt exists in S3, redirect to presigned URL
+        if loan.receipt_s3_key and loan.presigned_receipt_url:
+            return RedirectResponse(url=loan.presigned_receipt_url)
+        
+        # Otherwise, generate PDF on-the-fly
+        from app.loans.pdf_service import LoanPdfService
+        
+        pdf_service = LoanPdfService(db)
+        pdf_content = pdf_service.generate_receipt_pdf(loan.id)
+        
+        # Determine content type based on whether we generated PDF or fallback HTML
+        is_pdf = pdf_content.startswith(b'%PDF')
+        media_type = "application/pdf" if is_pdf else "text/html"
+        ext = "pdf" if is_pdf else "html"
+        
+        filename = f"Loan_Receipt_{loan_id}_{date.today()}.{ext}"
+        
+        return StreamingResponse(
+            BytesIO(pdf_content),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading receipt for loan {loan_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to download loan receipt") from e
 
 
 @router.get("/loans/export", summary="Export Driver Loan Data")

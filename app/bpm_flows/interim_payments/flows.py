@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Dict, Any, Optional
+from io import BytesIO
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -651,6 +652,44 @@ async def process_payment_allocation(db: Session, case_no: str, step_data: Dict[
             f"Successfully applied interim payment {interim_payment.payment_id} "
             f"to ledger for lease {selected_lease_id}"
         )
+
+        # ===== NEW: Generate and store receipt =====
+        try:
+            from app.interim_payments.pdf_service import InterimPaymentPdfService
+            from app.utils.s3_utils import s3_utils
+            
+            logger.info(f"Generating receipt PDF for payment {interim_payment.payment_id}")
+            
+            # Generate receipt PDF
+            pdf_service = InterimPaymentPdfService(db)
+            receipt_pdf = pdf_service.generate_receipt_pdf(interim_payment.id)
+            
+            # Prepare S3 key
+            year = datetime.now().year
+            month = datetime.now().strftime("%m")
+            s3_key = f"interim_payments/receipts/{year}/{month}/{interim_payment.payment_id}.pdf"
+            
+            # Upload to S3
+            pdf_buffer = BytesIO(receipt_pdf)
+            upload_success = s3_utils.upload_file(
+                file_obj=pdf_buffer,
+                key=s3_key,
+                content_type="application/pdf"
+            )
+            
+            if upload_success:
+                # Update interim payment with S3 key
+                interim_payment.receipt_s3_key = s3_key
+                db.commit()
+                db.refresh(interim_payment)
+                logger.info(f"Successfully stored receipt to S3: {s3_key}")
+            else:
+                logger.warning(f"Failed to upload receipt to S3 for payment {interim_payment.payment_id}")
+                
+        except Exception as receipt_error:
+            # Log error but don't fail the entire transaction
+            logger.error(f"Error generating/storing receipt: {str(receipt_error)}", exc_info=True)
+        # ===== END: Receipt generation =====
         
         # Mark BPM case as closed
         bpm_service.mark_case_as_closed(db, case_no)

@@ -112,6 +112,11 @@ class CurrentBalancesService:
                 joinedload(Lease.vehicle),
                 joinedload(Lease.medallion)
             )
+            .outerjoin(LeaseDriver)
+            .outerjoin(Driver)
+            .outerjoin(Vehicle)
+            .outerjoin(Medallion)
+            .outerjoin(TLCLicense)
             .filter(Lease.lease_status.in_([LeaseStatus.ACTIVE, LeaseStatus.TERMINATED]))
         )
         
@@ -145,8 +150,29 @@ class CurrentBalancesService:
             if filters.tlc_license_search:
                 tlc_licenses = [term.strip() for term in filters.tlc_license_search.split(',') if term.strip()]
                 if tlc_licenses:
-                    tlc_conditions = [TLCLicense.tlc_license_number.ilike(f"%{term}%") for term in tlc_licenses]
-                    query = query.join(Driver).join(TLCLicense).filter(or_(*tlc_conditions))
+                    logger.info(f"TLC License Search - Terms: {tlc_licenses}")
+                    
+                    # Use a fresh subquery to avoid join conflicts
+                    tlc_subquery = (
+                        self.db.query(Lease.id)
+                        .join(LeaseDriver)
+                        .join(Driver)
+                        .join(TLCLicense)
+                        .filter(
+                            LeaseDriver.is_additional_driver == False,
+                            or_(*[TLCLicense.tlc_license_number.ilike(f"%{term}%") for term in tlc_licenses])
+                        )
+                    )
+                    
+                    # Execute subquery to get lease IDs
+                    matching_lease_ids = [row[0] for row in tlc_subquery.all()]
+                    logger.info(f"TLC License Search - Found {len(matching_lease_ids)} matching lease IDs: {matching_lease_ids}")
+                    
+                    if matching_lease_ids:
+                        query = query.filter(Lease.id.in_(matching_lease_ids))
+                    else:
+                        # If no matches found, filter to return no results
+                        query = query.filter(Lease.id == -1)
             
             if filters.medallion_search:
                 medallions = [term.strip() for term in filters.medallion_search.split(',') if term.strip()]
@@ -170,12 +196,22 @@ class CurrentBalancesService:
             if filters.lease_status:
                 query = query.filter(Lease.lease_status == filters.lease_status.value)
             
-            if filters.driver_status and filters.driver_status != DriverStatusEnum.ACTIVE:
-                # Filter by driver status
-                pass  # Would need driver status field implementation
+            if filters.driver_status:
+                if filters.driver_status == DriverStatusEnum.ACTIVE:
+                    # Filter for active drivers (drivers with active TLC licenses)
+                    query = query.filter(
+                        Driver.driver_status == DriverStatusEnum.ACTIVE.value
+                    )
+                elif filters.driver_status == DriverStatusEnum.SUSPENDED:
+                    # Filter for inactive drivers (drivers with expired or no TLC licenses)
+                    query = query.filter(
+                        or_(
+                            Driver.driver_status == DriverStatusEnum.SUSPENDED.value
+                        )
+                    )
             
             if filters.payment_type:
-                query = query.join(Driver).filter(Driver.pay_to_mode == filters.payment_type.value)
+                query = query.filter(Driver.pay_to_mode == filters.payment_type.value)
         
         # Apply sorting
         if filters and filters.sort_by:
@@ -200,8 +236,6 @@ class CurrentBalancesService:
                 else:
                     query = query.order_by(sort_column.asc())
         
-        total_items = query.count()
-        
         # Handle pagination differently for financial column sorting
         if filters and filters.sort_by and filters.sort_by in [
             "cc_earnings", "weekly_lease_fee", "mta_tif", "ezpass_tolls", "pvb_violations",
@@ -213,7 +247,7 @@ class CurrentBalancesService:
             all_balance_rows = []
             for lease in all_leases:
                 row = self._calculate_live_balance_for_lease(lease, week_start, week_end)
-                if filters.dtr_status:
+                if filters and filters.dtr_status:
                     if row.dtr_status != filters.dtr_status:
                         continue
                 all_balance_rows.append(row)
@@ -231,16 +265,21 @@ class CurrentBalancesService:
             balance_rows = all_balance_rows[start_idx:end_idx]
             total_items = len(all_balance_rows)
         else:
-            # For non-financial columns, use database-level sorting and pagination
-            leases = query.offset((page - 1) * per_page).limit(per_page).all()
-            balance_rows = []
-            for lease in leases:
+            # For non-financial columns, need to get all data to apply calculated filters
+            all_leases = query.all()
+            all_balance_rows = []
+            for lease in all_leases:
                 row = self._calculate_live_balance_for_lease(lease, week_start, week_end)
-                # Apply DTR status filter
                 if filters and filters.dtr_status:
                     if row.dtr_status != filters.dtr_status:
                         continue
-                balance_rows.append(row)
+                all_balance_rows.append(row)
+            
+            # Apply pagination
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            balance_rows = all_balance_rows[start_idx:end_idx]
+            total_items = len(all_balance_rows)
         
         return balance_rows, total_items
     
@@ -305,6 +344,21 @@ class CurrentBalancesService:
         # Determine payment type
         payment_type = PaymentTypeEnum.ACH if driver and driver.pay_to_mode == 'ACH' else PaymentTypeEnum.CASH
         
+        # Convert lease status from database enum to current balances enum
+        lease_status_mapping = {
+            "Active": LeaseStatusEnum.ACTIVE,
+            "Terminated": LeaseStatusEnum.TERMINATED,
+            "Termination Requested": LeaseStatusEnum.TERMINATION_REQUESTED,
+        }
+        lease_status = lease_status_mapping.get(lease.lease_status, LeaseStatusEnum.ACTIVE)
+        
+        # Determine driver status based on TLC license expiration
+        # driver_status = DriverStatusEnum.SUSPENDED
+        # if driver and driver.tlc_license and driver.tlc_license.tlc_license_expiry_date:
+        #     current_date = date.today()
+        #     if driver.tlc_license.tlc_license_expiry_date >= current_date:
+        #         driver_status = DriverStatusEnum.ACTIVE
+        
         return WeeklyBalanceRow(
             lease_id=lease.lease_id,
             driver_name=driver.full_name if driver else "Unknown",
@@ -312,8 +366,8 @@ class CurrentBalancesService:
             medallion_number=medallion.medallion_number if medallion else "N/A",
             plate_number=vehicle.get_active_plate_number() if vehicle else "N/A",
             vin_number=vehicle.vin if vehicle else None,
-            lease_status=LeaseStatusEnum(lease.status.value),
-            driver_status=DriverStatusEnum.ACTIVE,  # Would need proper driver status
+            lease_status=lease_status,
+            driver_status=DriverStatusEnum(driver.driver_status.upper()) if driver and driver.driver_status else DriverStatusEnum.ACTIVE,
             dtr_status=DTRStatusEnum.NOT_GENERATED,
             payment_type=payment_type,
             cc_earnings=cc_earnings,
@@ -408,6 +462,26 @@ class CurrentBalancesService:
                 if vins:
                     vin_conditions = [Vehicle.vin.ilike(f"%{term}%") for term in vins]
                     query = query.filter(or_(*vin_conditions))
+            
+            # Driver status filter
+            if filters.driver_status:
+                if filters.driver_status == DriverStatusEnum.ACTIVE:
+                    # Filter for active drivers (drivers with active TLC licenses)
+                    query = query.filter(
+                        Driver.tlc_license.has(
+                            TLCLicense.tlc_license_expiration_date >= func.current_date()
+                        )
+                    )
+                elif filters.driver_status == DriverStatusEnum.INACTIVE:
+                    # Filter for inactive drivers (drivers with expired or no TLC licenses)
+                    query = query.filter(
+                        or_(
+                            Driver.tlc_license_id.is_(None),
+                            Driver.tlc_license.has(
+                                TLCLicense.tlc_license_expiration_date < func.current_date()
+                            )
+                        )
+                    )
         
         # Apply sorting for database columns
         if filters and filters.sort_by:
@@ -455,6 +529,22 @@ class CurrentBalancesService:
         
         payment_type = PaymentTypeEnum.ACH if driver and driver.pay_to_mode == 'ACH' else PaymentTypeEnum.CASH
         
+        # Convert lease status from database enum to current balances enum
+        lease_status_mapping = {
+            "Active": LeaseStatusEnum.ACTIVE,
+            "Terminated": LeaseStatusEnum.TERMINATED,
+            "Termination Requested": LeaseStatusEnum.TERMINATION_REQUESTED,
+        }
+        lease_status = lease_status_mapping.get(lease.lease_status, LeaseStatusEnum.ACTIVE) if lease else LeaseStatusEnum.TERMINATED
+        
+        # Determine driver status based on TLC license expiration
+        driver_status = DriverStatusEnum.INACTIVE
+        if driver and driver.tlc_license and driver.tlc_license.tlc_license_expiration_date:
+            # Use the DTR date or current date for historical comparison
+            comparison_date = dtr.generation_date.date() if dtr.generation_date else date.today()
+            if driver.tlc_license.tlc_license_expiration_date >= comparison_date:
+                driver_status = DriverStatusEnum.ACTIVE
+        
         return WeeklyBalanceRow(
             lease_id=lease.lease_id if lease else "N/A",
             driver_name=driver.full_name if driver else "Unknown",
@@ -462,8 +552,8 @@ class CurrentBalancesService:
             medallion_number=medallion.medallion_number if medallion else "N/A",
             plate_number=vehicle.get_active_plate_number() if vehicle else "N/A",
             vin_number=vehicle.vin if vehicle else None,
-            lease_status=LeaseStatusEnum.ACTIVE if lease and lease.status == LeaseStatus.ACTIVE else LeaseStatusEnum.TERMINATED,
-            driver_status=DriverStatusEnum.ACTIVE,
+            lease_status=lease_status,
+            driver_status=driver_status,
             dtr_status=DTRStatusEnum.GENERATED,
             payment_type=payment_type,
             cc_earnings=dtr.credit_card_earnings or Decimal("0"),
@@ -622,8 +712,8 @@ class CurrentBalancesService:
             self.db.query(DTR)
             .filter(
                 DTR.lease_id == lease_id,
-                DTR.period_start_date == last_week_start,
-                DTR.period_end_date == last_week_end,
+                DTR.week_start_date == last_week_start,
+                DTR.week_end_date == last_week_end,
                 DTR.status == DTRStatusModel.FINALIZED
             )
             .first()
@@ -696,7 +786,7 @@ class CurrentBalancesService:
             
             days.append(DailyBreakdown(
                 day_of_week=day_name,
-                date=current_date,
+                breakdown_date=current_date,
                 cc_earnings=cc_earnings,
                 mta_tif=mta_tif,
                 ezpass=ezpass,

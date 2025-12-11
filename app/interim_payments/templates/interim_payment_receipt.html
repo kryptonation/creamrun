@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interim Payment Receipt</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            color: #000;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 15mm;
+        }
+        
+        /* Header */
+        .header {
+            background-color: #F9B233;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        
+        .company-info {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .company-logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #000;
+        }
+        
+        .company-details {
+            text-align: left;
+            flex-grow: 1;
+            margin-left: 15px;
+        }
+        
+        .company-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #000;
+            margin-bottom: 3px;
+        }
+        
+        .company-address {
+            font-size: 10px;
+            color: #000;
+        }
+        
+        /* Receipt Info Section */
+        .receipt-info {
+            display: table;
+            width: 100%;
+            margin-bottom: 25px;
+            font-size: 10pt;
+        }
+        
+        .receipt-info-row {
+            display: table-row;
+        }
+        
+        .receipt-info-cell {
+            display: table-cell;
+            padding: 4px 10px;
+            vertical-align: middle;
+        }
+        
+        .receipt-info-label {
+            font-weight: normal;
+            width: 20%;
+        }
+        
+        .receipt-info-colon {
+            width: 2%;
+            text-align: center;
+        }
+        
+        .receipt-info-value {
+            font-weight: bold;
+            width: 28%;
+        }
+        
+        .receipt-info-value.highlight {
+            color: #E63946;
+        }
+        
+        /* Section Headers */
+        .section-header {
+            border-left: 4px solid #E63946;
+            padding-left: 10px;
+            font-size: 13pt;
+            font-weight: bold;
+            margin: 20px 0 15px 0;
+            color: #000;
+        }
+        
+        /* Payment Summary Table */
+        .payment-summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+        }
+        
+        .payment-summary-table th {
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 10pt;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        .payment-summary-table td {
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
+            font-size: 10pt;
+        }
+        
+        /* Payment Breakdown Table */
+        .payment-breakdown-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .payment-breakdown-table th {
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 10pt;
+            border-bottom: 2px solid #dee2e6;
+        }
+        
+        .payment-breakdown-table td {
+            padding: 10px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 10pt;
+        }
+        
+        .payment-breakdown-table td:last-child {
+            text-align: right;
+        }
+        
+        .payment-breakdown-table tr.total {
+            background-color: #e9ecef;
+            font-weight: bold;
+        }
+        
+        .payment-breakdown-table tr.total td {
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 12px 10px;
+        }
+        
+        /* Footer */
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            text-align: center;
+            font-size: 9pt;
+            color: #6c757d;
+        }
+        
+        /* Watermark */
+        .watermark {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 120px;
+            color: rgba(249, 178, 51, 0.08);
+            font-weight: bold;
+            z-index: -1;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="watermark">BAT</div>
+    
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-info">
+                <div class="company-logo">🚕 TAXI</div>
+                <div class="company-details">
+                    <div class="company-name">Big Apple Taxi Management LLC</div>
+                    <div class="company-address">50-24 Queens Boulevard, Woodside, NY 11377-4642, 718 779 5000 | bigappletaxinyc.com</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Receipt Information -->
+        <div class="receipt-info">
+            <div class="receipt-info-row">
+                <div class="receipt-info-cell receipt-info-label">Medallion</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value">{{ medallion }}</div>
+                <div class="receipt-info-cell receipt-info-label">Receipt number</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value">{{ receipt_number }}</div>
+            </div>
+            <div class="receipt-info-row">
+                <div class="receipt-info-cell receipt-info-label">Driver / Leaseholder</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value">{{ driver_name }}</div>
+                <div class="receipt-info-cell receipt-info-label">Receipt Date</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value">{{ receipt_date }}</div>
+            </div>
+            <div class="receipt-info-row">
+                <div class="receipt-info-cell receipt-info-label">TLC License</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value">{{ tlc_license }}</div>
+                <div class="receipt-info-cell receipt-info-label">Cashier</div>
+                <div class="receipt-info-cell receipt-info-colon">:</div>
+                <div class="receipt-info-cell receipt-info-value highlight">{{ cashier }}</div>
+            </div>
+        </div>
+        
+        <!-- Payment Summary Section -->
+        <div class="section-header">Payment Summary</div>
+        
+        <table class="payment-summary-table">
+            <thead>
+                <tr>
+                    <th>Amount</th>
+                    <th>Type</th>
+                    <th>Reference</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ payment_summary.amount }}</td>
+                    <td>{{ payment_summary.type }}</td>
+                    <td>{{ payment_summary.reference }}</td>
+                    <td>{{ payment_summary.date }}</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <!-- Payment Break-up Section -->
+        <div class="section-header">Payment Break-up</div>
+        
+        <table class="payment-breakdown-table">
+            <thead>
+                <tr>
+                    <th>Payment</th>
+                    <th>Reference ID</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in payment_breakdown %}
+                <tr>
+                    <td>{{ item.payment }}</td>
+                    <td>{{ item.reference_id }}</td>
+                    <td>{{ item.amount }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="total">
+                    <td colspan="2">Total</td>
+                    <td>{{ total }}</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <!-- Footer -->
+        <div class="footer">
+            This is a system-generated receipt. Generated on {{ generation_date }}.
+        </div>
+    </div>
+</body>
+</html>

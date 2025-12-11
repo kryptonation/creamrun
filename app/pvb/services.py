@@ -75,6 +75,7 @@ class PVBService:
 
             violations_to_insert = []
             failed_rows_count = 0
+            faild_reasons = []
 
             for i, row in enumerate(rows):
                 try:
@@ -138,6 +139,7 @@ class PVBService:
                 except (ValueError, IndexError) as e:
                     logger.warning(f"Skipping malformed row {i+2} in {file_name}: {e}. Data: {row}")
                     failed_rows_count += 1
+                    faild_reasons.append(f"Row {i+2}: {e}")
 
             self.repo.bulk_insert_violations(violations_to_insert)
             self.repo.update_import_record_status(
@@ -157,6 +159,7 @@ class PVBService:
                 "total_rows": len(rows),
                 "imported_records": len(violations_to_insert),
                 "failed_rows": failed_rows_count,
+                "failure_reasons": faild_reasons,
             }
         except Exception as e:
             self.db.rollback()
@@ -653,6 +656,62 @@ class PVBService:
             "failed": failed_count,
             "message": f"Retried {len(transactions_to_process)} transactions: {successful_count} succeeded, {failed_count} failed"
         }
+    
+    def get_pvb_logs(
+            self ,
+            import_id: Optional[int]=None,
+            file_name: Optional[str]=None,
+            from_date: Optional[date]=None,
+            to_date: Optional[date]=None,
+            status: Optional[PVBImportStatus]=None,
+            multiple: Optional[bool]=False,
+            sort_by: Optional[str] = None,
+            sort_order: Optional[str] = None,
+            page : Optional[int]= None,
+            per_page : Optional[int]= None
+    ) -> List[Dict]:
+        """
+        Retrieve logs for a specific PVB import.
+        """
+        try:
+            logs = self.db.query(PVBImport)
+
+            if import_id:
+                logs = logs.filter(PVBImport.id == import_id)
+            if file_name:
+                logs = logs.filter(PVBImport.file_name.ilike(f"%{file_name}%"))
+            if from_date:
+                logs = logs.filter(PVBImport.import_timestamp >= datetime.combine(from_date, time.min))
+            if to_date:
+                logs = logs.filter(PVBImport.import_timestamp <= datetime.combine(to_date, time.max))
+            if status:
+                logs = logs.filter(PVBImport.status == status)
+
+            # Sorting
+            if sort_by and sort_order:
+                sort_column = getattr(PVBImport, sort_by, None)
+                if sort_column is not None:
+                    if sort_order.lower() == "desc":
+                        logs = logs.order_by(sort_column.desc())
+                    else:
+                        logs = logs.order_by(sort_column.asc())
+                else:
+                    raise ValueError(f"Invalid sort column: {sort_by}")
+            else:
+                logs = logs.order_by(PVBImport.import_timestamp.desc())
+
+            # Pagination
+            if page and per_page:
+                logs = logs.offset((page - 1) * per_page).limit(per_page)
+
+            if multiple:
+                return [log.to_dict() for log in logs.all()]
+            else:
+                log = logs.first()
+                return log.to_dict() if log else None
+        except Exception as e:
+            logger.error(f"Error retrieving PVB logs: {e}", exc_info=True)
+            raise e
 
 # --- Celery Tasks ---
 

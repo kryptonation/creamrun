@@ -159,6 +159,26 @@ class LedgerRepository:
 
         result = self.db.execute(stmt)
         return list(result.scalars().all())
+    
+    def get_balance_by_lease_and_category(
+        self, 
+        lease_id: int, 
+        category: PostingCategory
+    ) -> Optional[LedgerBalance]:
+        """
+        Get the balance record for a specific lease and category.
+        Used for finding the LEASE balance when applying excess payments.
+        """
+        return (
+            self.db.query(LedgerBalance)
+            .filter(
+                LedgerBalance.lease_id == lease_id,
+                LedgerBalance.category == category,
+                LedgerBalance.status == BalanceStatus.OPEN
+            )
+            .order_by(LedgerBalance.due_date.asc())  # Get oldest first
+            .first()
+        )
 
     def list_postings(
         self,

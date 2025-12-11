@@ -307,3 +307,11 @@ class LoanRepository:
             .options(joinedload(LoanInstallment.loan))
             .all()
         )
+    
+    def get_installment_by_installment_id(self, installment_id: str) -> Optional[LoanInstallment]:
+        """Get installment by its system-generated ID."""
+        return (
+            self.db.query(LoanInstallment)
+            .filter(LoanInstallment.installment_id == installment_id)
+            .first()
+        )

@@ -21,7 +21,7 @@ from app.pvb.schemas import (
     PVBViolationResponse,
 )
 from app.pvb.services import PVBService
-from app.pvb.models import PVBViolation
+from app.pvb.models import PVBViolation , PVBImportStatus
 from app.pvb.stubs import create_stub_pvb_response
 from app.users.models import User
 from app.users.utils import get_current_user
@@ -65,6 +65,47 @@ async def upload_pvb_csv(
         logger.error("Error processing PVB CSV: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during file processing.") from e
 
+
+@router.get("/get_logs" , summary="Get PVB Processing Logs")
+def get_pvb_processing_logs(
+    page: int = Query(1, ge=1, description="Page number for pagination."),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page."),
+    import_id: Optional[int]= Query(None , description="Filter by Import ID."),
+    file_name: Optional[str]= Query(None , description="Filter by File Name."),
+    from_date: Optional[date]= Query(None , description="Filter from Import Date."),
+    to_date: Optional[date]= Query(None , description="Filter to Import Date."),
+    status: Optional[PVBImportStatus]= Query(None , description="Filter by Import Status."),
+    sort_by: Optional[str] = Query(None, description="Field to sort by."),
+    sort_order: Optional[str] = Query(None , description="Sort order (asc or desc)."),
+    pvb_service: PVBService = Depends(get_pvb_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieves logs related to PVB processing activities.
+    """
+    try:
+        logs = pvb_service.get_pvb_logs(
+            page=page,
+            per_page=per_page,
+            import_id=import_id,
+            file_name=file_name,
+            from_date=from_date,
+            to_date=to_date,
+            status=status,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            multiple=True
+        )
+        return {
+            "items": logs,
+            "total_items": len(logs),
+            "page": page,
+            "per_page": per_page,
+            "total_pages": math.ceil(len(logs) / per_page) if per_page > 0 else 0
+        }
+    except Exception as e:
+        logger.error("Error fetching PVB processing logs: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching logs.") from e
 
 @router.get("", response_model=PaginatedPVBViolationResponse, summary="List PVB Violations")
 def list_pvb_violations(

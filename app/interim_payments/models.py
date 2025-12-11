@@ -52,6 +52,8 @@ class InterimPayment(Base, AuditMixin):
     # --- Allocation Record ---
     allocations: Mapped[Optional[dict]] = mapped_column(JSON, comment="A JSON object detailing how the payment was allocated to different ledger balances.")
 
+    receipt_s3_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="S3 key/path for the generated receipt PDF")
+    
     # --- Relationships ---
     driver: Mapped["Driver"] = relationship()
     lease: Mapped["Lease"] = relationship()

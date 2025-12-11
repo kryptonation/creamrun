@@ -358,3 +358,121 @@ class RepairService:
         except Exception as e:
             logger.error(f"Error retrieving repair invoice: {e}", exc_info=True)
             raise InvalidRepairOperationError(f"Could not retrieve repair invoice: {e}") from e
+        
+    def mark_installment_paid(self, installment_id: str) -> None:
+        """
+        Called by LedgerService when an installment's balance reaches $0.
+        Updates installment status to PAID and checks if invoice should be closed.
+        
+        Args:
+            installment_id: The installment reference ID (e.g., "RPR-2025-001-01")
+        """
+        try:
+            installment = self.repo.get_installment_by_installment_id(installment_id)
+            
+            if not installment:
+                logger.warning(f"Installment {installment_id} not found for status update")
+                return
+            
+            # Only update if not already marked as PAID
+            if installment.status != RepairInstallmentStatus.PAID:
+                self.repo.update_installment(installment.id, {
+                    "status": RepairInstallmentStatus.PAID
+                })
+                
+                logger.info(
+                    f"Marked repair installment as PAID",
+                    installment_id=installment_id,
+                    invoice_id=installment.invoice_id
+                )
+                
+                # Check if all installments are now paid
+                self._check_and_close_invoice(installment.invoice_id)
+                
+        except Exception as e:
+            logger.error(
+                f"Error marking installment {installment_id} as paid",
+                error=str(e),
+                exc_info=True
+            )
+            raise
+
+    def mark_installment_reopened(self, installment_id: str) -> None:
+        """
+        Called by LedgerService when a payment is voided and balance is reopened.
+        Updates installment status back to POSTED and reopens invoice if needed.
+        
+        Args:
+            installment_id: The installment reference ID
+        """
+        try:
+            installment = self.repo.get_installment_by_installment_id(installment_id)
+            
+            if not installment:
+                logger.warning(f"Installment {installment_id} not found for status update")
+                return
+            
+            # Revert to POSTED status if currently PAID
+            if installment.status == RepairInstallmentStatus.PAID:
+                self.repo.update_installment(installment.id, {
+                    "status": RepairInstallmentStatus.POSTED
+                })
+                
+                logger.info(
+                    f"Reverted repair installment to POSTED (payment voided)",
+                    installment_id=installment_id,
+                    invoice_id=installment.invoice_id
+                )
+                
+                # Reopen invoice if it was closed
+                if installment.invoice.status == RepairInvoiceStatus.CLOSED:
+                    self.repo.update_invoice(installment.invoice_id, {
+                        "status": RepairInvoiceStatus.OPEN
+                    })
+                    logger.info(f"Reopened repair invoice {installment.invoice.repair_id}")
+                    
+        except Exception as e:
+            logger.error(
+                f"Error reopening installment {installment_id}",
+                error=str(e),
+                exc_info=True
+            )
+            raise
+
+    def _check_and_close_invoice(self, invoice_id: int) -> None:
+        """
+        Check if all installments for an invoice are PAID.
+        If so, mark the invoice as CLOSED.
+        
+        Args:
+            invoice_id: The invoice primary key
+        """
+        try:
+            invoice = self.repo.get_invoice_by_id(invoice_id)
+            
+            if not invoice or invoice.status == RepairInvoiceStatus.CLOSED:
+                return
+            
+            # Get all installments for this invoice
+            installments = self.repo.get_installments_by_invoice(invoice_id)
+            
+            # Check if ALL installments are PAID
+            if all(inst.status == RepairInstallmentStatus.PAID for inst in installments):
+                self.repo.update_invoice(invoice_id, {
+                    "status": RepairInvoiceStatus.CLOSED
+                })
+                
+                logger.info(
+                    f"Closed repair invoice (all installments paid)",
+                    repair_id=invoice.repair_id,
+                    invoice_id=invoice_id,
+                    total_installments=len(installments)
+                )
+                
+        except Exception as e:
+            logger.error(
+                f"Error checking/closing invoice {invoice_id}",
+                error=str(e),
+                exc_info=True
+            )
+            raise

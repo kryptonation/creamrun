@@ -172,6 +172,70 @@ class LedgerService:
                 new_status = BalanceStatus.CLOSED if new_balance_amount <= 0 else BalanceStatus.OPEN
                 self.repo.update_balance(balance, new_balance_amount, new_status)
 
+                # Notify source module if balance is fully paid
+                if new_balance_amount <= 0:
+                    self._notify_balance_paid(balance.reference_id, balance.category)
+
+            # Handle excess amount (auto-allocate to lease)
+            excess_amount = payment_amount - total_allocated
+
+            if excess_amount > 0:
+                if not lease_id:
+                    raise InvalidLedgerOperationError(
+                        f"lease_id is required to apply excess amount of ${excess_amount}."
+                    )
+                
+                logger.info(
+                    f"Applying excess amount ${excess_amount} to lease balance",
+                    driver_id=driver_id,
+                    lese_id=lease_id,
+                    excess_amount=float(excess_amount)
+                )
+
+                # Find the lease balance for this lease
+                lease_balance = self.repo.get_balance_by_lease_category(
+                    lease_id=lease_id, category=PostingCategory.LEASE
+                )
+
+                if lease_balance and lease_balance.status == BalanceStatus.OPEN:
+                    # Create CREDIT posting for lease
+                    excess_posting = LedgerPosting(
+                        category=PostingCategory.LEASE,
+                        amount=excess_amount,
+                        entry_type=EntryType.CREDIT,
+                        status=PostingStatus.POSTED,
+                        reference_id=f"PAYMENT-{payment_method}-EXCESS-{lease_balance.reference_id}",
+                        driver_id=driver_id,
+                        lease_id=lease_id,
+                        vehicle_id=lease_balance.vehicle_id,
+                        medallion_id=lease_balance.medallion_id,
+                    )
+                    self.repo.create_posting(excess_posting)
+                    created_postings.append(excess_posting)
+
+                    # Update lease balance
+                    new_lease_balance = Decimal(lease_balance.balance) - excess_amount
+                    new_lease_status = BalanceStatus.CLOSED if new_lease_balance <= 0 else BalanceStatus.OPEN
+                    self.repo.update_balance(lease_balance, new_lease_balance, new_lease_status)
+
+                    logger.info(
+                        f"Succesfully applied ${excess_amount} excess to lease balance",
+                        lease_balance_id=lease_balance.id,
+                        new_balance=float(new_lease_balance)
+                    )
+
+                    # Notify if lease balance is fully paid
+                    if new_lease_balance <= 0:
+                        self._notify_balance_paid(lease_balance.reference_id, PostingCategory.LEASE)
+                else:
+                    # No open lease balance exists - Create warning but don't fail
+                    logger.warning(
+                        f"No open lease balance found for lease_id {lease_id}. "
+                        f"Excess amount ${excess_amount} cannot be applied.",
+                        driver_id=driver_id,
+                        lease_id=lease_id
+                    )
+
             self.repo.db.commit()
             logger.info(
                 "Successfully applied interim payment.",
@@ -184,6 +248,34 @@ class LedgerService:
             self.repo.db.rollback()
             logger.error("Failed to apply interim payment.", error=str(e), exc_info=True)
             raise
+
+    def _notify_balance_paid(self, reference_id: str, category: PostingCategory):
+        """
+        Notify source modules when a balance is fully paid.
+        This enables status synchronization.
+        """
+        try:
+            if category == PostingCategory.REPAIR:
+                from app.repairs.services import RepairService
+                repair_service = RepairService(self.repo.db)
+                repair_service.mark_installment_paid(reference_id)
+                
+            elif category == PostingCategory.LOAN:
+                from app.loans.services import LoanService
+                loan_service = LoanService(self.repo.db)
+                loan_service.mark_installment_paid(reference_id)
+                
+            # Add other categories as needed (EZPASS, PVB, TLC, etc.)
+            
+        except Exception as e:
+            # Don't fail the payment if notification fails
+            logger.error(
+                f"Failed to notify source module about paid balance",
+                reference_id=reference_id,
+                category=category.value,
+                error=str(e),
+                exc_info=True
+            )
 
     def apply_weekly_earnings(
         self, driver_id: int, earnings_amount: Decimal, lease_id: Optional[int] = None
@@ -232,51 +324,117 @@ class LedgerService:
             logger.error("Failed to apply weekly earnings.", driver_id=driver_id, error=str(e), exc_info=True)
             raise
 
-    def void_posting(self, posting_id: str, reason: str) -> LedgerPosting:
+    def void_posting(
+        self,
+        posting_id: str,
+        reason: str,
+        user_id: int
+    ) -> Tuple[LedgerPosting, LedgerPosting]:
         """
-        Voids a posting by creating a reversal entry and updating the original status.
+        Voids a posting by creating a reversal and notifying source modules.
+        
+        NEW: Notifies source modules when payments are reversed so they can
+        update installment status back to POSTED.
         """
         try:
-            original_posting = self.repo.get_posting_by_id(posting_id)
-
-            if original_posting.status == PostingStatus.VOIDED:
-                raise InvalidLedgerOperationError(
-                    f"Posting {posting_id} is already voided."
-                )
-
-            # Create reversal posting
-            reversal_amount = -original_posting.amount
-            new_reversal = LedgerPosting(
-                category=original_posting.category,
+            # Get original posting
+            original = self.repo.get_posting_by_posting_id(posting_id)
+            
+            if not original:
+                raise PostingNotFoundError(f"Posting {posting_id} not found")
+            
+            if original.status == PostingStatus.VOIDED:
+                raise InvalidLedgerOperationError(f"Posting {posting_id} is already voided")
+            
+            # Mark original as voided
+            original.status = PostingStatus.VOIDED
+            original.voided_at = datetime.now(timezone.utc)
+            original.voided_by = user_id
+            original.void_reason = reason
+            
+            # Create reversal posting (opposite type)
+            reversal_type = EntryType.DEBIT if original.entry_type == EntryType.CREDIT else EntryType.CREDIT
+            reversal_amount = -original.amount if original.entry_type == EntryType.CREDIT else original.amount
+            
+            reversal = LedgerPosting(
+                category=original.category,
                 amount=reversal_amount,
-                entry_type=EntryType.CREDIT if original_posting.entry_type == EntryType.DEBIT else EntryType.DEBIT,
+                entry_type=reversal_type,
                 status=PostingStatus.POSTED,
-                reference_id=f"VOID-{original_posting.reference_id}",
-                driver_id=original_posting.driver_id,
-                lease_id=original_posting.lease_id,
-                vehicle_id=original_posting.vehicle_id,
-                medallion_id=original_posting.medallion_id,
-                reversal_for_id=original_posting.id,
+                reference_id=f"VOID-{original.posting_id}",
+                driver_id=original.driver_id,
+                lease_id=original.lease_id,
+                vehicle_id=original.vehicle_id,
+                medallion_id=original.medallion_id,
+                description=f"Reversal of {original.posting_id}: {reason}"
             )
-            self.repo.create_posting(new_reversal)
-
-            # Update original posting status
-            self.repo.update_posting_status(original_posting, PostingStatus.VOIDED)
-
-            # Update corresponding balance if it exists
-            balance = self.repo.get_balance_by_reference_id(original_posting.reference_id)
+            
+            self.repo.create_posting(reversal)
+            
+            # Link them
+            original.voided_by_posting_id = reversal.posting_id
+            
+            # Update the related balance
+            balance = self.repo.get_balance_by_reference_id(original.reference_id)
             if balance:
-                new_balance_amount = balance.balance - original_posting.amount
-                new_status = BalanceStatus.CLOSED if new_balance_amount <= 0 else BalanceStatus.OPEN
-                self.repo.update_balance(balance, new_balance_amount, new_status)
-
+                # Reverse the effect of the original posting
+                if original.entry_type == EntryType.CREDIT:
+                    # Original was a payment (reduced balance), so add it back
+                    new_balance = balance.balance + abs(original.amount)
+                else:
+                    # Original was an obligation (increased balance), so subtract it
+                    new_balance = balance.balance - abs(original.amount)
+                
+                # Reopen if necessary
+                new_status = BalanceStatus.OPEN if new_balance > 0 else BalanceStatus.CLOSED
+                
+                self.repo.update_balance(balance, new_balance, new_status)
+                
+                # NEW: Notify source module if payment was voided
+                if original.entry_type == EntryType.CREDIT and new_balance > 0:
+                    self._notify_balance_reopened(original.reference_id, original.category)
+            
             self.repo.db.commit()
-            logger.info("Successfully voided posting.", posting_id=posting_id, reversal_id=new_reversal.id)
-            return new_reversal
-        except (SQLAlchemyError, LedgerError, PostingNotFoundError) as e:
+            
+            logger.info(
+                f"Successfully voided posting {posting_id}",
+                reversal_posting_id=reversal.posting_id,
+                user_id=user_id
+            )
+            
+            return original, reversal
+            
+        except Exception as e:
             self.repo.db.rollback()
-            logger.error("Failed to void posting.", posting_id=posting_id, error=str(e), exc_info=True)
+            logger.error(f"Failed to void posting {posting_id}", error=str(e), exc_info=True)
             raise
+
+    def _notify_balance_reopened(self, reference_id: str, category: PostingCategory):
+        """
+        Notify source modules when a payment is voided and balance is reopened.
+        """
+        try:
+            if category == PostingCategory.REPAIR:
+                from app.repairs.services import RepairService
+                repair_service = RepairService(self.repo.db)
+                repair_service.mark_installment_reopened(reference_id)
+                
+            elif category == PostingCategory.LOAN:
+                from app.loans.services import LoanService
+                loan_service = LoanService(self.repo.db)
+                loan_service.mark_installment_reopened(reference_id)
+                
+            # Add other categories as needed
+            
+        except Exception as e:
+            # Don't fail the void if notification fails
+            logger.error(
+                f"Failed to notify source module about reopened balance",
+                reference_id=reference_id,
+                category=category.value,
+                error=str(e),
+                exc_info=True
+            )
 
     def list_postings(
         self, **kwargs

@@ -340,5 +340,124 @@ class LoanService:
         
         return results, successful_count, failed_count
     
+    def mark_installment_paid(self, installment_id: str) -> None:
+        """
+        Called by LedgerService when a loan installment's balance reaches $0.
+        Updates installment status to PAID and checks if loan should be closed.
+        
+        Args:
+            installment_id: The installment reference ID (e.g., "DLN-2025-001-01")
+        """
+        try:
+            installment = self.repo.get_installment_by_installment_id(installment_id)
+            
+            if not installment:
+                logger.warning(f"Loan installment {installment_id} not found for status update")
+                return
+            
+            # Only update if not already marked as PAID
+            if installment.status != LoanInstallmentStatus.PAID:
+                self.repo.update_installment(installment.id, {
+                    "status": LoanInstallmentStatus.PAID
+                })
+                
+                logger.info(
+                    f"Marked loan installment as PAID",
+                    installment_id=installment_id,
+                    loan_id=installment.loan_id
+                )
+                
+                # Check if all installments are now paid
+                self._check_and_close_loan(installment.loan_id)
+                
+        except Exception as e:
+            logger.error(
+                f"Error marking loan installment {installment_id} as paid",
+                error=str(e),
+                exc_info=True
+            )
+            raise
+
+    def mark_installment_reopened(self, installment_id: str) -> None:
+        """
+        Called by LedgerService when a payment is voided and balance is reopened.
+        Updates installment status back to POSTED and reopens loan if needed.
+        
+        Args:
+            installment_id: The installment reference ID
+        """
+        try:
+            installment = self.repo.get_installment_by_installment_id(installment_id)
+            
+            if not installment:
+                logger.warning(f"Loan installment {installment_id} not found for status update")
+                return
+            
+            # Revert to POSTED status if currently PAID
+            if installment.status == LoanInstallmentStatus.PAID:
+                self.repo.update_installment(installment.id, {
+                    "status": LoanInstallmentStatus.POSTED
+                })
+                
+                logger.info(
+                    f"Reverted loan installment to POSTED (payment voided)",
+                    installment_id=installment_id,
+                    loan_id=installment.loan_id
+                )
+                
+                # Reopen loan if it was closed
+                if installment.loan.status == LoanStatus.CLOSED:
+                    self.repo.update_loan(installment.loan_id, {
+                        "status": LoanStatus.OPEN
+                    })
+                    logger.info(f"Reopened loan {installment.loan.loan_id}")
+                    
+        except Exception as e:
+            logger.error(
+                f"Error reopening loan installment {installment_id}",
+                error=str(e),
+                exc_info=True
+            )
+            raise
+
+    def _check_and_close_loan(self, loan_id: int) -> None:
+        """
+        Check if all installments for a loan are PAID.
+        If so, mark the loan as CLOSED.
+        
+        Args:
+            loan_id: The loan primary key
+        """
+        try:
+            loan = self.repo.get_loan_by_id(loan_id)
+            
+            if not loan or loan.status == LoanStatus.CLOSED:
+                return
+            
+            # Get all installments for this loan
+            installments = self.db.query(LoanInstallment).filter(
+                LoanInstallment.loan_id == loan_id
+            ).all()
+            
+            # Check if ALL installments are PAID
+            if all(inst.status == LoanInstallmentStatus.PAID for inst in installments):
+                self.repo.update_loan(loan_id, {
+                    "status": LoanStatus.CLOSED
+                })
+                
+                logger.info(
+                    f"Closed loan (all installments paid)",
+                    loan_id=loan.loan_id,
+                    total_installments=len(installments)
+                )
+                
+        except Exception as e:
+            logger.error(
+                f"Error checking/closing loan {loan_id}",
+                error=str(e),
+                exc_info=True
+            )
+            raise
+    
 
         

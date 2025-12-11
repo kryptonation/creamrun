@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from pydantic import BaseModel, Field
 
@@ -50,8 +50,10 @@ class InterimPaymentResponse(BaseModel):
     amount: Decimal
     payment_date: datetime
     payment_method: PaymentMethod
+    receipt_url: Optional[str] = None
 
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
         populate_by_name = True
 
@@ -67,3 +69,34 @@ class PaginatedInterimPaymentResponse(BaseModel):
     total_pages: int
     available_categories: List[str] = []
     available_payment_methods: List[str] = []
+
+
+class InterimPaymentAllocationDetail(BaseModel):
+    """Details of a single allocation within an interim payment."""
+    category: str
+    reference_id: str
+    amount: Decimal
+    # NEW: Include ledger status
+    ledger_balance_status: Optional[str] = None  # "OPEN" or "CLOSED"
+    is_fully_paid: Optional[bool] = None
+
+class InterimPaymentDetailResponse(BaseModel):
+    """Detailed response for a single interim payment."""
+    payment_id: str
+    case_no: str
+    driver_id: int
+    driver_name: str
+    lease_id: int
+    lease_identifier: str
+    payment_date: datetime
+    total_amount: Decimal
+    payment_method: PaymentMethod
+    allocations: List[InterimPaymentAllocationDetail]
+    notes: Optional[str] = None
+    receipt_url: Optional[str] = None
+    created_by: int
+    created_on: datetime
+    
+    # NEW: Summary fields
+    total_allocated: Decimal
+    excess_to_lease: Optional[Decimal] = None  # If any excess was applied

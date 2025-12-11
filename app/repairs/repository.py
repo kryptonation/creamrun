@@ -304,3 +304,16 @@ class RepairRepository:
         query = query.offset((page - 1) * per_page).limit(per_page)
 
         return query.all(), total_items
+    
+    def get_installments_by_invoice(self, invoice_id: int) -> List[RepairInstallment]:
+        """Get all installments for a given invoice."""
+        return (
+            self.db.query(RepairInstallment)
+            .filter(RepairInstallment.invoice_id == invoice_id)
+            .order_by(RepairInstallment.week_start_date.asc())
+            .all()
+        )
+
+    # def get_invoice_by_id(self, invoice_id: int) -> Optional[RepairInvoice]:
+    #     """Get invoice by primary key."""
+    #     return self.db.query(RepairInvoice).filter(RepairInvoice.id == invoice_id).first()

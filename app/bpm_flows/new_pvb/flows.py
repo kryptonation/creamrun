@@ -273,8 +273,24 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
         case_entity = bpm_service.get_case_entity(db, case_no=case_no, entity_name=ENTITY_MAPPER["PVB"])
 
         fine = Decimal(step_data.get("fine" , 0))
-        processing_fee = fine * Decimal("0.025")
-        amount_due = fine + processing_fee
+        penalty = Decimal(step_data.get("penalty" , 0))
+        interest = Decimal(step_data.get("interest" , 0))
+        reduction = Decimal(step_data.get("reduction" , 0))
+        payment = Decimal(step_data.get("payment" , 0))
+        processing_fee = 0
+
+        if fine <= 50:
+            processing_fee = Decimal(5)
+        elif fine > 50:
+            processing_fee = Decimal(7)
+
+        amount_due = (fine + penalty + interest + processing_fee) - (reduction + payment)
+
+        if amount_due != Decimal(step_data.get("amount_due" , 0)):
+            raise HTTPException(
+                status_code=400,
+                detail="Amount due does not match the calculated total from fine, penalty, interest, reduction, processing fee, and payment"
+            )
         
         pvb_service = PVBService(db)
         
@@ -293,9 +309,9 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 violation.issue_date = step_data.get("issue_date" , None)
                 violation.issue_time = step_data.get("issue_time" , None)
                 violation.fine = fine
-                violation.penalty = Decimal(step_data.get("penalty" , 0))
-                violation.interest = Decimal(step_data.get("interest" , 0))
-                violation.reduction = Decimal(step_data.get("reduction" , 0))
+                violation.penalty = penalty
+                violation.interest = interest
+                violation.reduction = reduction
                 violation.amount_due = amount_due
                 violation.violation_code = step_data.get("violation_code" , None)
                 violation.violation_country = step_data.get("violation_country" , None)
@@ -309,7 +325,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 violation.street_code_2 = step_data.get("street_code_2" , None)
                 violation.street_code_3 = step_data.get("street_code_3" , None)
                 violation.non_program = step_data.get("non_program" , False)
-                violation.payment = Decimal(step_data.get("payment" , 0))
+                violation.payment = payment
                 violation.ng_pmt = step_data.get("ng_pmt")
                 violation.judgement = step_data.get("judgement")
                 violation.system_entry_date = step_data.get("system_entry_date" , None)
@@ -336,9 +352,9 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 "issue_date": step_data.get("issue_date" , None),
                 "fine": fine,
                 "processing_fee": processing_fee,
-                "penalty": Decimal(step_data.get("penalty" ,0)),
-                "interest": Decimal(step_data.get("interest" , 0)),
-                "reduction": Decimal(step_data.get("reduction" , 0)),
+                "penalty": penalty,
+                "interest": interest,
+                "reduction": reduction,
                 "amount_due": amount_due,
                 "violation_code": step_data.get("violation_code" , None),
                 "violation_country": step_data.get("violation_country" , None),
@@ -351,7 +367,7 @@ def choose_driver_process(db: Session, case_no: str, step_data: Dict[str, Any]):
                 "street_code_2": step_data.get("street_code_2" , None),
                 "street_code_3": step_data.get("street_code_3" , None),
                 "non_program": step_data.get("non_program" , False),
-                "payment": Decimal(step_data.get("payment" , 0)),
+                "payment": payment,
                 "ng_pmt": step_data.get("ng_pmt" ),
                 "judgement": step_data.get("judgement" , False),
                 "system_entry_date": step_data.get("system_entry_date" , None),

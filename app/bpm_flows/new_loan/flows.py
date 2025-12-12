@@ -339,6 +339,9 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
         
         # Create audit trail
         case = bpm_service.get_cases(db=db, case_no=case_no)
+        
+        receipt_s3_key, receipt_url = loan_svc._generate_and_store_receipt(loan)
+        
         if case:
             audit_trail_service.create_audit_trail(
                 db=db,
@@ -360,7 +363,7 @@ async def enter_loan_details_process(db: Session, case_no: str, step_data: Dict[
         logger.info(f"Successfully created loan {loan.loan_id} for case {case_no}")
         
         # Return data for confirmation modal
-        return {"installments": formatted_installments, "loan_id": loan.loan_id, "status": "Ok"}
+        return {"installments": formatted_installments, "loan_id": loan.loan_id, "receipt_s3_key": receipt_s3_key, "receipt_url": receipt_url, "status": "Ok"}
         
     except HTTPException:
         db.rollback()

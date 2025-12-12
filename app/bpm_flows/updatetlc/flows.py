@@ -113,16 +113,16 @@ def fetch_tlc_license(db, case_no, case_params=None):
         if tlc_doc and tlc_doc.get("document_path"):
             metadata = s3_utils.get_file_metadata(tlc_doc["document_path"])
             metadata = metadata if metadata else {}
-            metadata = metadata.get("extracted_data" , {}).get("extracted_data" ,{})
+            metadata = metadata.get("extracted_data" , {})
             extracted_data[tlc_doc.get("document_type")] = metadata
 
         logger.info(f"##$#### TLC Data OCR: {extracted_data}")
 
         if extracted_data.get("tlc_license" , {}):
             tlc_data = extracted_data.get("tlc_license" , {})
-            if tlc_data.get("dates", None):
-                    driver_data["tlc_license_details"]["tlc_license_expiry_date"] = tlc_data.get("dates", driver_data["tlc_license_details"]["tlc_license_expiry_date"])[0]
-                    driver_data["tlc_license_details"]["tlc_license_number"] = tlc_data.get("license_number", driver_data["tlc_license_details"]["tlc_license_number"])
+           
+            driver_data["tlc_license_details"]["tlc_license_expiry_date"] = tlc_data.get("expiration_date", driver_data["tlc_license_details"]["tlc_license_expiry_date"])
+            driver_data["tlc_license_details"]["tlc_license_number"] = tlc_data.get("tlc_license_number", driver_data["tlc_license_details"]["tlc_license_number"])
 
         return {
             "driver_info": {

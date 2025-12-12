@@ -38,114 +38,82 @@ class DriverStatusEnum(str, Enum):
     BLACKLISTED = "BLACKLISTED"
 
 
-class DailyBreakdown(BaseModel):
-    """Daily breakdown of earnings and charges"""
-    day_of_week: str = Field(..., description="Day name (Sunday, Monday, etc.)")
-    breakdown_date: date = Field(..., description="Specific date")
-    cc_earnings: Decimal = Field(default=Decimal("0"), description="Credit card earnings for the day")
-    mta_tif: Decimal = Field(default=Decimal("0"), description="MTA/TIF charges for the day")
-    ezpass: Decimal = Field(default=Decimal("0"), description="EZPass tolls for the day")
-    pvb_violations: Decimal = Field(default=Decimal("0"), description="PVB violations for the day")
-    tlc_tickets: Decimal = Field(default=Decimal("0"), description="TLC tickets for the day")
-    net_daily_earnings: Decimal = Field(default=Decimal("0"), description="Net earnings for the day")
-
-
-class DelayedCharge(BaseModel):
-    """Delayed charges from previous weeks"""
-    category: str = Field(..., description="Charge category (EZPass, PVB, TLC)")
-    amount: Decimal = Field(..., description="Amount of delayed charge")
-    original_date: date = Field(..., description="Original occurrence date")
-    system_entry_date: date = Field(..., description="Date charge was entered into system")
-    description: Optional[str] = Field(None, description="Description of the charge")
+class WeekPeriod(BaseModel):
+    """Week period information"""
+    week_start: date
+    week_end: date
+    week_label: str
+    is_current_week: bool
 
 
 class WeeklyBalanceRow(BaseModel):
-    """Single row in the current balances table representing a lease"""
+    """
+    Single row in the current balances table
     
-    # Identification
-    lease_id: str = Field(..., description="Lease ID")
-    driver_name: str = Field(..., description="Primary driver name")
-    tlc_license: Optional[str] = Field(None, description="Driver TLC license")
-    medallion_number: str = Field(..., description="Medallion number")
-    plate_number: str = Field(..., description="Vehicle plate number")
-    vin_number: Optional[str] = Field(None, description="Vehicle VIN number")
+    UPDATED: Added ssn field with masked SSN (XXX-XX-####)
+    """
+    # Identity fields
+    lease_id: str
+    driver_name: str
+    tlc_license: Optional[str]
+    ssn: Optional[str] = Field(None, description="Masked SSN (XXX-XX-####)")  # NEW
+    medallion_number: str
+    plate_number: Optional[str]
+    vin_number: Optional[str]
     
     # Status fields
-    lease_status: LeaseStatusEnum = Field(..., description="Lease status")
-    driver_status: DriverStatusEnum = Field(..., description="Driver status")
-    dtr_status: DTRStatusEnum = Field(..., description="DTR generation status")
-    payment_type: PaymentTypeEnum = Field(..., description="Payment method")
+    lease_status: LeaseStatusEnum
+    driver_status: DriverStatusEnum
+    dtr_status: DTRStatusEnum
+    payment_type: PaymentTypeEnum
     
-    # Financial data (Week-to-Date)
-    cc_earnings: Decimal = Field(default=Decimal("0"), description="Credit card earnings WTD")
-    weekly_lease_fee: Decimal = Field(default=Decimal("0"), description="Weekly lease charge")
-    mta_tif: Decimal = Field(default=Decimal("0"), description="MTA/TIF charges WTD")
-    ezpass_tolls: Decimal = Field(default=Decimal("0"), description="EZPass tolls WTD")
-    pvb_violations: Decimal = Field(default=Decimal("0"), description="PVB violations WTD")
-    tlc_tickets: Decimal = Field(default=Decimal("0"), description="TLC tickets WTD")
-    repairs_wtd: Decimal = Field(default=Decimal("0"), description="Repairs due this week")
-    loans_wtd: Decimal = Field(default=Decimal("0"), description="Loan installments due this week")
-    misc_charges: Decimal = Field(default=Decimal("0"), description="Miscellaneous charges")
-    
-    # Calculated fields
-    subtotal_deductions: Decimal = Field(default=Decimal("0"), description="Total deductions")
-    prior_balance: Decimal = Field(default=Decimal("0"), description="Prior balance carried forward")
-    deposit_amount: Decimal = Field(default=Decimal("0"), description="Deposit amount")
-    net_earnings: Decimal = Field(default=Decimal("0"), description="Net earnings after all deductions")
-    
-    # Expandable details (populated on demand)
-    daily_breakdown: Optional[List[DailyBreakdown]] = Field(None, description="Daily breakdown of earnings/charges")
-    delayed_charges: Optional[List[DelayedCharge]] = Field(None, description="Delayed charges from previous weeks")
+    # Financial fields
+    cc_earnings: Decimal
+    weekly_lease_fee: Decimal
+    mta_tif: Decimal
+    ezpass_tolls: Decimal
+    pvb_violations: Decimal
+    tlc_tickets: Decimal
+    repairs_wtd: Decimal
+    loans_wtd: Decimal
+    misc_charges: Decimal
+    subtotal_deductions: Decimal
+    prior_balance: Decimal
+    deposit_amount: Decimal
+    net_earnings: Decimal
     
     # Metadata
-    last_updated: datetime = Field(..., description="Last update timestamp")
+    last_updated: datetime
 
-
-class WeekPeriod(BaseModel):
-    """Week period information"""
-    week_start: date = Field(..., description="Sunday start date")
-    week_end: date = Field(..., description="Saturday end date")
-    week_label: str = Field(..., description="Human-readable week label")
-    is_current_week: bool = Field(..., description="Whether this is the current active week")
-    
-    @field_validator('week_start')
-    @classmethod
-    def validate_week_start(cls, v):
-        """Ensure week starts on Sunday"""
-        if v.weekday() != 6:  # Sunday is 6 in Python
-            raise ValueError('Week must start on Sunday')
-        return v
-    
-    @field_validator('week_end')
-    @classmethod
-    def validate_week_end(cls, v):
-        """Ensure week ends on Saturday"""
-        if v.weekday() != 5:  # Saturday is 5 in Python
-            raise ValueError('Week must end on Saturday')
-        return v
+    class Config:
+        """Pydantic configuration"""
+        from_attributes = True
 
 
 class CurrentBalancesFilter(BaseModel):
-    """Enhanced filters for current balances query with individual column search and sorting"""
-    # General search (existing)
-    search: Optional[str] = Field(None, description="General search by lease ID, driver name, TLC license, medallion, or plate")
+    """
+    Filter parameters for current balances
     
-    # Individual column searches
-    lease_id_search: Optional[str] = Field(None, description="Search by lease ID (comma-separated for multiple values)")
-    driver_name_search: Optional[str] = Field(None, description="Search by driver name (comma-separated for multiple values)")
-    tlc_license_search: Optional[str] = Field(None, description="Search by TLC license (comma-separated for multiple values)")
-    medallion_search: Optional[str] = Field(None, description="Search by medallion number (comma-separated for multiple values)")
-    plate_search: Optional[str] = Field(None, description="Search by plate number (comma-separated for multiple values)")
-    vin_search: Optional[str] = Field(None, description="Search by VIN number (comma-separated for multiple values)")
+    UPDATED: Added ssn_search field
+    """
+    # Search filters
+    search: Optional[str] = None
+    lease_id_search: Optional[str] = None
+    driver_name_search: Optional[str] = None
+    tlc_license_search: Optional[str] = None
+    medallion_search: Optional[str] = None
+    plate_search: Optional[str] = None
+    vin_search: Optional[str] = None
+    ssn_search: Optional[str] = Field(None, description="Search by SSN (full or last 4 digits)")  # NEW
     
-    # Status filters (existing)
-    lease_status: Optional[LeaseStatusEnum] = Field(None, description="Filter by lease status")
-    driver_status: Optional[DriverStatusEnum] = Field(None, description="Filter by driver status")
-    payment_type: Optional[PaymentTypeEnum] = Field(None, description="Filter by payment type")
-    dtr_status: Optional[DTRStatusEnum] = Field(None, description="Filter by DTR status")
+    # Status filters
+    lease_status: Optional[LeaseStatusEnum] = None
+    driver_status: Optional[DriverStatusEnum] = None
+    payment_type: Optional[PaymentTypeEnum] = None
+    dtr_status: Optional[DTRStatusEnum] = None
     
     # Sorting
-    sort_by: Optional[str] = Field(None, description="Column to sort by (lease_id, driver_name, medallion_number, plate_number, cc_earnings, net_earnings, etc.)")
+    sort_by: Optional[str] = None
     sort_order: Optional[str] = Field("asc", description="Sort order: asc or desc")
 
 
@@ -158,18 +126,42 @@ class CurrentBalancesResponse(BaseModel):
     per_page: int = Field(..., description="Items per page")
     total_pages: int = Field(..., description="Total pages")
     last_refresh: datetime = Field(..., description="Last data refresh timestamp")
-    available_filters: Optional[dict] = Field(None, description="Available filter values for frontend reference")
+    available_filters: Optional[dict] = Field(None, description="Available filter values")
+
+
+class DailyBreakdown(BaseModel):
+    """Daily breakdown of charges"""
+    date: date
+    cc_earnings: Decimal
+    ezpass: Decimal
+    mta_tif: Decimal
+    violations: Decimal
+    tlc_tickets: Decimal
+    net_daily: Decimal
+
+
+class DelayedCharge(BaseModel):
+    """Delayed charge from previous weeks"""
+    category: str
+    amount: Decimal
+    original_date: date
+    system_entry_date: datetime
+    description: Optional[str]
 
 
 class WeeklyBalanceDetail(BaseModel):
-    """Detailed view of a single lease balance with daily breakdown"""
+    """
+    Detailed view of a single lease balance with daily breakdown
     
+    UPDATED: Added ssn field
+    """
     # All fields from WeeklyBalanceRow
     lease_id: str
     driver_name: str
     tlc_license: Optional[str]
+    ssn: Optional[str] = Field(None, description="Masked SSN (XXX-XX-####)")  # NEW
     medallion_number: str
-    plate_number: str
+    plate_number: Optional[str]
     vin_number: Optional[str]
     lease_status: LeaseStatusEnum
     driver_status: DriverStatusEnum

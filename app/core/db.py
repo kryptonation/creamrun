@@ -84,7 +84,7 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-        logger.info("Committing DB transaction")
+        logger.debug("Committing DB transaction")
         db.commit()
     finally:
         db.close()
@@ -138,7 +138,7 @@ async def get_async_db():
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            logger.info("Committing async DB transaction")
+            logger.debug("Committing async DB transaction")
             await session.commit()
         except Exception as e:
             await session.rollback()

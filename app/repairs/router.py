@@ -1,12 +1,13 @@
 ### app/repairs/router.py
 
 import math
+from io import BytesIO
 from datetime import date , datetime
 from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -24,6 +25,8 @@ from app.repairs.schemas import (
 )
 from app.repairs.models import RepairInstallment , RepairInvoice
 from app.repairs.services import RepairService
+from app.repairs.pdf_service import RepairPdfService
+from app.repairs.repository import RepairRepository
 from app.leases.services import lease_service
 from app.repairs.stubs import create_stub_repair_invoice_response, create_stub_repair_installment_response
 from app.users.models import User
@@ -43,7 +46,6 @@ def get_repair_service(db: Session = Depends(get_db)) -> RepairService:
 
 @router.get("", response_model=PaginatedRepairInvoiceResponse, summary="List Vehicle Repair Invoices")
 def list_repair_invoices(
-    use_stubs: bool = Query(False, description="Return stubbed data for testing."),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     sort_by: Optional[str] = Query("date"),
@@ -66,43 +68,56 @@ def list_repair_invoices(
 ):
     """
     Retrieves a paginated and filterable list of all vehicle repair invoices.
-    """
-    if use_stubs:
-        return create_stub_repair_invoice_response(page, per_page)
     
+    NEW: Includes receipt_url in the response for each invoice.
+    """
     try:
         invoices, total_items = repair_service.repo.list_invoices(
             page=page, per_page=per_page, sort_by=sort_by, sort_order=sort_order,
-            repair_id=repair_id, invoice_number=invoice_number, from_invoice_date=from_invoice_date,
-            to_invoice_date=to_invoice_date, lease_type=lease_type, workshop_type=workshop_type,
+            repair_id=repair_id, invoice_number=invoice_number,
+            from_invoice_date=from_invoice_date, to_invoice_date=to_invoice_date,
+            lease_type=lease_type, workshop_type=workshop_type,
             from_total_amount=from_total_amount, to_total_amount=to_total_amount,
-            status=status, driver_name=driver_name, medallion_no=medallion_no , lease_id=lease_id,
-            vin=vin
+            status=status, driver_name=driver_name, medallion_no=medallion_no,
+            lease_id=lease_id, vin=vin
         )
 
-        response_items = [
-            RepairInvoiceListResponse(
-                repair_id=inv.repair_id,
-                invoice_number=inv.invoice_number,
-                invoice_date=inv.invoice_date,
-                status=inv.status,
-                driver_name=inv.driver.full_name if inv.driver else "N/A",
-                medallion_no=inv.medallion.medallion_number if inv.medallion else "N/A",
-                lease_type=inv.lease.lease_type if inv.lease else "N/A",
-                workshop_type=inv.workshop_type,
-                total_amount=inv.total_amount,
-            ) for inv in invoices
-        ]
-        
-        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+        items = []
+        for inv in invoices:
+            items.append(
+                RepairInvoiceListResponse(
+                    repair_id=inv.repair_id,
+                    invoice_number=inv.invoice_number,
+                    invoice_date=inv.invoice_date,
+                    status=inv.status.value,
+                    driver_name=inv.driver.full_name if inv.driver else None,
+                    medallion_no=inv.medallion.medallion_number if inv.medallion else None,
+                    lease_type=inv.lease.lease_type if inv.lease else None,
+                    workshop_type=inv.workshop_type.value,
+                    total_amount=inv.total_amount,
+                    receipt_url=inv.presigned_receipt_url,  # NEW
+                )
+            )
+
+        total_pages = math.ceil(total_items / per_page) if total_items > 0 else 0
 
         return PaginatedRepairInvoiceResponse(
-            items=response_items, total_items=total_items, page=page,
-            per_page=per_page, total_pages=total_pages
+            items=items,
+            total_items=total_items,
+            page=page,
+            per_page=per_page,
+            total_pages=total_pages,
         )
+
+    except RepairError as e:
+        logger.warning("Business logic error in list_repair_invoices: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error("Error fetching repair invoices: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching repair invoices.") from e
+        logger.error("Error listing repair invoices: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while retrieving repair invoices.",
+        ) from e
 
 
 @router.post("/create-case", summary="Create a New Repair Invoice Case", status_code=status.HTTP_201_CREATED)
@@ -126,82 +141,90 @@ def create_repair_invoice_case(
         raise HTTPException(status_code=500, detail="Could not start a new repair invoice case.") from e
 
 
-@router.get("/{repair_id}", response_model=RepairInvoiceDetailResponse, summary="View Repair Invoice Details")
+@router.get("/{repair_id}", response_model=RepairInvoiceDetailResponse, summary="Get Repair Invoice Details")
 def get_repair_invoice_details(
     repair_id: str,
     repair_service: RepairService = Depends(get_repair_service),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Retrieves the detailed view of a single repair invoice, including its payment schedule.
+    Fetches the full details of a single repair invoice, including payment schedule.
+    
+    NEW: Includes receipt_url in the response.
     """
     try:
         invoice = repair_service.repo.get_invoice_by_repair_id(repair_id)
         if not invoice:
-            raise InvoiceNotFoundError(repair_id)
+            raise InvoiceNotFoundError(f"Repair invoice '{repair_id}' not found.")
 
+        # Calculate totals
+        installments = invoice.installments
         total_paid = sum(
-            inst.principal_amount for inst in invoice.installments if inst.status == RepairInstallmentStatus.PAID
+            inst.principal_amount
+            for inst in installments
+            if inst.status == RepairInstallmentStatus.PAID
         )
         remaining_balance = invoice.total_amount - total_paid
-        installments_progress = f"{len([i for i in invoice.installments if i.status == RepairInstallmentStatus.PAID])}/{len(invoice.installments)}"
+        paid_count = sum(1 for inst in installments if inst.status == RepairInstallmentStatus.PAID)
+        installments_progress = f"{paid_count}/{len(installments)}"
 
-        # Prepare detailed information cards
-        driver_details = {
-            "name": invoice.driver.full_name,
-            "ssn": f"XXX-XX-{invoice.driver.ssn[-4:]}" if invoice.driver.ssn else "N/A",
-            "address": f"{invoice.driver.primary_driver_address.address_line_1}, {invoice.driver.primary_driver_address.city}",
-            "phone": invoice.driver.phone_number_1,
-            "dob": invoice.driver.dob,
-            "dmv_license_no": invoice.driver.dmv_license.dmv_license_number if invoice.driver.dmv_license else "N/A",
-            "dmv_expiry": invoice.driver.dmv_license.dmv_license_expiry_date if invoice.driver.dmv_license else "N/A",
-            "tlc_license_no": invoice.driver.tlc_license.tlc_license_number if invoice.driver.tlc_license else "N/A",
-        }
-        
-        vehicle_details = {
-            "name": f"{invoice.vehicle.year} {invoice.vehicle.make} {invoice.vehicle.model}",
-            "vin": invoice.vehicle.vin,
-            "entity_name": invoice.vehicle.vehicle_entity.entity_name if invoice.vehicle.vehicle_entity else "N/A",
-            "tsp": invoice.vehicle.tsp,
-            "security_type": invoice.vehicle.security_type,
-            "model": invoice.vehicle.model,
-            "make": invoice.vehicle.make,
-            "year": invoice.vehicle.year,
-            "color": invoice.vehicle.color,
-            "cylinder": invoice.vehicle.cylinders,
-        }
-        
-        lease_details = {
-            "name": f"Lease - {invoice.lease.lease_type.upper()}",
-            "lease_id": invoice.lease.lease_id,
-            "type": invoice.lease.lease_type,
-            "total_weeks": invoice.lease.duration_in_weeks,
-            "start_date": invoice.lease.lease_start_date,
-            "end_date": invoice.lease.lease_end_date,
-            "weekly_lease": lease_service.get_lease_configurations(repair_service.db, lease_id=invoice.lease_id, lease_breakup_type="lease_amount").lease_limit,
-            "repairs": "Driver", # Placeholder, logic to determine this may be needed
-        }
+        # Build payment schedule
+        payment_schedule = []
+        running_balance = invoice.total_amount
+        for inst in installments:
+            week_period = f"{inst.week_start_date.strftime('%m/%d/%Y')}-{inst.week_end_date.strftime('%m/%d/%Y')}"
+            prior_balance = running_balance
+            running_balance -= inst.principal_amount
 
-        # Prepare payment schedule
-        schedule_response = []
-        balance = invoice.total_amount
-        prior_balance_agg = Decimal("0.0")
-        for inst in sorted(invoice.installments, key=lambda x: x.week_start_date):
-            balance -= inst.principal_amount
-            schedule_response.append(
+            payment_schedule.append(
                 RepairInstallmentResponse(
                     installment_id=inst.installment_id,
-                    week_period=f"{inst.week_start_date.strftime('%m/%d/%Y')} - {inst.week_end_date.strftime('%m/%d/%Y')}",
+                    week_period=week_period,
                     principal_amount=inst.principal_amount,
-                    prior_balance=prior_balance_agg,
-                    balance=balance,
+                    prior_balance=prior_balance,
+                    balance=running_balance,
                     status=inst.status,
                     posted_on=inst.posted_on.date() if inst.posted_on else None,
                 )
             )
-            if inst.status == RepairInstallmentStatus.PAID:
-                prior_balance_agg += inst.principal_amount
 
+        # Build detail cards
+        repair_invoice_details = {
+            "repair_id": invoice.repair_id,
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date.strftime("%m/%d/%Y"),
+            "workshop_type": invoice.workshop_type.value,
+            "description": invoice.description or "N/A",
+            "status": invoice.status.value,
+        }
+
+        driver_details = {
+            "driver_name": invoice.driver.full_name if invoice.driver else "N/A",
+            "tlc_license": (
+                invoice.driver.tlc_license.tlc_license_number
+                if invoice.driver and invoice.driver.tlc_license
+                else "N/A"
+            ),
+            "contact": invoice.driver.phone_number_1 if invoice.driver else "N/A",
+        }
+
+        vehicle_details = {
+            "vin": invoice.vehicle.vin if invoice.vehicle else "N/A",
+            "make_model": (
+                f"{invoice.vehicle.make} {invoice.vehicle.model}"
+                if invoice.vehicle
+                else "N/A"
+            ),
+            "year": invoice.vehicle.year if invoice.vehicle else "N/A",
+        }
+
+        lease_details = {
+            "lease_id": invoice.lease.lease_id if invoice.lease else "N/A",
+            "lease_type": invoice.lease.lease_type.value if invoice.lease else "N/A",
+            "medallion": (
+                invoice.medallion.medallion_number if invoice.medallion else "N/A"
+            ),
+        }
 
         return RepairInvoiceDetailResponse(
             repair_id=invoice.repair_id,
@@ -209,25 +232,22 @@ def get_repair_invoice_details(
             total_paid=total_paid,
             remaining_balance=remaining_balance,
             installments_progress=installments_progress,
-            repair_invoice_details={
-                "repair_id": invoice.repair_id,
-                "invoice_number": invoice.invoice_number,
-                "invoice_date": invoice.invoice_date,
-                "start_week": invoice.start_week,
-                "workshop_type": invoice.workshop_type,
-                "notes": invoice.description,
-            },
+            repair_invoice_details=repair_invoice_details,
             driver_details=driver_details,
             vehicle_details=vehicle_details,
             lease_details=lease_details,
-            payment_schedule=schedule_response,
+            payment_schedule=payment_schedule,
+            receipt_url=invoice.presigned_receipt_url,  # NEW
         )
 
     except InvoiceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error fetching details for repair ID {repair_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An error occurred while fetching repair invoice details.") from e
+        logger.error("Error fetching repair invoice details: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while retrieving repair invoice details.",
+        ) from e
 
 @router.post("/ledger/post-installment", summary="Manually Post a Due Installment to Ledger")
 def post_installment_manually(
@@ -455,3 +475,60 @@ def list_repair_installments(
     except Exception as e:
         logger.error("Error fetching repair installments: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching repair installments.") from e
+    
+@router.get("/{repair_id}/receipt", summary="Download Repair Receipt PDF")
+def download_repair_receipt(
+    repair_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Download the receipt PDF for a specific repair invoice.
+    
+    If the receipt exists in S3, redirects to the presigned URL.
+    Otherwise, generates the PDF on-the-fly.
+    
+    NEW ENDPOINT for repair receipt downloads.
+    """
+    try:
+        repo = RepairRepository(db)
+        invoice = repo.get_invoice_by_repair_id(repair_id)
+        
+        if not invoice:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Repair invoice not found: {repair_id}"
+            )
+        
+        # If receipt exists in S3, redirect to presigned URL
+        if invoice.receipt_s3_key and invoice.presigned_receipt_url:
+            logger.info(f"Redirecting to S3 presigned URL for repair {repair_id}")
+            return RedirectResponse(url=invoice.presigned_receipt_url)
+        
+        # Otherwise, generate PDF on-the-fly
+        logger.info(f"Generating receipt on-the-fly for repair {repair_id}")
+        pdf_service = RepairPdfService(db)
+        pdf_content = pdf_service.generate_receipt_pdf(invoice.id)
+        
+        # Determine content type (PDF vs HTML fallback)
+        is_pdf = pdf_content.startswith(b'%PDF')
+        media_type = "application/pdf" if is_pdf else "text/html"
+        ext = "pdf" if is_pdf else "html"
+        
+        filename = f"Repair_Receipt_{repair_id}_{date.today()}.{ext}"
+        
+        return StreamingResponse(
+            BytesIO(pdf_content),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading receipt for repair {repair_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to download repair receipt"
+        ) from e
+

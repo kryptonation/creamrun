@@ -355,7 +355,7 @@ async def get_case_steps(
     for step_info in list(grouped_steps.values()):
         for sub_step in step_info["sub_steps"]:
             step_function = STEP_REGISTRY[f"{sub_step['step_id']}-fetch"]
-            logger.info("Calling function with %s-fetch", sub_step["step_id"])
+            logger.debug("Calling function with %s-fetch", sub_step["step_id"])
             case_step_data = step_function["function"](db, case_no, case_params)
             case_step_config = bpm_service.get_case_step_config(
                 db, step_id=sub_step["step_id"]
@@ -401,7 +401,7 @@ async def get_case_step_information(
 
     try:
         step_function = STEP_REGISTRY[f"{case_step_config.step_id}-fetch"]
-        logger.info("Calling function with %s-fetch", case_step_config.step_id)
+        logger.debug("Calling function with %s-fetch", case_step_config.step_id)
         case_step_information = step_function["function"](db, case_no, case_params)
     except ValueError as e:
         logger.error(e)

@@ -212,22 +212,22 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         
         try:
             # Log request start
-            logger.info(
+            logger.debug(
                 "request_started",
                 method=request.method,
                 path=request.url.path,
                 client_host=request.client.host if request.client else None,
                 headers=dict(request.headers) if LogConfig.LOG_LEVEL == "DEBUG" else None
             )
-            
+
             # Call the actual endpoint
             response = await call_next(request)
-            
+
             # Calculate duration
             duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-            
+
             # Log successful response
-            logger.info(
+            logger.debug(
                 "request_completed",
                 method=request.method,
                 path=request.url.path,

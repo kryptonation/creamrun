@@ -26,6 +26,7 @@ from app.ledger.models import BalanceStatus
 from app.users.utils import get_current_user
 from app.utils.exporter.excel_exporter import ExcelExporter
 from app.utils.exporter.pdf_exporter import PDFExporter
+from app.utils.s3_utils import s3_utils
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -151,7 +152,7 @@ def list_interim_payments(
                         amount=alloc['amount'],
                         payment_date=payment.payment_date,
                         payment_method=payment.payment_method,
-                        receipt_url=payment.receipt_url  # NEW: Include presigned URL
+                        receipt_url=s3_utils.generate_presigned_url(payment.receipt_s3_key) if payment.receipt_s3_key else None  # NEW: Include presigned URL
                     ))
         
         total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
@@ -273,7 +274,7 @@ def get_interim_payment_by_id(
             payment_method=payment.payment_method,
             notes=payment.notes,
             allocations=payment.allocations or [],
-            receipt_url=payment.receipt_url,  # NEW: Include presigned URL
+            receipt_url=s3_utils.generate_presigned_url(payment.receipt_s3_key) if payment.receipt_s3_key else None,  # NEW: Include presigned URL
             created_on=payment.created_on
         )
         
@@ -303,8 +304,9 @@ def download_interim_payment_receipt(
             raise HTTPException(status_code=404, detail=f"Interim payment not found with ID {payment_id}")
         
         # If receipt exists in S3, redirect to presigned URL
-        if payment.receipt_s3_key and payment.receipt_url:
-            return RedirectResponse(url=payment.receipt_url)
+        if payment.receipt_s3_key:
+            receipt_url = s3_utils.generate_presigned_url(payment.receipt_s3_key) if payment.receipt_s3_key else None
+            return RedirectResponse(url=receipt_url) if receipt_url else None
         
         # Otherwise, generate PDF on-the-fly
         from app.interim_payments.pdf_service import InterimPaymentPdfService

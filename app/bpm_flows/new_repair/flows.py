@@ -366,6 +366,7 @@ def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str
                 document_date=datetime.now().strftime('%Y-%m-%d'),
                 notes=repair_invoice_doc.get("document_notes")
             )
+        receipt_s3_key, receipt_url = repair_service._generate_and_store_receipt(repair_invoice)
         
         # Create audit trail
         case = bpm_service.get_cases(db, case_no=case_no)
@@ -398,6 +399,7 @@ def create_repair_invoice_process(db: Session, case_no: str, step_data: Dict[str
             "invoice_number": repair_invoice.invoice_number,
             "total_amount": float(repair_invoice.total_amount),
             "installments_count": len(repair_invoice.installments),
+            "receipt_url": receipt_url
         }
     
     except HTTPException:

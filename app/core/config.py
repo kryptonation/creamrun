@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from functools import lru_cache
+from typing import Optional
 
 import boto3
 from pydantic import Field
@@ -104,6 +105,9 @@ class Settings(BaseSettings):
     aws_admin_email: str = None
     s3_bucket_name: str = None
 
+    # Logging configuration
+    uvicorn_log_level: str = "INFO"
+
     claude_model_id: str = None
     app_base_url: str = None
 
@@ -183,6 +187,8 @@ class Settings(BaseSettings):
     shift_lease_medallion_weekly_cap_regular_night: float = 0.00
     shift_lease_medallion_weekly_cap_hybrid_night: float = 0.00
 
+    lease_deposit_release_days: Optional[int] = 30
+    lease_termination_reasons: str = ""
     lease_6_months: int = 0
     day_name_to_num: dict = {}
     full_time_drivers: str = ""
@@ -208,7 +214,7 @@ class Settings(BaseSettings):
 
     super_admin_email_id: str = "superadmin@bat.com"
 
-    tlc_service_fee:int = 10
+    tlc_service_fee: int = 10
 
     #
     # ---------------------------

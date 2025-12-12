@@ -1,6 +1,6 @@
 ## app/drivers/search_service.py
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta , date
 from typing import List
 
 # Third party imports
@@ -11,6 +11,7 @@ from sqlalchemy import desc
 # Local imports
 from app.drivers.models import Driver, TLCLicense, DMVLicense
 from app.leases.models import LeaseDriver, Lease
+from app.entities.models import Address , BankAccount
 from app.drivers.schemas import DriverStatus
 from app.uploads.models import Document
 from app.audit_trail.models import AuditTrail
@@ -443,4 +444,69 @@ def get_formatted_drivers(drivers: List[Driver], db: Session , is_additional_dri
         })
 
     return drivers_list
+
+
+def get_drivers_for_export(db, filters: dict, sort_by=None, sort_order="asc"):
+    stmt = (
+        select(
+            # Driver
+            Driver.driver_id.label("driver_id"),
+            Driver.first_name.label("first_name"),
+            Driver.last_name.label("last_name"),
+            Driver.driver_type.label("driver_type"),
+            Driver.driver_status.label("driver_status"),
+            Driver.drive_locked.label("is_drive_locked"),
+            Driver.is_archived.label("is_archived"),
+
+            # TLC
+            TLCLicense.tlc_license_number.label("tlc_license_number"),
+            TLCLicense.tlc_license_expiry_date.label("tlc_license_expiry_date"),
+
+            # DMV
+            DMVLicense.dmv_license_number.label("dmv_license_number"),
+            DMVLicense.dmv_license_expiry_date.label("dmv_license_expiry_date"),
+
+            # Address
+            Address.address_line_1.label("address_line_1"),
+            Address.address_line_2.label("address_line_2"),
+            Address.city.label("city"),
+            Address.state.label("state"),
+            Address.zip.label("zip"),
+
+            # Bank
+            BankAccount.bank_name.label("bank_name"),
+            BankAccount.bank_account_number.label("bank_account_number"),
+        )
+        .select_from(Driver)
+        .outerjoin(TLCLicense, Driver.tlc_license_number_id == TLCLicense.id)
+        .outerjoin(DMVLicense, Driver.dmv_license_number_id == DMVLicense.id)
+        .outerjoin(Address, Driver.primary_address_id == Address.id)
+        .outerjoin(BankAccount, Driver.bank_account_id == BankAccount.id)
+    )
+
+    # ✅ Filters
+    if filters.get("driver_lookup_id"):
+        stmt = stmt.where(Driver.driver_id == filters["driver_lookup_id"])
+
+    if filters.get("driver_status"):
+        stmt = stmt.where(Driver.driver_status == filters["driver_status"])
+
+    # ✅ Sorting (safe)
+    if sort_by:
+        column = getattr(Driver, sort_by, None)
+        if column is not None:
+            stmt = stmt.order_by(
+                column.asc() if sort_order == "asc" else column.desc()
+            )
+
+    results = db.execute(stmt).mappings().all()
+
+    cleaned_results = [
+        {key: ("" if value is None else value) for key, value in row.items()}
+        for row in results
+    ]
+
+    return cleaned_results
+
+
 

@@ -244,14 +244,14 @@ def fetch_driver_information(db, case_no, case_params=None):
                 if doc and doc.get("document_path"):
                     metadata = s3_utils.get_file_metadata(doc["document_path"])
                     metadata = metadata if metadata else {}
-                    logger.info(f"####-- Meta Data - = {metadata} ######")
-                    metadata = metadata.get("extracted_data" , {}).get("extracted_data" ,{})
+                    metadata = metadata.get("extracted_data" , {})
                 else:
                     metadata = {}
-
+                
+                logger.info("-*-*-*- OCR metadata: -*-*-******************** %s", metadata)
                 ocr_results[doc.get("document_type")] = metadata
                 
-        logger.info("-*-*-*- OCR results: -*-*-* %s", ocr_results)
+        logger.info("-*-*-*- OCR results: -*-*-******************** %s", ocr_results)
         driver_data = format_driver_response(driver, False)
         # Merge OCR results into the driver data (OCR data takes precedence)
         
@@ -304,7 +304,9 @@ def fetch_driver_information(db, case_no, case_params=None):
         if tlc_license:
             tlc_data = tlc_license
             info = driver_data.setdefault("tlc_license_details", {})
-            fill_if_missing(info,"tlc_license_expiry_date",tlc_data ,"dates")
+            fill_if_missing(info,"tlc_license_expiry_date",tlc_data ,"expiration_date")
+            fill_if_missing(info,"tlc_license_number",tlc_data ,"tlc_license_number")
+
 
         if driver_ssn:
             ssn_data = driver_ssn
@@ -314,7 +316,8 @@ def fetch_driver_information(db, case_no, case_params=None):
         if payee_proof:
             payee_data = payee_proof
             info = driver_data.setdefault("payee_details", {})
-            if info.get("pay_to_mode", None) != "Check":
+            logger.info(f'@$$#$#%   payee info : {info} %$##$#$')
+            if payee_data.get("bank_name" , None):
                 info["pay_to_mode"] = "ACH"
                 bank_info = info.setdefault("data", {})
                 fill_if_missing(bank_info,"bank_name",payee_data ,"bank_name")

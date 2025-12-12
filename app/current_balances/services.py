@@ -785,14 +785,15 @@ class CurrentBalancesService:
             net_daily = cc_earnings - (mta_tif + ezpass + pvb + tlc)
             
             days.append(DailyBreakdown(
+                date=current_date,
                 day_of_week=day_name,
                 breakdown_date=current_date,
                 cc_earnings=cc_earnings,
                 mta_tif=mta_tif,
                 ezpass=ezpass,
-                pvb_violations=pvb,
+                violations=pvb,
                 tlc_tickets=tlc,
-                net_daily_earnings=net_daily
+                net_daily=net_daily
             ))
             
             current_date += timedelta(days=1)
@@ -805,7 +806,7 @@ class CurrentBalancesService:
             self.db.query(func.coalesce(func.sum(EZPassTransaction.amount), 0))
             .filter(
                 EZPassTransaction.lease_id == lease_id,
-                EZPassTransaction.transaction_date == date_param
+                EZPassTransaction.posting_date == date_param
             )
             .scalar()
         )
@@ -814,10 +815,10 @@ class CurrentBalancesService:
     def _get_daily_pvb(self, lease_id: int, date_param: date) -> Decimal:
         """Get PVB violations for a specific day"""
         result = (
-            self.db.query(func.coalesce(func.sum(PVBViolation.fine_amount), 0))
+            self.db.query(func.coalesce(func.sum(PVBViolation.fine), 0))
             .filter(
                 PVBViolation.lease_id == lease_id,
-                PVBViolation.violation_date == date_param
+                PVBViolation.posting_date == date_param
             )
             .scalar()
         )
@@ -852,7 +853,7 @@ class CurrentBalancesService:
                 EZPassTransaction.lease_id == lease_id,
                 EZPassTransaction.created_on >= week_start,
                 EZPassTransaction.created_on <= week_end,
-                EZPassTransaction.transaction_date < week_start
+                EZPassTransaction.posting_date < week_start
             )
             .all()
         )
@@ -861,9 +862,9 @@ class CurrentBalancesService:
             delayed.append(DelayedCharge(
                 category="EZPass",
                 amount=charge.amount,
-                original_date=charge.transaction_date,
+                original_date=charge.posting_date,
                 system_entry_date=charge.created_on.date(),
-                description=f"Toll: {charge.plaza_name or 'Unknown'}"
+                description=f"Toll: {charge.exit_plaza or 'Unknown'}"
             ))
         
         # Get delayed PVB violations
@@ -873,7 +874,7 @@ class CurrentBalancesService:
                 PVBViolation.lease_id == lease_id,
                 PVBViolation.created_on >= week_start,
                 PVBViolation.created_on <= week_end,
-                PVBViolation.violation_date < week_start
+                PVBViolation.posting_date < week_start
             )
             .all()
         )
@@ -881,10 +882,10 @@ class CurrentBalancesService:
         for charge in pvb_charges:
             delayed.append(DelayedCharge(
                 category="PVB",
-                amount=charge.fine_amount,
-                original_date=charge.violation_date,
+                amount=charge.fine,
+                original_date=charge.posting_date,
                 system_entry_date=charge.created_on.date(),
-                description=f"Violation: {charge.violation_description or 'Unknown'}"
+                description=f"Violation: 'Unknown'"
             ))
         
         # Get delayed TLC tickets

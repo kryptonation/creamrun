@@ -11,11 +11,11 @@ from app.drivers.services import driver_service
 from app.drivers.utils import format_driver_response
 from app.leases.schemas import LeaseStatus
 from app.leases.services import lease_service
+from app.ledger.models import PostingCategory
+from app.ledger.repository import LedgerRepository
+from app.ledger.services import LedgerService
 from app.utils.logger import get_logger
 from app.vehicles.schemas import VehicleStatus
-from app.ledger.services import LedgerService
-from app.ledger.repository import LedgerRepository
-from app.ledger.models import PostingCategory
 
 logger = get_logger(__name__)
 
@@ -192,8 +192,8 @@ def process_lease_termination(db, case_no, step_data):
 
         if step_data.get("cancellation_fee") <= 0:
             raise ValueError("Cancellation fee must be greater than 0")
-        
-        lease_data["cancellation_fee"] = step_data.get("cancellation_fee" , 0)
+
+        lease_data["cancellation_fee"] = step_data.get("cancellation_fee", 0)
         # Update the lease
         lease = lease_service.upsert_lease(db, lease_data)
 
@@ -201,20 +201,24 @@ def process_lease_termination(db, case_no, step_data):
         ledger_service = LedgerService(ledger_repo)
 
         main_driver = next(
-                (ld.driver.id for ld in lease.lease_driver if ld.is_additional_driver is False),
-                None
-            )
+            (
+                ld.driver.id
+                for ld in lease.lease_driver
+                if ld.is_additional_driver is False
+            ),
+            None,
+        )
 
-        logger.info(f'Posting cancellation fee to ledger for lease {lease.lease_id}')
+        logger.info(f"Posting cancellation fee to ledger for lease {lease.lease_id}")
         ledger = ledger_service.create_obligation(
-                category=PostingCategory.CANCELLATION_FEE.value,
-                amount= step_data.get("cancellation_fee" , 0),
-                reference_id= lease.lease_id,
-                driver_id= main_driver,
-                lease_id=lease.id,
-                vehicle_id=lease.vehicle_id,
-                medallion_id=lease.medallion_id,
-            )
+            category=PostingCategory.CANCELLATION_FEE,
+            amount=step_data.get("cancellation_fee", 0),
+            reference_id=lease.lease_id,
+            driver_id=main_driver,
+            lease_id=lease.id,
+            vehicle_id=lease.vehicle_id,
+            medallion_id=lease.medallion_id,
+        )
 
         # Handle notes if provided
         if step_data.get("notes"):

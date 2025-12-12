@@ -176,7 +176,7 @@ class LedgerRepository:
                 LedgerBalance.category == category,
                 LedgerBalance.status == BalanceStatus.OPEN
             )
-            .order_by(LedgerBalance.due_date.asc())  # Get oldest first
+            .order_by(LedgerBalance.id.desc())  # Get oldest first
             .first()
         )
 
@@ -322,3 +322,15 @@ class LedgerRepository:
         balances = list(result.scalars().all())
 
         return balances, total_items
+    
+    def get_balance_by_lease_category(
+        self, 
+        lease_id: int, 
+        category: PostingCategory
+    ) -> Optional[LedgerBalance]:
+        """
+        Get the balance record for a specific lease and category.
+        Alias for get_balance_by_lease_and_category for backward compatibility.
+        """
+        return self.get_balance_by_lease_and_category(lease_id, category)
+ 

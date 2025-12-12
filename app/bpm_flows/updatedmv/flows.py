@@ -125,10 +125,12 @@ def fetch_dmv_license(db: Session, case_no, case_params=None):
         if dmv_document and dmv_document.get("document_path"):
             metadata = s3_utils.get_file_metadata(dmv_document["document_path"])
             metadata = metadata if metadata else {}
-            metadata = metadata.get("extracted_data" , {}).get("extracted_data" ,{})
+            metadata = metadata.get("extracted_data" , {})
             extracted_data[dmv_document.get("document_type")] = metadata
 
         logger.info(f"##$#### DMV Data OCR: {extracted_data}")
+
+        license_number = driver_data["dmv_license_details"]["dmv_license_number"]
 
         if extracted_data.get("dmv_license" , {}):
             dmv_data = extracted_data.get("dmv_license" , {})
@@ -153,7 +155,7 @@ def fetch_dmv_license(db: Session, case_no, case_params=None):
                 **driver_data["driver_details"],
                 "driver_seq_id": driver.id,
                 "tlc_license": driver_data['tlc_license_details']['tlc_license_number'] if driver_data['tlc_license_details']['tlc_license_number'] else "",
-                "dmv_license": driver_data['dmv_license_details']['dmv_license_number'] if driver_data['dmv_license_details']['dmv_license_number'] else "",
+                "dmv_license": license_number if license_number else "",
             },
             "dmv_license_info": driver_data['dmv_license_details'],
             "dmv_license_document": dmv_document

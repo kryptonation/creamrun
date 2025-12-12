@@ -147,3 +147,52 @@ class PVBManualCreateRequest(BaseModel):
             except Exception as e:
                 raise ValueError(f"Invalid time format: {e}")
         return None
+    
+class EditPVBViolationRequest(BaseModel):
+    """
+    Request payload for editing an existing PVB Violation.
+    Only includes fields that are allowed to be updated.
+    """
+
+    # --- Raw / Editable Violation Fields ---
+    state: Optional[str] = None
+    type: Optional[str] = None
+    summons: Optional[str] = None
+
+    issue_date: Optional[date] = None
+    issue_time: Optional[time] = None
+
+    fine: Optional[Decimal] = Field(None)
+    penalty: Optional[Decimal] = Field(None)
+    interest: Optional[Decimal] = Field(None)
+    reduction: Optional[Decimal] = Field(None)
+    processing_fee: Optional[Decimal] = Field(None)
+    amount_due: Optional[Decimal] = Field(None)
+
+    payment: Optional[Decimal] = Field(None)
+    driver_payment_amount: Optional[Decimal] = Field(None)
+
+    # --- Flags & Auxiliary Fields ---
+    non_program: Optional[bool] = None
+    system_entry_date: Optional[date] = None
+    new_issue: Optional[bool] = None
+    hearing_ind: Optional[str] = None
+    penalty_warning: Optional[str] = None
+    judgement: Optional[bool] = None
+    ng_pmt: Optional[bool] = None
+
+    # --- Location Fields ---
+    front_or_opp: Optional[str] = None
+    house_number: Optional[str] = None
+    intersect_street: Optional[str] = None
+    geo_location: Optional[str] = None
+    street_code_1: Optional[str] = None
+    street_code_2: Optional[str] = None
+    street_code_3: Optional[str] = None
+
+    street_name: Optional[str] = None
+    violation_code: Optional[str] = None
+    violation_country: Optional[str] = None
+
+    class Config:
+        orm_mode = True

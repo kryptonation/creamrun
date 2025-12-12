@@ -6,19 +6,14 @@ from enum import Enum as PyEnum
 from typing import List, Optional
 
 from sqlalchemy import (
-    Date,
-    Enum,
-    ForeignKey,
-    Integer,
-    Numeric,
-    String,
-    Text,
-    DateTime,
+    Date, Enum, ForeignKey, Integer, Numeric, String,
+    Text, DateTime,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
 from app.users.models import AuditMixin
+from app.utils.s3_utils import s3_utils
 
 
 class RepairInvoiceStatus(str, PyEnum):
@@ -71,12 +66,31 @@ class RepairInvoice(Base, AuditMixin):
     status: Mapped[RepairInvoiceStatus] = mapped_column(Enum(RepairInvoiceStatus), default=RepairInvoiceStatus.DRAFT, index=True)
     start_week: Mapped[date] = mapped_column(Date, comment="The Sunday that marks the beginning of the first payment period.")
 
+    # --- Receipt Storage (NEW) ---
+    receipt_s3_key: Mapped[Optional[str]] = mapped_column(String(512), 
+                                                          comment="S3 key where the repair receipt PDF is stored")
+    receipt_url: Mapped[Optional[str]] = mapped_column(String(1024), 
+                                                       comment="Presigned URL for accessing the repair receipt")
+    
     # --- Relationships ---
     driver: Mapped["Driver"] = relationship()
     lease: Mapped["Lease"] = relationship()
     vehicle: Mapped["Vehicle"] = relationship()
     medallion: Mapped["Medallion"] = relationship()
     installments: Mapped[List["RepairInstallment"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
+
+    @property
+    def presigned_receipt_url(self) -> Optional[str]:
+        """
+        Generate a fresh presigned URL for the receipt if it exists in S3.
+        This property ensures URLs are always fresh (not expired).
+        """
+        if self.receipt_s3_key:
+            try:
+                return s3_utils.generate_presigned_url(self.receipt_s3_key, expiration=3600)
+            except Exception:
+                return None
+        return None
 
 
 class RepairInstallment(Base, AuditMixin):

@@ -19,6 +19,7 @@ from app.pvb.schemas import (
     PVBManualPostRequest,
     PVBReassignRequest,
     PVBViolationResponse,
+    EditPVBViolationRequest,
 )
 from app.pvb.services import PVBService
 from app.pvb.models import PVBViolation , PVBImportStatus
@@ -550,6 +551,64 @@ def get_pvb_violation(
     except Exception as e:
         logger.error("Error fetching PVB violation: %s", e, exc_info=True)
         raise e
+
+@router.put("/{pvb_id}", summary="Edit PVB Violation", response_model=PVBViolationResponse)
+def edit_pvb_violation(
+    pvb_id: int,
+    request: EditPVBViolationRequest,
+    pvb_service: PVBService = Depends(get_pvb_service),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Edits an existing PVB violation.
+    """
+    try:
+        # Exclude unset fields to only update what's passed
+        pvb = pvb_service.repo.get_violation_by_id(pvb_id)
+        if not pvb:
+            raise HTTPException(status_code=404, detail="PVB violation not found.")
+        if request.summons != pvb.summons:
+            summons_exists = pvb_service.repo.get_violation_by_summons(request.summons)
+            if summons_exists:
+                raise HTTPException(status_code=400, detail="Summons number already exists.")
+
+        updates = request.model_dump(exclude_unset=True)
+        updated_violation = pvb_service.repo.update_violation(
+            violation_id=pvb_id, updates=updates
+        )
+        
+        v = pvb
+        return PVBViolationResponse(
+            id=v.id,
+            plate=v.plate,
+            state=v.state,
+            type=v.type,
+            summons=v.summons,
+            source=v.source,    
+            issue_datetime=datetime.combine(v.issue_date, v.issue_time) if v.issue_time and v.issue_date else None,
+            vin=v.vehicle.vin if v.vehicle else None,
+            lease_id=v.lease.lease_id if v.lease else None,
+            medallion_no=v.medallion.medallion_number if v.medallion else None,
+            driver_id=v.driver.driver_id if v.driver else None,
+            posting_date=v.posting_date,
+            status=v.status,
+            amount=v.amount_due,
+            fine=v.fine,
+            penalty=v.penalty,
+            interest=v.interest,
+            reduction=v.reduction,
+            processing_fee=v.processing_fee,
+            failure_reason=v.failure_reason,
+            violation_code=v.violation_code,
+            violation_country=v.violation_country,
+            street_name=v.street_name
+        )
+    except PVBError as e:
+        logger.warning("Business logic error during PVB update: %s", e)
+        raise HTTPException(status_code=fast_status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+         logger.error("Error updating PVB violation: %s", e, exc_info=True)
+         raise HTTPException(status_code=500, detail="An unexpected error occurred during update.") from e
 
 @router.post("/create-case", summary="Create a New PVB Case", status_code=fast_status.HTTP_201_CREATED)
 def create_pvb_case(

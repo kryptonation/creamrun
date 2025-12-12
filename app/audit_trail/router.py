@@ -17,6 +17,7 @@ from app.core.db import get_db
 from app.users.models import User
 from app.users.services import UserService
 from app.users.utils import get_current_user
+from app.core.dependencies import get_db_with_current_user
 
 # Local application imports
 from app.utils.logger import get_logger
@@ -28,7 +29,7 @@ logger = get_logger(__name__)
 @router.post("/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_audit_trail(
     entry: AuditTrailCreate,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_with_current_user),
     get_current_user: User = Depends(get_current_user),
 ):
     """
@@ -106,6 +107,10 @@ async def get_case_audit(
             if audit.created_by:
                 user_data = await user_service.repo.get_user_by_id(
                     user_id=audit.created_by
+                )
+            elif audit.done_by:
+                user_data = await user_service.repo.get_user_by_id(
+                    user_id=audit.done_by
                 )
             else:
                 user_data = await user_service.repo.get_user_by_email(

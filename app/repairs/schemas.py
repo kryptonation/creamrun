@@ -12,6 +12,8 @@ from app.leases.schemas import LeaseType
 class RepairInvoiceListResponse(BaseModel):
     """
     Response schema for a single repair invoice in a list, matching the UI grid.
+    
+    NEW: Added receipt_url field for PDF access.
     """
     repair_id: str
     invoice_number: str
@@ -19,9 +21,10 @@ class RepairInvoiceListResponse(BaseModel):
     status: str
     driver_name: Optional[str] = None
     medallion_no: Optional[str] = None
-    lease_type: Optional[str] = None # Will be populated in the router from lease
+    lease_type: Optional[str] = None
     workshop: str = Field(..., alias="workshop_type")
     amount: Decimal = Field(..., alias="total_amount")
+    receipt_url: Optional[str] = Field(None, description="Presigned URL for repair receipt PDF")  # NEW
 
     class Config:
         from_attributes = True
@@ -37,16 +40,16 @@ class PaginatedRepairInvoiceResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
-    status_list : List[RepairInvoiceStatus] = Field(
+    status_list: List[RepairInvoiceStatus] = Field(
         default_factory=lambda: list(RepairInvoiceStatus)
     )
-    lease_type_list : List[LeaseType] = Field(
+    lease_type_list: List[LeaseType] = Field(
         default_factory=lambda: list(LeaseType)
     )
-    workshop_type_list : List[WorkshopType] = Field(
+    workshop_type_list: List[WorkshopType] = Field(
         default_factory=lambda: list(WorkshopType)
     )
-    installment_status_list : List[RepairInstallmentStatus] = Field(
+    installment_status_list: List[RepairInstallmentStatus] = Field(
         default_factory=lambda: list(RepairInstallmentStatus)
     )
 
@@ -64,6 +67,7 @@ class RepairInstallmentResponse(BaseModel):
     posted_date: Optional[date] = Field(None, alias="posted_on")
 
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
         populate_by_name = True
 
@@ -71,13 +75,15 @@ class RepairInstallmentResponse(BaseModel):
 class RepairInvoiceDetailResponse(BaseModel):
     """
     Comprehensive response schema for the detailed view of a single Repair Invoice.
+    
+    NEW: Added receipt_url field for PDF access.
     """
     # Header Info
     repair_id: str
     repair_amount: Decimal = Field(..., alias="total_amount")
     total_paid: Decimal
     remaining_balance: Decimal
-    installments_progress: str # e.g., "1/5"
+    installments_progress: str  # e.g., "1/5"
 
     # Detail Cards
     repair_invoice_details: dict
@@ -87,8 +93,12 @@ class RepairInvoiceDetailResponse(BaseModel):
 
     # Payment Schedule
     payment_schedule: List[RepairInstallmentResponse]
+    
+    # Receipt URL (NEW)
+    receipt_url: Optional[str] = Field(None, description="Presigned URL for repair receipt PDF")
 
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
         populate_by_name = True
 
@@ -114,6 +124,7 @@ class RepairInstallmentListResponse(BaseModel):
     workshop_type: Optional[WorkshopType] = None
 
     class Config:
+        """Pydantic configuration"""
         from_attributes = True
         populate_by_name = True
 

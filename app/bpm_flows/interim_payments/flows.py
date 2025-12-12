@@ -16,6 +16,7 @@ from app.interim_payments.services import InterimPaymentService
 from app.leases.services import lease_service
 from app.ledger.services import LedgerService
 from app.ledger.models import LedgerBalance
+from app.utils.s3_utils import s3_utils
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -719,6 +720,7 @@ async def process_payment_allocation(db: Session, case_no: str, step_data: Dict[
             "message": "Interim payment successfully created and allocated.",
             "payment_id": interim_payment.payment_id,
             "driver_name": f"{interim_payment.driver.full_name if interim_payment.driver else 'Unknown'}",
+            "receipt_url": s3_utils.generate_presigned_url(interim_payment.receipt_s3_key)
         }
         
     except HTTPException:

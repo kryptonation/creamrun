@@ -80,23 +80,23 @@ bat_app = FastAPI(
 )
 
 # Configure logging
-if settings.environment.lower() != "production":
+if settings.environment.lower() in ["production", "staging"]:
     setup_app_logging(
         bat_app,
-        log_level="INFO",
-        use_json=False,
-        log_file="app.log",
+        log_level=settings.uvicorn_log_level,
+        use_json=True,
+        log_file="/var/log/batm_app.log",
         app_name="Big Apple Taxi Management System",
         environment=settings.environment,
     )
 else:
     setup_app_logging(
         bat_app,
-        log_level="INFO",
-        use_json=True,
-        log_file="/var/log/batm_app.log",
+        log_level=settings.uvicorn_log_level,
+        use_json=False,
+        log_file="app.log",
         app_name="Big Apple Taxi Management System",
-        environment="production",
+        environment=settings.environment,
     )
 logger = get_logger(__name__)
 

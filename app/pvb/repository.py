@@ -107,6 +107,7 @@ class PVBRepository:
             .values(**updates)
         )
         self.db.execute(stmt)
+        self.db.commit()
 
     def list_violations(
         self,

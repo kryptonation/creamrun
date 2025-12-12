@@ -22,6 +22,7 @@ from app.drivers.search_service import (
     build_driver_query,
     driver_lease_report,
     get_formatted_drivers,
+    get_drivers_for_export,
     get_paginated_results,
     get_total_items,
 )
@@ -416,54 +417,36 @@ def export_drivers_to_csv(
     Exports filtered drivers data to the specified format (Excel or PDF).
     """
     try:
-        drivers = search_drivers(
-            db=db, page=1, per_page=100000,
-            driver_lookup_id=driver_id, tlc_license_number=tlc_license_number,
-            dmv_license_number=dmv_license_number, ssn=ssn, driver_name=driver_name,
-            driver_type=driver_type, driver_status=driver_status,
-            tlc_license_expiry_from=tlc_license_expiry_from,
-            tlc_license_expiry_to=tlc_license_expiry_to,
-            dmv_license_expiry_from=dmv_license_expiry_from,
-            dmv_license_expiry_to=dmv_license_expiry_to,
-            has_documents=has_documents, has_vehicle=has_vehicle,
-            has_active_lease=has_active_lease, is_drive_locked=is_drive_locked,
-            lease_type=lease_type, is_archived=is_archived,
-            sort_by=sort_by, sort_order=sort_order,
-        )["items"]
 
-        if not drivers:
-            raise ValueError("No drivers data available for export with the given filters.")
+        filters = {
+            "driver_id": driver_id,
+            "tlc_license_number": tlc_license_number,
+            "dmv_license_number": dmv_license_number,
+            "ssn": ssn,
+            "driver_name": driver_name,
+            "driver_type": driver_type,
+            "driver_status": driver_status,
+            "tlc_license_expiry_from": tlc_license_expiry_from,
+            "tlc_license_expiry_to": tlc_license_expiry_to,
+            "dmv_license_expiry_from": dmv_license_expiry_from,
+            "dmv_license_expiry_to": dmv_license_expiry_to,
+            "has_documents": has_documents,
+            "has_vehicle": has_vehicle,
+            "has_active_lease": has_active_lease,
+            "is_drive_locked": is_drive_locked,
+            "lease_type": lease_type,
+            "is_archived": is_archived,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+        }
+        
+        logger.info("Starting export of drivers with filters")
+        export_data = get_drivers_for_export(db, filters, sort_by, sort_order)
 
-        export_data = [
-            {
-                "driver_id": formatted_driver["driver_details"]["driver_lookup_id"] or "",
-                "first_name": formatted_driver["driver_details"]["first_name"] or "",
-                "last_name": formatted_driver["driver_details"]["last_name"] or "",
-                "driver_type": formatted_driver["driver_details"]["driver_type"] or "",
-                "driver_status": formatted_driver["driver_details"]["driver_status"] or "",
-                "driver_ssn": formatted_driver["driver_details"]["driver_ssn"] or "",
-                "is_drive_locked": formatted_driver["driver_details"]["is_drive_locked"],
-                "has_audit_trail": formatted_driver["driver_details"]["has_audit_trail"],
-                "tlc_license_number": formatted_driver["tlc_license_details"]["tlc_license_number"] or "",
-                "tlc_license_expiry_date": formatted_driver["tlc_license_details"]["tlc_license_expiry_date"] or "",
-                "dmv_license_number": formatted_driver["dmv_license_details"]["dmv_license_number"] or "",
-                "dmv_license_expiry_date": formatted_driver["dmv_license_details"]["dmv_license_expiry_date"] or "",
-                "has_documents": formatted_driver["has_documents"],
-                "has_vehicle": formatted_driver["has_vehicle"],
-                "is_archived": formatted_driver["is_archived"],
-                "pay_to_mode": formatted_driver["payee_details"]["pay_to_mode"] or "",
-                "bank_name": formatted_driver["payee_details"]["bank_name"] or "",
-                "bank_account_number": formatted_driver["payee_details"]["bank_account_number"] or "",
-                "address_line_1": formatted_driver["primary_address_details"].get("address_line_1", "") or "",
-                "address_line_2": formatted_driver["primary_address_details"].get("address_line_2", "") or "",
-                "city": formatted_driver["primary_address_details"].get("city", "") or "",
-                "state": formatted_driver["primary_address_details"].get("state", "") or "",
-                "zip": formatted_driver["primary_address_details"].get("zip", "") or "",
-                "latitude": formatted_driver["secondary_address_details"].get("latitude", "") or "",
-                "longitude": formatted_driver["secondary_address_details"].get("longitude", "") or "",
-            }
-            for formatted_driver in drivers
-        ]
+        logger.info("done with export of drivers with filters")
+
+        # export_data = get_formatted_drivers_export(query, db)
+        # logger.info(f"Loop is Done for Export data prepared with {len(export_data)} records.")
 
         filename = f"drivers_{date.today()}.{'xlsx' if export_format == 'excel' else export_format}"
 
@@ -475,6 +458,8 @@ def export_drivers_to_csv(
             "pdf": "application/pdf"
         }
         media_type = media_types.get(export_format, "application/octet-stream")
+
+        logger.info(f"Exported file prepared: {filename} with media type: {media_type}")
 
         headers = {"Content-Disposition": f"attachment; filename={filename}"}
         return StreamingResponse(file_content, media_type=media_type, headers=headers)

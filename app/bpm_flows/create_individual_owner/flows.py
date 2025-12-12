@@ -120,7 +120,7 @@ def fetch_individual_owner_details(
                 if doc and doc.get("document_path"):
                     metadata = s3_utils.get_file_metadata(doc["document_path"])
                     metadata = metadata if metadata else {}
-                    metadata = metadata.get("extracted_data" , {}).get("extracted_data" ,{})
+                    metadata = metadata.get("extracted_data" , {})
                 else:
                     metadata = {}
                 
@@ -133,6 +133,7 @@ def fetch_individual_owner_details(
         payee_proof = orc_results.get("payee_proof", {})
         license = orc_results.get("driving_license", {})
         ssn = orc_results.get("ssn" , {})
+        passport = orc_results.get("passport" , {})
 
         if license:
             info = individual_data.setdefault("individual_info", {})
@@ -179,6 +180,10 @@ def fetch_individual_owner_details(
                 fill_if_missing(data, "bank_name", payee_proof, "bank_name")
                 fill_if_missing(data, "bank_account_name", payee_proof, "account_holder_name")
                 fill_if_missing(data, "bank_account_number", payee_proof, "account_number")
+
+        if passport:
+            info = individual_data.setdefault("individual_info", {})
+            fill_if_missing(info, "passport", passport, "passport_number")
 
         individual_data["documents"] = all_docs
 
